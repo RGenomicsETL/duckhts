@@ -127,7 +127,7 @@ jobs:
             $key = "HKLM:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\$executable"
             New-Item -Force -Path $key | Out-Null
             New-ItemProperty -Force -Path $key -Name DumpFolder -PropertyType ExpandString -Value $dumpDir | Out-Null
-            New-ItemProperty -Force -Path $key -Name DumpType -PropertyType DWord -Value 2 | Out-Null
+            New-ItemProperty -Force -Path $key -Name DumpType -PropertyType DWord -Value 1 | Out-Null
             New-ItemProperty -Force -Path $key -Name DumpCount -PropertyType DWord -Value 10 | Out-Null
           }
 
@@ -143,6 +143,55 @@ jobs:
         if: matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release'
         shell: bash
         run: scripts/test_somalier_release_campaigns.sh
+
+      - name: Capture original Windows Server 2022 native crashes
+        if: matrix.config.os == 'windows-2022'
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $env:GITHUB_PAT = ""
+          $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
+          $toolsDir = Join-Path $env:RUNNER_TEMP "duckhts-procdump"
+          $archive = Join-Path $env:RUNNER_TEMP "Procdump.zip"
+          Invoke-WebRequest -Uri "https://download.sysinternals.com/files/Procdump.zip" -OutFile $archive
+          $expectedHash = "5FE68E81632F13188930AFFFF20A9A9910170BAE654360850D3108CEAD708A2D"
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expectedHash) {
+            throw "ProcDump download checksum mismatch"
+          }
+          Expand-Archive -Path $archive -DestinationPath $toolsDir
+          $procdump = Join-Path $toolsDir "procdump64.exe"
+          & $procdump -accepteula -i $dumpDir -mm
+          if ($LASTEXITCODE -ne 0) { throw "ProcDump registration failed" }
+          $debugger = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug").Debugger
+          if ($debugger -notlike "*$procdump*") { throw "ProcDump is not the postmortem debugger" }
+
+          $probeSource = Join-Path $env:RUNNER_TEMP "duckhts_crash_probe.c"
+          $probe = Join-Path $env:RUNNER_TEMP "duckhts_crash_probe.exe"
+          @'
+          int main(void) {
+              volatile int *pointer = 0;
+              *pointer = 1;
+              return 0;
+          }
+          '@ | Set-Content -Path $probeSource
+          & gcc.exe -O0 $probeSource -o $probe
+          if ($LASTEXITCODE -ne 0) { throw "Could not compile the postmortem dump probe" }
+          $process = Start-Process -FilePath $probe -NoNewWindow -Wait -PassThru
+          if ($process.ExitCode -ne -1073741819) { throw "Crash probe did not raise an access violation" }
+          for ($attempt = 0; $attempt -lt 10; $attempt++) {
+            $probeDump = Get-ChildItem -Path $dumpDir -Filter "duckhts_crash_probe*.dmp" | Select-Object -First 1
+            if ($probeDump) { break }
+            Start-Sleep -Milliseconds 500
+          }
+          if (-not $probeDump) { throw "Postmortem debugger did not create a crash probe dump" }
+          Remove-Item -Path $probeDump.FullName
+          "GITHUB_PAT=" | Add-Content -Path $env:GITHUB_ENV
+
+      - name: Verify crash-check environment
+        if: matrix.config.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_PAT) { throw "Do not include the CI token in native minidumps" }
 
       - uses: r-lib/actions/check-r-package@v2
         with:
@@ -160,15 +209,7 @@ jobs:
           $env:R_LIBS = $checkLibrary
           $env:GITHUB_PAT = ""
           $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
-          $toolsDir = Join-Path $env:RUNNER_TEMP "duckhts-procdump"
-          $archive = Join-Path $env:RUNNER_TEMP "Procdump.zip"
-          Invoke-WebRequest -Uri "https://download.sysinternals.com/files/Procdump.zip" -OutFile $archive
-          $expectedHash = "5FE68E81632F13188930AFFFF20A9A9910170BAE654360850D3108CEAD708A2D"
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expectedHash) {
-            throw "ProcDump download checksum mismatch"
-          }
-          Expand-Archive -Path $archive -DestinationPath $toolsDir
-          $procdump = Join-Path $toolsDir "procdump64.exe"
+          $procdump = Join-Path $env:RUNNER_TEMP "duckhts-procdump/procdump64.exe"
           $rscript = (Get-Command Rscript.exe).Source
           & $procdump -accepteula -e -x $dumpDir $rscript --vanilla scripts/diagnose_bam_extraction.R
           $code = $LASTEXITCODE
@@ -197,8 +238,25 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           path: |
-            ${{ runner.temp }}/r-crash-dumps
+            ${{ runner.temp }}/r-crash-dumps/Rterm*.dmp
+            ${{ runner.temp }}/r-crash-dumps/Rscript*.dmp
+            ${{ runner.temp }}/r-crash-dumps/R.exe*.dmp
+            ${{ runner.temp }}/r-crash-dumps/R_*.dmp
+            ${{ runner.temp }}/r-crash-dumps/application-events.txt
             r/Rduckhts/check
+
+      - name: Restore Windows postmortem debugger
+        if: always() && matrix.config.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          $procdump = Join-Path $env:RUNNER_TEMP "duckhts-procdump/procdump64.exe"
+          if (Test-Path $procdump) {
+            $debugger = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug" -ErrorAction SilentlyContinue
+            if ($debugger.Debugger -like "*$procdump*") {
+              & $procdump -u
+              if ($LASTEXITCODE -ne 0) { throw "Could not restore the postmortem debugger" }
+            }
+          }
 
       - name: Verify htslib header diagnostics stay outside DuckHTS compilation
         if: runner.os == 'macOS'
