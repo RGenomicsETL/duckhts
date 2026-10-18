@@ -1,4 +1,4 @@
-This submission updates Rduckhts to 2.0.0.0.1.6 and the bundled DuckHTS
+This submission updates Rduckhts to 2.0.0.0.1.7 and the bundled DuckHTS
 extension from 1.5.2 to 2.0.0. The packaging revision also keeps webR
 builds on the bundled htslib headers.
 

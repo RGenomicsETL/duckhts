@@ -72,6 +72,7 @@ jobs:
           - {os: macos-latest,   r: 'release'}
           - {os: windows-latest, r: 'release', rtools: '45'}
           - {os: windows-2022,   r: 'devel', rtools: '45'}
+          - {os: windows-2022,   r: '4.5.3', rtools: '45'}
           - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
           - {os: ubuntu-latest,   r: 'release'}
          # - {os: ubuntu-latest,   r: 'oldrel-1'}
@@ -92,6 +93,14 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
+      - name: Verify Windows R 4.5.3 runtime
+        if: matrix.config.os == 'windows-2022' && matrix.config.r == '4.5.3'
+        shell: Rscript {0}
+        run: |
+          stopifnot(identical(as.character(getRversion()), "4.5.3"))
+          print(R.version.string)
+          print(Sys.info()[c("sysname", "release", "version", "machine")])
+
       #- name: Install system dependencies (macOS)
       #  if: runner.os == 'macOS'
       #  run: |
@@ -108,8 +117,8 @@ jobs:
         shell: bash
         run: echo "DUCKHTS_STRICT_WARNINGS=1" >> "$GITHUB_ENV"
 
-      - name: Enable Windows R-devel crash dumps
-        if: runner.os == 'Windows' && matrix.config.r == 'devel'
+      - name: Enable Windows Server 2022 crash dumps
+        if: matrix.config.os == 'windows-2022'
         shell: pwsh
         run: |
           $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
@@ -142,8 +151,8 @@ jobs:
           error-on: '"warning"'
           working-directory: r/Rduckhts
 
-      - name: Trace Windows R-devel BAM extraction after check failure
-        if: failure() && runner.os == 'Windows' && matrix.config.r == 'devel'
+      - name: Trace Windows Server 2022 BAM extraction after check failure
+        if: failure() && matrix.config.os == 'windows-2022'
         timeout-minutes: 10
         shell: pwsh
         run: |
@@ -155,7 +164,7 @@ jobs:
           exit $code
 
       - name: Collect Windows application crash events
-        if: failure() && runner.os == 'Windows' && matrix.config.r == 'devel'
+        if: failure() && matrix.config.os == 'windows-2022'
         shell: pwsh
         run: |
           $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
@@ -167,11 +176,11 @@ jobs:
             Format-List TimeCreated, Id, ProviderName, Message |
             Out-File (Join-Path $dumpDir "application-events.txt")
 
-      - name: Upload Windows R-devel crash evidence
-        if: failure() && runner.os == 'Windows' && matrix.config.r == 'devel'
+      - name: Upload Windows Server 2022 crash evidence
+        if: failure() && matrix.config.os == 'windows-2022'
         uses: actions/upload-artifact@v4
         with:
-          name: windows-r-devel-crash-evidence
+          name: windows-r-${{ matrix.config.r }}-crash-evidence
           if-no-files-found: warn
           retention-days: 7
           path: |
