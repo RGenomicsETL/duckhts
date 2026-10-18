@@ -107,12 +107,12 @@ DBI::dbExecute(con, paste(
 ))
 #> [1] 2200
 head(rduckhts_depth_bins(con, "bins")[, c("chrom", "start", "reads", "ratio", "kept")])
-#>   chrom start reads     ratio kept
-#> 1     1 0e+00   628 1.0129032 TRUE
-#> 2     1 1e+06   636 1.0258065 TRUE
-#> 3     1 2e+06   600 0.9677419 TRUE
-#> 4     1 3e+06   608 0.9806452 TRUE
-#> 5     1 4e+06   616 0.9935484 TRUE
-#> 6     1 5e+06   624 1.0064516 TRUE
+#>   chrom   start reads     ratio kept
+#> 1    21 4.8e+07   604 0.9741935 TRUE
+#> 2    21 4.9e+07   612 0.9870968 TRUE
+#> 3    21 5.0e+07   620 1.0000000 TRUE
+#> 4    21 5.1e+07   628 1.0129032 TRUE
+#> 5    21 5.2e+07   636 1.0225080 TRUE
+#> 6    21 5.3e+07   600 0.9677419 TRUE
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
