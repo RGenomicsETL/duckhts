@@ -262,7 +262,7 @@ real_results <- run_untimed(c(
        solutions = "SELECT * FROM solutions ORDER BY sample_id, solution",
        segments = "SELECT * FROM segments ORDER BY sample_id, solution, chrom, start"))
 utils::write.csv(real_results$solutions, file.path(results_dir, "solutions_duckhts.csv"), row.names = FALSE)
-utils::write.csv(real_results$segments, file.path(results_dir, "segments_duckhts.csv"), row.names = FALSE)
+utils::write.csv(real_results$segments, gzfile(file.path(results_dir, "segments_duckhts.csv.gz")), row.names = FALSE)
 knitr::kable(real_results$kept, caption = "Kept bins per composite after the panel mask")
 ```
 
@@ -282,7 +282,7 @@ upstream_solutions <- do.call(rbind, lapply(upstream, `[[`, "solutions"))
 upstream_states <- do.call(rbind, lapply(upstream, `[[`, "states"))
 upstream_segments <- do.call(rbind, lapply(upstream, `[[`, "segments"))
 utils::write.csv(upstream_solutions, file.path(results_dir, "solutions_upstream.csv"), row.names = FALSE)
-utils::write.csv(upstream_segments, file.path(results_dir, "segments_upstream.csv"), row.names = FALSE)
+utils::write.csv(upstream_segments, gzfile(file.path(results_dir, "segments_upstream.csv.gz")), row.names = FALSE)
 ```
 
 ## Agreement with upstream
@@ -342,6 +342,19 @@ knitr::kable(data.frame(
   starts_within = c(NA, NA, NA, sprintf("%.1f%% of %d", 100 * a4_share, nrow(joined))),
   pass = c(all(agreement$A1), all(agreement$A2), all(agreement$A3), a4_share >= 0.9)))
 if (nrow(outside) > 0) knitr::kable(outside, digits = 4, caption = "Starts outside the A4 tolerances")
+# Observation, not a declared criterion: the same comparison restricted to the
+# composites where either model's best solution reports a tumour fraction above
+# 0.02. Below that, the normal fraction is near 1, the state means lie within
+# the noise of each other, and ploidy and states are not identified.
+informative <- agreement$test_id[(1 - agreement$normal_duckhts) > 0.02 | (1 - agreement$normal_upstream) > 0.02]
+informative_rows <- agreement[agreement$test_id %in% informative, ]
+higher <- sum(joined$log_likelihood[!joined$within] > joined$log_likelihood_upstream[!joined$within] + 1)
+lower <- sum(joined$log_likelihood[!joined$within] < joined$log_likelihood_upstream[!joined$within] - 1)
+knitr::kable(data.frame(
+  composites_with_a_fraction = nrow(informative_rows),
+  A1 = sum(informative_rows$A1), A2 = sum(informative_rows$A2), A3 = sum(informative_rows$A3),
+  starts_outside_A4 = sum(!joined$within), port_objective_higher_by_1 = higher, upstream_objective_higher_by_1 = lower),
+  caption = "Observation: agreement among the composites with a reported fraction, and which optimizer ended higher where the starts differ")
 ```
 
 ## Planted gains and samples without change
@@ -355,17 +368,25 @@ gain_rows <- do.call(rbind, lapply(design$test_id[design$kind == "gain"], functi
   u <- best_upstream[best_upstream$sample_id == id, ]
   mine <- best_states[best_states$sample_id == id, ]
   chr18 <- mean(mine$state[mine$chrom == "chr18"] == 3)
+  chr18_state <- as.integer(names(which.max(table(mine$state[mine$chrom == "chr18"]))))
+  theirs <- upstream_states[upstream_states$sample_id == id & upstream_states$start_normal == u$start_normal &
+                              upstream_states$start_ploidy == u$start_ploidy, ]
+  chr18_state_upstream <- as.integer(names(which.max(table(theirs$state[theirs$chrom == "chr18"]))))
+  chr18_median <- median(bins$log2_ratio[bins$sample_id == id & bins$chrom == "chr18"], na.rm = TRUE)
   autosomes <- mine[!mine$chrom %in% c("chrX", "chrY") & mine$chrom != "chr18", ]
   worst_other <- max(tapply(autosomes$state != 2, autosomes$chrom, mean))
   tolerance <- if (depth == "0.1x") 0.08 else 0.05
-  data.frame(test_id = id, depth = depth, truth = truth, tumour_fraction = 1 - o$normal_fraction,
+  data.frame(test_id = id, depth = depth, truth = truth, designed_log2 = log2(1 + truth / 2),
+             chr18_median_log2 = chr18_median, tumour_fraction = 1 - o$normal_fraction,
              tumour_fraction_upstream = 1 - u$normal_fraction, ploidy = o$ploidy, status = o$status,
+             chr18_copies = chr18_state, chr18_copies_upstream = chr18_state_upstream,
+             extra_copies_times_fraction = (chr18_state - 2) * (1 - o$normal_fraction),
              chr18_three_copies = chr18, worst_other_altered = worst_other,
              G1 = abs(o$ploidy - 2) <= 0.15 && chr18 >= 0.9 && worst_other <= 0.1 &&
                abs((1 - o$normal_fraction) - truth) <= tolerance, stringsAsFactors = FALSE)
 }))
 utils::write.csv(gain_rows, file.path(results_dir, "gains.csv"), row.names = FALSE)
-knitr::kable(gain_rows, digits = 4, caption = "Planted chromosome-18 gains: the best solution of the port")
+knitr::kable(gain_rows, digits = 4, caption = "Planted chromosome-18 gains: the best solution of the port, with the copy number both models give chromosome 18")
 pure_rows <- do.call(rbind, lapply(design$test_id[design$kind == "pure"], function(id) {
   o <- best_ours[best_ours$sample_id == id, ]
   u <- best_upstream[best_upstream$sample_id == id, ]
@@ -405,16 +426,41 @@ s1 <- scaling$seconds[[2L]] <= 2.6 * base && scaling$seconds[[3L]] <= 6.8 * base
 knitr::kable(scaling, digits = 3, caption = "Fresh processes, four threads, spill forbidden")
 ```
 
-The latency exponent over 1×, 2× and 4× bins is `r sprintf("%.2f", exponent)`; S1 `r if (s1) "passes" else "fails"`.
+The latency exponent over 1×, 2× and 4× bins is `r sprintf("%.2f", exponent)`; four samples of the
+1× size take `r sprintf("%.2f", scaling$seconds[[5L]] / base)`× the one-sample latency; S1
+`r if (s1) "passes" else "fails"`. One decode runs per sample on the thread that holds that
+sample's row, so parallelism across samples depends on how DuckDB spreads the per-sample rows
+over threads; it is not a property of the kernel.
 
 ## Findings
 
-- A1 holds for `r sum(agreement$A1)` of `r nrow(agreement)` composites, A2 for `r sum(agreement$A2)`,
-  A3 for `r sum(agreement$A3)`; A4: `r sprintf("%.1f%%", 100 * a4_share)` of starts within tolerance
-  (`r if (a4_share >= 0.9) "passes" else "fails"`).
-- G1 holds for `r sum(gain_rows$G1)` of `r nrow(gain_rows)` gain composites; N1 for
-  `r sum(pure_rows$N1)` of `r nrow(pure_rows)` pure composites.
-- S1 `r if (s1) "passes" else "fails"`: exponent `r sprintf("%.2f", exponent)`, peak RSS
-  `r sprintf("%.0f", max(scaling$max_rss_mib))` MiB.
+- **Declared criteria.** A1 holds for `r sum(agreement$A1)` of `r nrow(agreement)` composites, A2
+  for `r sum(agreement$A2)`, A3 for `r sum(agreement$A3)`; A4 has
+  `r sprintf("%.1f%%", 100 * a4_share)` of starts within tolerance
+  (`r if (a4_share >= 0.9) "passes" else "fails"`). G1 holds for `r sum(gain_rows$G1)` of
+  `r nrow(gain_rows)` gain composites; N1 for `r sum(pure_rows$N1)` of `r nrow(pure_rows)` pure
+  composites. S1 `r if (s1) "passes" else "fails"` (exponent `r sprintf("%.2f", exponent)`, peak
+  RSS `r sprintf("%.0f", max(scaling$max_rss_mib))` MiB, four samples at
+  `r sprintf("%.2f", scaling$seconds[[5L]] / base)`×).
+- **Where the two models land on the same optimum they agree exactly.** In
+  `r sum(gain_rows$chr18_copies == gain_rows$chr18_copies_upstream)` of `r nrow(gain_rows)` gain
+  composites the port and upstream give chromosome 18 the same copy number and the same fraction to
+  four decimals, with every bin in the same state. The disagreements sit on flat objectives: pure
+  samples and the smallest gains, where the normal fraction is near 1 and ploidy and states are not
+  identified, or starts where one optimizer climbed to a different local maximum. Among the starts
+  outside A4, the port's objective ended higher than upstream's by more than 1 in `r higher` and
+  lower in `r lower`; both optimizers find local maxima, as the design note says.
+- **A single altered chromosome does not identify the fraction.** Both models see the planted
+  shift (chromosome 18 median log2 ratio against the designed `log2(1 + m/2)` in the table) and
+  explain it as a higher copy number in a smaller share of cells: extra copies times fraction is
+  close to `m`, the called copy number is 3 only when `m` is small enough for the prior to prefer it.
+  This is the model's known degeneracy on genomes with one event, shared with upstream, so G1 as
+  declared (three copies at fraction `m`) fails for both; a fraction is identified when a genome
+  carries changes of more than one magnitude, which this design does not plant.
+- **Samples without change report no fraction** (at most
+  `r sprintf("%.3f", max(pure_rows$tumour_fraction))` from the port, `r sprintf("%.3f", max(pure_rows$tumour_fraction_upstream))` from upstream); the guard fired
+  on `r sum(pure_rows$status == "guard_zero")` of them, the rest converged to a normal fraction near
+  1, whose ploidy and copy numbers are not evidence.
 
-Every table above is written under `benchmarks/results/depth-state/`.
+Every table above is written under `benchmarks/results/depth-state/`; the per-segment tables are
+gzip-compressed.
