@@ -280,8 +280,11 @@ rduckhts_depth_sex_fraction <- function(con, bins_table, reference_table = NULL,
 #' each other and whole chromosomes can take any state, so its copy numbers
 #' are not evidence. Fraction and ploidy trade against each other,
 #' so all solutions are returned; a ploidy-3 explanation of a ploidy-2 genome
-#' usually ranks second. The port and its kept upstream quirks are documented
-#' in the DuckHTS catalog entry and `design/depth_fraction_lane.md`.
+#' usually ranks second. A genome with one altered region does not identify
+#' the fraction either: a one-copy gain in a share `m` of cells and a two-copy
+#' gain in `m / 2` give the same ratio, and the prior decides, as in upstream.
+#' The port and its kept upstream quirks are documented in the DuckHTS catalog
+#' entry and `design/depth_fraction_lane.md`.
 #'
 #' @param con A DuckDB connection with DuckHTS loaded.
 #' @param bins_table Name of a table or view of corrected bins with

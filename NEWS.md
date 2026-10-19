@@ -16,6 +16,12 @@
   fraction of 0.7 within 0.05 and ploidy 2 within 0.15 and call planted
   whole-chromosome and arm changes. The model holds about `max_cn * 28 + 40`
   bytes per bin, bounded by `max_bins`.
+  `benchmarks/benchmark_depth_state_model.md` runs the unmodified upstream
+  code on the same corrected bins of 16 real low-pass composites: where both
+  land on the same optimum they agree to four decimals with every bin in the
+  same state; on flat objectives (no change, a single small event) the two
+  optimizers reach different local maxima, and a single altered chromosome
+  does not identify the fraction in either; latency is linear in bins.
 
 - `duckhts_somalier_bam_counts` reads its panel when the query is bound, on
   the calling thread, instead of in the scan's global init on a DuckDB worker
