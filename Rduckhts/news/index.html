@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.0.1.7</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.0.1.8</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,6 +38,10 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="2.0.0.0.1.8" id="rduckhts-200018">Rduckhts 2.0.0.0.1.8<a class="anchor" aria-label="anchor" href="#rduckhts-200018"></a></h2>
+<ul><li>The bundled <code>duckhts_somalier_bam_counts</code> reads its panel when the query is bound, on the calling thread, instead of on a DuckDB worker thread. On Windows, closing the private panel instance on a worker thread left a DuckDB <code>thread_local</code> that the Rtools-built <code>duckdb</code> package destroys on freed memory when the worker exits, which ended the R session with status <code>0xC0000005</code> at <code>dbDisconnect(shutdown = TRUE)</code>, most often on Windows Server 2022. <code><a href="../reference/rduckhts_somalier_bam_counts.html">rduckhts_somalier_bam_counts()</a></code> and <code><a href="../reference/rduckhts_ancestry_bam.html">rduckhts_ancestry_bam()</a></code> are unchanged in behaviour.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="2.0.0.0.1.6" id="rduckhts-200016">Rduckhts 2.0.0.0.1.6<a class="anchor" aria-label="anchor" href="#rduckhts-200016"></a></h2>
 <ul><li>webR and r-universe builds compile the bundled extension against its bundled htslib 1.24 headers even when toolchain include flags expose another htslib, keeping the compiled declarations aligned with the linked static archive.</li>

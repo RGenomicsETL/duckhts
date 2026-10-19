@@ -62,13 +62,13 @@ Source:
 [`DESCRIPTION`](https://github.com/RGenomicsETL/duckhts/blob/main/DESCRIPTION)
 
 Toure S, Ward R (2026). *Rduckhts: 'DuckDB' High Throughput Sequencing
-File Formats Reader Extension*. R package version 2.0.0.0.1.7,
+File Formats Reader Extension*. R package version 2.0.0.0.1.8,
 <https://github.com/RGenomicsETL/duckhts>.
 
     @Manual{,
       title = {Rduckhts: 'DuckDB' High Throughput Sequencing File Formats Reader Extension},
       author = {Sounkou Mahamane Toure and Ryan Ward},
       year = {2026},
-      note = {R package version 2.0.0.0.1.7},
+      note = {R package version 2.0.0.0.1.8},
       url = {https://github.com/RGenomicsETL/duckhts},
     }
