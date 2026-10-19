@@ -81,6 +81,10 @@
 - [`rduckhts_depth_sex_fraction()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_sex_fraction.md)
   : Estimate the Share of a Second Genome of the Other Sex from X and Y
   Depth
+- [`rduckhts_depth_state_solutions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_state_solutions.md)
+  [`rduckhts_depth_state_segments()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_state_solutions.md)
+  : Decode Tumour Fraction, Ploidy and Copy-Number Segments from
+  Corrected Bins
 - [`rduckhts_detect_quality_encoding()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_detect_quality_encoding.md)
   : Detect FASTQ Quality Encoding
 - [`rduckhts_fasta()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta.md)

@@ -1,5 +1,18 @@
 # Changelog
 
+## Rduckhts 2.0.0.0.1.9
+
+- New
+  [`rduckhts_depth_state_solutions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_state_solutions.md)
+  and
+  [`rduckhts_depth_state_segments()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_state_solutions.md)
+  fit the bundled ichorCNA-style copy-number state model to corrected
+  bins from
+  [`rduckhts_depth_bins()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_bins.md):
+  tumour fraction, ploidy and rank of every start, and each solution’s
+  copy-number segments. Arguments are checked in R before any query;
+  `table_name` publishes the result as a table.
+
 ## Rduckhts 2.0.0.0.1.8
 
 - The bundled `duckhts_somalier_bam_counts` reads its panel when the

@@ -1,0 +1,168 @@
+# Decode Tumour Fraction, Ploidy and Copy-Number Segments from Corrected Bins
+
+Fits the copy-number state model of ichorCNA (Adalsteinsson, Ha, Freeman
+et al. 2017; GavinHaLab/ichorCNA tag v0.6.1) to each sample's kept
+corrected bins: a hidden Markov model over copy numbers 1 to \`max_cn\`
+with a Student's t emission on the log ratio, whose state means follow
+from the normal fraction \`n\` and tumour ploidy \`phi\`, fitted by
+expectation maximisation with the upstream priors from every start of
+\`ploidies\` x \`normal_fractions\`. Each start gives one solution,
+ranked by its objective (data log-likelihood plus log prior).
+\[rduckhts_depth_state_solutions()\] returns the solutions;
+\[rduckhts_depth_state_segments()\] returns their Viterbi segments.
+
+## Usage
+
+``` r
+rduckhts_depth_state_solutions(
+  con,
+  bins_table,
+  normal_fractions = c(0.5, 0.6, 0.7, 0.8, 0.9),
+  ploidies = c(2, 3),
+  max_cn = 7,
+  txn_e = 0.9999999,
+  txn_strength = 1e+07,
+  max_iter = 20,
+  min_segment_bins = 50,
+  alt_fraction_threshold = 0.05,
+  close_margin = 10,
+  max_bins = 1e+06,
+  table_name = NULL,
+  overwrite = FALSE
+)
+
+rduckhts_depth_state_segments(
+  con,
+  bins_table,
+  normal_fractions = c(0.5, 0.6, 0.7, 0.8, 0.9),
+  ploidies = c(2, 3),
+  max_cn = 7,
+  txn_e = 0.9999999,
+  txn_strength = 1e+07,
+  max_iter = 20,
+  min_segment_bins = 50,
+  alt_fraction_threshold = 0.05,
+  close_margin = 10,
+  max_bins = 1e+06,
+  table_name = NULL,
+  overwrite = FALSE
+)
+```
+
+## Arguments
+
+- con:
+
+  A DuckDB connection with DuckHTS loaded.
+
+- bins_table:
+
+  Name of a table or view of corrected bins with \`sample_id\`,
+  \`chrom\`, \`start\`, \`end\`, \`log2_ratio\` and \`kept\`, such as
+  the output of \[rduckhts_depth_bins()\]. Restrict contigs and remove
+  problem bins in SQL first.
+
+- normal_fractions:
+
+  Starts of the normal fraction, each in (0, 1).
+
+- ploidies:
+
+  Starts of the tumour ploidy, each in \\1, 10\\; the EM starts from
+  their floor. A normal start of 0.95 runs only at ploidy 2, as
+  upstream.
+
+- max_cn:
+
+  Highest copy-number state, a whole number in \\2, 20\\.
+
+- txn_e:
+
+  Self-transition probability in (0, 1).
+
+- txn_strength:
+
+  Transition pseudo-counts, positive.
+
+- max_iter:
+
+  EM iteration cap, a whole number in \\2, 1000\\.
+
+- min_segment_bins, alt_fraction_threshold:
+
+  The guard's two thresholds.
+
+- close_margin:
+
+  Objective difference below which a lower-ranked solution is
+  \`close_to_best\`.
+
+- max_bins:
+
+  Kept bins one sample may hold; the model holds about \`max_cn \* 28 +
+  40\` bytes a bin.
+
+- table_name:
+
+  Optional table to create instead of returning a data frame.
+
+- overwrite:
+
+  Whether \`table_name\` may replace an existing table.
+
+## Value
+
+A data frame (or invisible \`TRUE\` when \`table_name\` is given).
+Solutions have one row per sample and start: \`sample_id\`, \`solution\`
+(rank, 1 is best), \`start_normal\`, \`start_ploidy\`,
+\`normal_fraction\`, \`tumour_fraction\`, \`ploidy\`,
+\`log_likelihood\`, \`altered_fraction\`, \`iterations\`, \`status\`,
+\`segments\`, \`bins\`, \`upstream\` and \`method\`. Segments have one
+row per sample, solution and segment: the solution columns through
+\`status\`, then \`chrom\`, \`start\`, \`end\`, \`bins\`, \`state\` (the
+copy number of the Viterbi state), \`copy_number\` (after upstream's
+integer correction of high-level amplifications), \`median_log2_ratio\`,
+\`upstream\` and \`method\`.
+
+## Details
+
+The model learns from autosomal bins (contigs whose
+\`duckhts_contig_key()\` is not X, Y or MT) and decodes every kept bin.
+A kept bin without a ratio takes every state with likelihood 1, as
+upstream carries it. Upstream's guard sets the fraction to zero
+(\`status\` \`guard_zero\`) when the longest altered training segment
+has at most \`min_segment_bins\` bins and at most
+\`alt_fraction_threshold\` of the training bins are altered; a solution
+ranked below the best with an objective within \`close_margin\` of it is
+\`close_to_best\`, the rest are \`ok\`. A sample without copy-number
+change therefore reports no fraction, by the guard or by a fit whose
+normal fraction is near 1; in that fit the state means lie within the
+noise of each other and whole chromosomes can take any state, so its
+copy numbers are not evidence. Fraction and ploidy trade against each
+other, so all solutions are returned; a ploidy-3 explanation of a
+ploidy-2 genome usually ranks second. The port and its kept upstream
+quirks are documented in the DuckHTS catalog entry and
+\`design/depth_fraction_lane.md\`.
+
+## Examples
+
+``` r
+con <- rduckhts_connect()
+DBI::dbExecute(con, paste(
+  "CREATE TEMP TABLE bins AS SELECT 'S1' AS sample_id, CAST(c AS VARCHAR) AS chrom,",
+  "b * 1000000 AS start, (b + 1) * 1000000 AS \"end\", true AS kept,",
+  "log2(CASE WHEN c = 8 THEN 1.15 ELSE 1 END) +",
+  "0.05 * (((b * 37 + c * 11) % 100) / 50.0 - 1) AS log2_ratio",
+  "FROM range(1, 23) t(c), range(0, 60) r(b)"
+))
+#> [1] 1320
+best <- rduckhts_depth_state_solutions(con, "bins")
+best[best$solution == 1, c("tumour_fraction", "ploidy", "status")]
+#>   tumour_fraction   ploidy status
+#> 5       0.1011181 2.009539     ok
+segments <- rduckhts_depth_state_segments(con, "bins")
+segments[segments$solution == 1 & segments$chrom == "8", c("chrom", "copy_number", "bins")]
+#>    chrom copy_number bins
+#> 21     8           5   60
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
