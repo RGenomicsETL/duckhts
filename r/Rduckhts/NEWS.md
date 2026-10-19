@@ -1,3 +1,11 @@
+# Rduckhts 2.0.0.9000.0.1.8
+
+- New `rduckhts_depth_state_solutions()` and `rduckhts_depth_state_segments()`
+  fit the bundled ichorCNA-style copy-number state model to corrected bins
+  from `rduckhts_depth_bins()`: tumour fraction, ploidy and rank of every
+  start, and each solution's copy-number segments. Arguments are checked in R
+  before any query; `table_name` publishes the result as a table.
+
 # Rduckhts 2.0.0.0.1.8
 
 - The bundled `duckhts_somalier_bam_counts` reads its panel when the query is

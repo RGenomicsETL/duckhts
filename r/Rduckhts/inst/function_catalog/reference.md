@@ -3126,6 +3126,86 @@ duckhts_depth_sex_fraction uses the base inputs. duckhts_depth_sex_fraction_ref 
 SELECT sample_id, major_sex, fraction, fraction_low, fraction_high, status FROM duckhts_depth_sex_fraction_ref('corrected_bins', 'reference_bins_with_sex');
 ```
 
+## duckhts_depth_state_solutions
+
+Fit the ichorCNA copy-number state model to corrected bins: tumour fraction, ploidy and rank of every start.
+
+Signature:
+
+```sql
+duckhts_depth_state_solutions(bins_table, normal_fractions := [0.5, 0.6, 0.7, 0.8, 0.9], ploidies := [2.0, 3.0], max_cn := 7, txn_e := 0.9999999, txn_strength := 10000000.0, max_iter := 20, min_segment_bins := 50, alt_fraction_threshold := 0.05, close_margin := 10.0, max_bins := 1000000)
+```
+
+Returns:
+
+```
+table(sample_id VARCHAR, solution INTEGER, start_normal DOUBLE, start_ploidy DOUBLE, normal_fraction DOUBLE, tumour_fraction DOUBLE, ploidy DOUBLE, log_likelihood DOUBLE, altered_fraction DOUBLE, iterations INTEGER, status VARCHAR, segments BIGINT, bins BIGINT, upstream VARCHAR, method VARCHAR)
+```
+
+### Input
+
+bins_table holds corrected bins with sample_id, chrom, start, end, log2_ratio and kept, as duckhts_depth_bins returns them. Only kept bins take part; a kept bin whose log2_ratio is NULL takes every state with likelihood 1, as upstream carries a bin without a ratio. Bins are ordered by chrom then start within a sample. The model learns from the autosomal bins (duckhts_contig_key not X, Y or MT) and decodes every bin. Restrict contigs and remove problem bins in SQL first.
+
+### Model
+
+A port of ichorCNA v0.6.1 (GavinHaLab/ichorCNA, Adalsteinsson, Ha, Freeman et al. 2017) for one sample with clonal states of copy number 1 to max_cn and the Student's t emission (nu 2.1) on the natural-log ratio, whose state means are log(((1 - n) c + 2 n) / ((1 - n) phi + 2 n)) for normal fraction n and ploidy phi. Expectation maximisation with the upstream priors (Beta(1, 1) on n, Gamma(4, 0.75) on phi, Gamma(2, beta_k) on each state precision, Dirichlet(200, 800 for two copies) on the initial distribution and Dirichlet(A * txn_strength) on the transitions) runs from each start of ploidies x normal_fractions for at most max_iter iterations until the objective changes by less than 1e-4 relative; a normal start of 0.95 runs only at ploidy 2, as upstream. The forward-backward and Viterbi passes follow HMMcopy 1.54.0. Upstream maximises each parameter with L-BFGS-B; this port climbs each one-dimensional objective from the same start, so values can differ in the last digits.
+
+### Guard and ranking
+
+Solutions are ranked by their objective, the data log-likelihood plus log prior. Upstream's guard sets normal_fraction to 1 (status guard_zero) when the longest altered training segment has at most min_segment_bins bins and at most alt_fraction_threshold of the training bins are altered. A lower-ranked solution whose objective is within close_margin of the best is close_to_best (a DuckHTS addition); the rest are ok. tumour_fraction is 1 - normal_fraction.
+
+### Output
+
+One row per sample and start with the solution columns, the number of its segments and bins, upstream ('ichorCNA v0.6.1') and method ('duckhts_depth_state v1'). altered_fraction is the share of training bins whose Viterbi state is not two copies. iterations counts the EM iterations whose parameters the solution reports.
+
+### Limits
+
+One decode per sample and macro call, on one thread per sample. The model holds about max_cn * 28 + 40 bytes per bin and one 48-byte record per segment and start; max_bins bounds the bins of a sample and the start grid has at most 100 points. A sample without copy-number change gives no fraction: the guard sets it to zero, or the fit converges to a normal fraction near 1, where the state means lie within the noise of each other and whole chromosomes can take any state, as in upstream; the copy numbers of such a solution are not evidence, its fraction is. Fraction and ploidy trade against each other, so every start is returned. Depth does not see copy-neutral changes, and a constitutional copy-number variant looks like a change in every cell. Kept upstream quirks are listed in design/depth_fraction_lane.md.
+
+### Validation
+
+test/sql/depth_state_model.test and the R tests recover a planted normal fraction of 0.7 within 0.05, ploidy 2 within 0.15, whole-chromosome and arm-level changes over at least 95% and 90% of their bins, and the guard on an unchanged genome. benchmarks/benchmark_depth_state_model.md compares fraction, ploidy and segments with the upstream code run on the same corrected bins.
+
+### Examples
+
+```sql
+SELECT sample_id, tumour_fraction, ploidy, altered_fraction, status FROM duckhts_depth_state_solutions('corrected_bins') WHERE solution = 1;
+```
+
+## duckhts_depth_state_segments
+
+Viterbi copy-number segments of every solution of the ichorCNA state model over corrected bins.
+
+Signature:
+
+```sql
+duckhts_depth_state_segments(bins_table, normal_fractions := [0.5, 0.6, 0.7, 0.8, 0.9], ploidies := [2.0, 3.0], max_cn := 7, txn_e := 0.9999999, txn_strength := 10000000.0, max_iter := 20, min_segment_bins := 50, alt_fraction_threshold := 0.05, close_margin := 10.0, max_bins := 1000000)
+```
+
+Returns:
+
+```
+table(sample_id VARCHAR, solution INTEGER, start_normal DOUBLE, start_ploidy DOUBLE, normal_fraction DOUBLE, tumour_fraction DOUBLE, ploidy DOUBLE, log_likelihood DOUBLE, altered_fraction DOUBLE, iterations INTEGER, status VARCHAR, chrom VARCHAR, start BIGINT, end BIGINT, bins INTEGER, state INTEGER, copy_number INTEGER, median_log2_ratio DOUBLE, upstream VARCHAR, method VARCHAR)
+```
+
+### Input
+
+The same relation and options as duckhts_depth_state_solutions; the two macros share one decode per call.
+
+### Output
+
+One row per sample, solution and segment: the solution columns of duckhts_depth_state_solutions, then chrom, start and end (the first bin's start and the last bin's end), bins, state (the copy number of the Viterbi state), copy_number (the state after upstream's integer correction, which re-reads segments at the highest state or with a median implying at least 1.2 max_cn copies from their median and the fitted purity and ploidy when the purity is at least 0.05), median_log2_ratio (the median of the segment's non-NULL ratios), upstream and method. A segment never crosses a contig.
+
+### Limits
+
+As duckhts_depth_state_solutions. Segment order is unspecified; order by sample_id, solution, chrom and start when it matters.
+
+### Examples
+
+```sql
+SELECT chrom, start, "end", bins, copy_number, median_log2_ratio FROM duckhts_depth_state_segments('corrected_bins') WHERE sample_id = 'S1' AND solution = 1 AND copy_number <> 2 ORDER BY chrom, start;
+```
+
 ## duckhts_bam_mismatch_counts
 
 Count aligned read bases against the reference by mate, cycle, base quality and substitution, optionally leaving out masked positions such as known variants.

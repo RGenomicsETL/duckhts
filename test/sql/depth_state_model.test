@@ -1,0 +1,158 @@
+# name: test/sql/depth_state_model.test
+# description: duckhts_depth_state_solutions and duckhts_depth_state_segments on synthetic corrected bins with a known truth
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SET threads = 2;
+
+# A synthetic genome of 1 Mb bins: 22 autosomes of 120 bins and X of 100. Every draw is a hash of
+# its coordinates, so the data are deterministic; ds_normal is a Box-Muller standard normal. The
+# tumour sample has a normal fraction of 0.7 (tumour fraction 0.3) at ploidy 2, with three copies
+# of chromosome 8, one copy of chromosome 13 and one copy of the first 40 bins of chromosome 17.
+# Its log2 ratio is log2(((1 - n) c + 2 n) / ((1 - n) 2 + 2 n)) plus noise with standard deviation
+# 0.06, about the bin noise of 1 Mb bins at 0.1x. The normal sample has two copies everywhere.
+# Declared before running: the best tumour solution has a normal fraction within 0.05 of 0.7 and
+# a ploidy within 0.15 of 2; chromosomes 8 and 13 are called three and one copies over at least
+# 95% of their bins, the 17p loss over at least 90% of its 40 bins, and every other autosomal bin
+# two copies over at least 99%; the normal sample's best solution is guard_zero with fraction 0.
+statement ok
+CREATE MACRO ds_u(salt, sample_id, chrom, bin) AS (hash(salt, sample_id, chrom, bin) % 1000003 + 0.5) / 1000003.0;
+
+statement ok
+CREATE MACRO ds_normal(sample_id, chrom, bin) AS
+  sqrt(-2 * ln(ds_u('a', sample_id, chrom, bin))) * cos(2 * pi() * ds_u('b', sample_id, chrom, bin));
+
+statement ok
+CREATE TEMP TABLE ds_genome AS
+SELECT chrom, b AS bin, b * 1000000 AS start, (b + 1) * 1000000 AS "end"
+FROM (SELECT CAST(c AS VARCHAR) AS chrom, 120 AS bins FROM range(1, 23) t(c)
+      UNION ALL SELECT 'X', 100) g, range(0, g.bins) r(b);
+
+statement ok
+CREATE TEMP TABLE ds_truth AS
+SELECT s.sample_id, s.normal_fraction, g.chrom, g.bin, g.start, g."end",
+       CASE WHEN s.sample_id = 'tumour' AND g.chrom = '8' THEN 3
+            WHEN s.sample_id = 'tumour' AND g.chrom = '13' THEN 1
+            WHEN s.sample_id = 'tumour' AND g.chrom = '17' AND g.bin < 40 THEN 1
+            ELSE 2 END AS copies
+FROM (VALUES ('tumour', 0.7), ('normal', 1.0)) s(sample_id, normal_fraction), ds_genome g;
+
+statement ok
+CREATE TEMP TABLE ds_bins AS
+SELECT sample_id, chrom, start, "end", copies,
+       CASE WHEN chrom = '5' AND bin = 10 THEN NULL
+            ELSE log2(((1 - normal_fraction) * copies + 2 * normal_fraction) / ((1 - normal_fraction) * 2 + 2 * normal_fraction))
+                 + 0.06 * ds_normal(sample_id, chrom, bin) END AS log2_ratio,
+       true AS kept
+FROM ds_truth;
+
+statement ok
+CREATE TEMP TABLE ds_solutions AS SELECT * FROM duckhts_depth_state_solutions('ds_bins');
+
+# Every start of the default grid gives one ranked solution per sample.
+query TIII
+SELECT sample_id, count(*), min(solution), max(solution)
+FROM ds_solutions GROUP BY sample_id ORDER BY sample_id;
+----
+normal	10	1	10
+tumour	10	1	10
+
+query TTTT
+SELECT sample_id, abs(normal_fraction - 0.7) <= 0.05, abs(ploidy - 2) <= 0.15, status
+FROM ds_solutions WHERE sample_id = 'tumour' AND solution = 1;
+----
+tumour	true	true	ok
+
+query TTTT
+SELECT sample_id, normal_fraction = 1, tumour_fraction = 0, status
+FROM ds_solutions WHERE sample_id = 'normal' AND solution = 1;
+----
+normal	true	true	guard_zero
+
+query TTT
+SELECT sample_id, upstream, method FROM ds_solutions WHERE solution = 1 ORDER BY sample_id;
+----
+normal	ichorCNA v0.6.1	duckhts_depth_state v1
+tumour	ichorCNA v0.6.1	duckhts_depth_state v1
+
+statement ok
+CREATE TEMP TABLE ds_segments AS SELECT * FROM duckhts_depth_state_segments('ds_bins');
+
+# The best solution's segments cover every kept bin exactly once.
+query TT
+SELECT sample_id, sum(bins) = (SELECT count(*) FROM ds_bins b WHERE b.sample_id = s.sample_id)
+FROM ds_segments s WHERE solution = 1 GROUP BY sample_id ORDER BY sample_id;
+----
+normal	true
+tumour	true
+
+# Bin-level calls of the best tumour solution against the planted copies.
+statement ok
+CREATE TEMP TABLE ds_calls AS
+SELECT t.sample_id, t.chrom, t.bin, t.copies, s.copy_number
+FROM ds_truth t
+JOIN ds_segments s ON s.sample_id = t.sample_id AND s.solution = 1 AND s.chrom = t.chrom
+  AND t.start >= s.start AND t."end" <= s."end";
+
+query TTTT
+SELECT
+  (SELECT avg(CASE WHEN copy_number = 3 THEN 1.0 ELSE 0 END) FROM ds_calls WHERE sample_id = 'tumour' AND chrom = '8') >= 0.95,
+  (SELECT avg(CASE WHEN copy_number = 1 THEN 1.0 ELSE 0 END) FROM ds_calls WHERE sample_id = 'tumour' AND chrom = '13') >= 0.95,
+  (SELECT avg(CASE WHEN copy_number = 1 THEN 1.0 ELSE 0 END) FROM ds_calls WHERE sample_id = 'tumour' AND chrom = '17' AND bin < 40) >= 0.90,
+  (SELECT avg(CASE WHEN copy_number = 2 THEN 1.0 ELSE 0 END) FROM ds_calls
+   WHERE sample_id = 'tumour' AND copies = 2 AND chrom <> 'X') >= 0.99;
+----
+true	true	true	true
+
+query T
+SELECT (SELECT avg(CASE WHEN copy_number = 2 THEN 1.0 ELSE 0 END) FROM ds_calls WHERE sample_id = 'normal' AND chrom <> 'X') >= 0.99;
+----
+true
+
+# A kept bin without a ratio stays in its segment and does not set the median.
+query TT
+SELECT bins >= 11, median_log2_ratio IS NOT NULL
+FROM ds_segments WHERE sample_id = 'normal' AND solution = 1 AND chrom = '5' AND start <= 10000000 AND "end" > 10000000;
+----
+true	true
+
+# The decode is deterministic.
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM ds_segments EXCEPT ALL SELECT * FROM duckhts_depth_state_segments('ds_bins'))
+  UNION ALL
+  (SELECT * FROM duckhts_depth_state_segments('ds_bins') EXCEPT ALL SELECT * FROM ds_segments));
+----
+0
+
+# Option contracts.
+statement error
+SELECT * FROM duckhts_depth_state_solutions('ds_bins', max_cn := 1);
+----
+max_cn must be in [2, 20]
+
+statement error
+SELECT * FROM duckhts_depth_state_solutions('ds_bins', max_bins := 100);
+----
+more kept bins than max_bins
+
+statement error
+SELECT * FROM duckhts_depth_state_solutions('ds_bins', normal_fractions := [1.5]);
+----
+normal_fractions must be in (0, 1)
+
+statement error
+SELECT * FROM duckhts_depth_state_solutions('ds_bins', txn_e := 1.0);
+----
+txn_e must be in (0, 1)
+
+# A sample without kept bins gives no rows rather than an error.
+statement ok
+CREATE TEMP TABLE ds_none AS SELECT * REPLACE (false AS kept) FROM ds_bins WHERE sample_id = 'normal';
+
+query I
+SELECT count(*) FROM duckhts_depth_state_solutions('ds_none');
+----
+0

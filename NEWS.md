@@ -1,5 +1,22 @@
 # DuckHTS Extension News
 
+# duckhts 2.0.0.9000 (development)
+
+- Copy-number state model over corrected bins
+  (https://github.com/RGenomicsETL/duckhts/issues/343, phase 2): a port of the
+  ichorCNA v0.6.1 hidden Markov model with HMMcopy's forward-backward and
+  Viterbi passes, as a native kernel behind two table macros.
+  `duckhts_depth_state_solutions` fits normal fraction and ploidy from every
+  start of a grid, ranks the starts by their objective and applies upstream's
+  guard; `duckhts_depth_state_segments` returns each solution's Viterbi
+  segments with the state and the integer-corrected copy number. One sample,
+  clonal states up to `max_cn`, upstream defaults; the kept upstream quirks
+  and the one optimizer difference are listed in
+  `design/depth_fraction_lane.md`. SQL and R tests recover a planted normal
+  fraction of 0.7 within 0.05 and ploidy 2 within 0.15 and call planted
+  whole-chromosome and arm changes. The model holds about `max_cn * 28 + 40`
+  bytes per bin, bounded by `max_bins`.
+
 # duckhts 2.0.0
 
 - `duckhts_somalier_bam_counts` reads its panel when the query is bound, on

@@ -433,9 +433,69 @@ static const char *const depth_sex_ref_sql[] = {
     "'duckhts_depth_sex_fraction reference v1' AS method FROM __dht_combined)",
 };
 
+/* ---- duckhts_depth_state_segments / duckhts_depth_state_solutions ------- */
+
+/* The state model of depth_state_hmm.h (an ichorCNA v0.6.1 port) over kept
+ * corrected bins. Bins are listed by chrom then start, as upstream orders
+ * its chromosome factor; the model learns from autosomal bins and decodes
+ * every bin. One decode runs per sample and macro call. */
+#define DEPTH_STATE_OPTIONS \
+    "normal_fractions := [0.5, 0.6, 0.7, 0.8, 0.9], ploidies := [2.0, 3.0], max_cn := 7, " \
+    "txn_e := 0.9999999, txn_strength := 10000000.0, max_iter := 20, min_segment_bins := 50, " \
+    "alt_fraction_threshold := 0.05, close_margin := 10.0, max_bins := 1000000"
+
+#define DEPTH_STATE_ARGUMENTS \
+    "normal_fractions, ploidies, max_cn, txn_e, txn_strength, max_iter, min_segment_bins, " \
+    "alt_fraction_threshold, close_margin, max_bins"
+
+static const char depth_state_lists[] =
+    "WITH __dht_bins AS MATERIALIZED (SELECT "
+    "CASE WHEN sample_id IS NULL THEN error('duckhts_depth_state: sample_id must not be NULL') "
+    "ELSE CAST(sample_id AS VARCHAR) END AS sample_id, "
+    "CASE WHEN chrom IS NULL THEN error('duckhts_depth_state: chrom must not be NULL') "
+    "ELSE CAST(chrom AS VARCHAR) END AS chrom, "
+    "CAST(start AS BIGINT) AS start, CAST(\"end\" AS BIGINT) AS \"end\", "
+    "CAST(log2_ratio AS DOUBLE) AS log2_ratio, " DEPTH_AUTOSOMAL("chrom") " AS train "
+    "FROM query_table(bins_table) WHERE coalesce(kept, false)), "
+    "__dht_lists AS (SELECT sample_id, "
+    "list(chrom ORDER BY chrom, start) AS chroms, "
+    "list(start ORDER BY chrom, start) AS starts, "
+    "list(\"end\" ORDER BY chrom, start) AS ends, "
+    "list(log2_ratio ORDER BY chrom, start) AS ratios, "
+    "list(train ORDER BY chrom, start) AS trains "
+    "FROM __dht_bins GROUP BY sample_id), "
+    "__dht_decoded AS (SELECT sample_id, unnest(__duckhts_depth_state_decode("
+    "chroms, starts, ends, ratios, trains, "
+    "CAST(normal_fractions AS DOUBLE[]), CAST(ploidies AS DOUBLE[]), CAST(max_cn AS INTEGER), "
+    "CAST(txn_e AS DOUBLE), CAST(txn_strength AS DOUBLE), CAST(max_iter AS INTEGER), "
+    "CAST(min_segment_bins AS INTEGER), CAST(alt_fraction_threshold AS DOUBLE), "
+    "CAST(close_margin AS DOUBLE), CAST(max_bins AS BIGINT))) AS r FROM __dht_lists) ";
+
+static const char *const depth_state_segments_sql[] = {
+    "CREATE OR REPLACE MACRO duckhts_depth_state_segments(bins_table, " DEPTH_STATE_OPTIONS ") AS TABLE ",
+    depth_state_lists,
+    "SELECT sample_id, r.solution, r.start_normal, r.start_ploidy, r.normal_fraction, "
+    "1 - r.normal_fraction AS tumour_fraction, r.ploidy, r.log_likelihood, r.altered_fraction, "
+    "r.iterations, r.status, r.chrom, r.start, r.\"end\", r.bins, r.state, r.copy_number, "
+    "r.median_log2_ratio, 'ichorCNA v0.6.1' AS upstream, 'duckhts_depth_state v1' AS method "
+    "FROM __dht_decoded",
+};
+
+static const char *const depth_state_solutions_sql[] = {
+    "CREATE OR REPLACE MACRO duckhts_depth_state_solutions(bins_table, " DEPTH_STATE_OPTIONS ") AS TABLE ",
+    "SELECT sample_id, solution, start_normal, start_ploidy, normal_fraction, tumour_fraction, ploidy, "
+    "log_likelihood, altered_fraction, iterations, status, count(*) AS segments, "
+    "CAST(sum(bins) AS BIGINT) AS bins, upstream, method "
+    "FROM duckhts_depth_state_segments(bins_table, " DEPTH_STATE_ARGUMENTS ") GROUP BY ALL",
+};
+
 bool register_duckhts_depth_sql(duckhts_registration_t *registration) {
     return duckhts_register_sql_parts(registration, depth_bins_sql,
                                       sizeof(depth_bins_sql) / sizeof(depth_bins_sql[0])) &&
+           duckhts_register_sql_parts(registration, depth_state_segments_sql,
+                                      sizeof(depth_state_segments_sql) / sizeof(depth_state_segments_sql[0])) &&
+           duckhts_register_sql_parts(registration, depth_state_solutions_sql,
+                                      sizeof(depth_state_solutions_sql) / sizeof(depth_state_solutions_sql[0])) &&
            duckhts_register_sql_parts(registration, depth_region_sql,
                                       sizeof(depth_region_sql) / sizeof(depth_region_sql[0])) &&
            duckhts_register_sql_parts(registration, depth_region_ref_sql,
