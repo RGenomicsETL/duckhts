@@ -232,7 +232,11 @@ jobs:
           if (-not (Test-Path $cdb)) { throw "Windows SDK debugger is unavailable" }
           $debuggerCommands = Join-Path $env:RUNNER_TEMP "duckhts-exit-debugger.txt"
           $debuggerLog = Join-Path $dumpDir "duckhts-exit-debugger.log"
+          # A first-chance access violation stops before any handler runs; print
+          # the faulting context and write a full dump, then end the debuggee.
+          $avDump = (Join-Path $dumpDir "duckhts-access-violation.dmp") -replace '\\', '/'
           @(
+            ('sxe -c ".echo DUCKHTS_ACCESS_VIOLATION; .lastevent; r; kv 100; lm; .dump /o /ma {0}; q" av' -f $avDump),
             'bu /w "@edx == 0xc0000005" ntdll!NtTerminateProcess',
             'g'
           ) | Set-Content -Path $debuggerCommands
@@ -242,7 +246,24 @@ jobs:
           }
           Remove-Item -Path $debuggerLog
 
-          $rscript = (Get-Command Rscript.exe).Source
+          $crashProbe = Join-Path $env:RUNNER_TEMP "duckhts_crash_probe.exe"
+          & $cdb -G -logou $debuggerLog -cf $debuggerCommands $crashProbe
+          # The probe has no PDB, so its frames print as module+offset.
+          $probeReport = Select-String -Path $debuggerLog -Pattern "DUCKHTS_ACCESS_VIOLATION" -Context 0, 40 |
+            Out-String -Width 400
+          if ($probeReport -notmatch "duckhts_crash_probe\+0x" -or -not (Test-Path $avDump)) {
+            Get-Content $debuggerLog | Write-Host
+            throw "Live debugger did not report the access-violation probe stack and dump"
+          }
+          Remove-Item -Path $debuggerLog, $avDump
+
+          # C:\R\bin\Rscript.exe only launches bin\x64\Rscript.exe through
+          # cmd.exe; debug the architecture binary, which loads R.dll itself.
+          $rBin = (& Rscript.exe --vanilla -e "cat(normalizePath(R.home('bin')))")
+          $rscript = Join-Path $rBin "Rscript.exe"
+          if ((Split-Path $rBin -Leaf) -ne "x64" -or -not (Test-Path $rscript)) {
+            throw "Could not resolve the x64 R executable from $rBin"
+          }
           $replay = Join-Path $env:RUNNER_TEMP "duckhts-tinytest-replay.R"
           @'
           if (!requireNamespace("tinytest", quietly = TRUE)) {
@@ -252,6 +273,14 @@ jobs:
           writeLines("complete", Sys.getenv("DUCKHTS_REPLAY_MARKER"))
           '@ | Set-Content -Path $replay
           & $cdb -G -logou $debuggerLog -cf $debuggerCommands $rscript --vanilla $replay
+          if (-not (Select-String -Path $debuggerLog -Pattern "R\.dll" -Quiet)) {
+            throw "The debugged replay process did not load R.dll"
+          }
+          $replayFault = Select-String -Path $debuggerLog -Pattern "DUCKHTS_ACCESS_VIOLATION" -Context 0, 160
+          if ($replayFault) {
+            $replayFault | Out-String -Width 400 | Write-Host
+            throw "Full tinytest replay raised an access violation; stack, modules and dump are in the crash evidence"
+          }
           $replayStopped = Select-String -Path $debuggerLog -Pattern "Breakpoint 0 hit" -Quiet
           if (-not (Test-Path $marker)) {
             if (-not $replayStopped) {
@@ -277,7 +306,11 @@ jobs:
           $env:GITHUB_PAT = ""
           $dumpDir = Join-Path $env:RUNNER_TEMP "r-crash-dumps"
           $procdump = Join-Path $env:RUNNER_TEMP "duckhts-procdump/procdump64.exe"
-          $rscript = (Get-Command Rscript.exe).Source
+          $rBin = (& Rscript.exe --vanilla -e "cat(normalizePath(R.home('bin')))")
+          $rscript = Join-Path $rBin "Rscript.exe"
+          if ((Split-Path $rBin -Leaf) -ne "x64" -or -not (Test-Path $rscript)) {
+            throw "Could not resolve the x64 R executable from $rBin"
+          }
           & $procdump -accepteula -e -x $dumpDir $rscript --vanilla scripts/diagnose_bam_extraction.R
           $code = $LASTEXITCODE
           Write-Host ("ProcDump exit code: {0} (0x{1:X8})" -f $code, ($code -band [long]0xFFFFFFFF))
@@ -310,6 +343,7 @@ jobs:
             ${{ runner.temp }}/r-crash-dumps/R.exe*.dmp
             ${{ runner.temp }}/r-crash-dumps/R_*.dmp
             ${{ runner.temp }}/r-crash-dumps/duckhts-exit-debugger.log
+            ${{ runner.temp }}/r-crash-dumps/duckhts-access-violation.dmp
             ${{ runner.temp }}/r-crash-dumps/application-events.txt
             r/Rduckhts/check
 
