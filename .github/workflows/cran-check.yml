@@ -199,7 +199,7 @@ jobs:
 
       - name: Replay full R 4.5.3 tinytest suite under CDB
         if: always() && matrix.config.os == 'windows-2022' && matrix.config.r == '4.5.3'
-        timeout-minutes: 12
+        timeout-minutes: 28
         shell: pwsh
         run: |
           $checkLibrary = "r/Rduckhts/check/Rduckhts.Rcheck"
@@ -235,11 +235,17 @@ jobs:
           # A first-chance access violation stops before any handler runs; print
           # the faulting context and write a full dump, then end the debuggee.
           $avDump = (Join-Path $dumpDir "duckhts-access-violation.dmp") -replace '\\', '/'
+          # 0x20474343 and 0x21474343 are GCC's C++ throw codes; DuckDB raises
+          # thousands per suite and they are not faults.
           @(
+            'sxi 20474343',
+            'sxi 21474343',
             ('sxe -c ".echo DUCKHTS_ACCESS_VIOLATION; .lastevent; r; kv 100; lm; .dump /o /ma {0}; q" av' -f $avDump),
             'bu /w "@edx == 0xc0000005" ntdll!NtTerminateProcess',
             'g'
           ) | Set-Content -Path $debuggerCommands
+          # Match the echoed marker on its own line, not the sxe command text.
+          $faultPattern = '^DUCKHTS_ACCESS_VIOLATION\s*$'
           & $cdb -G -logou $debuggerLog -cf $debuggerCommands $exitProbe
           if (-not (Select-String -Path $debuggerLog -Pattern "Breakpoint 0 hit" -Quiet)) {
             throw "Live debugger did not reach the explicit process-exit probe"
@@ -249,7 +255,7 @@ jobs:
           $crashProbe = Join-Path $env:RUNNER_TEMP "duckhts_crash_probe.exe"
           & $cdb -G -logou $debuggerLog -cf $debuggerCommands $crashProbe
           # The probe has no PDB, so its frames print as module+offset.
-          $probeReport = Select-String -Path $debuggerLog -Pattern "DUCKHTS_ACCESS_VIOLATION" -Context 0, 40 |
+          $probeReport = Select-String -Path $debuggerLog -Pattern $faultPattern -Context 0, 40 |
             Out-String -Width 400
           if ($probeReport -notmatch "duckhts_crash_probe\+0x" -or -not (Test-Path $avDump)) {
             Get-Content $debuggerLog | Write-Host
@@ -272,24 +278,31 @@ jobs:
           source("r/Rduckhts/tests/tinytest.R")
           writeLines("complete", Sys.getenv("DUCKHTS_REPLAY_MARKER"))
           '@ | Set-Content -Path $replay
-          & $cdb -G -logou $debuggerLog -cf $debuggerCommands $rscript --vanilla $replay
-          if (-not (Select-String -Path $debuggerLog -Pattern "R\.dll" -Quiet)) {
-            throw "The debugged replay process did not load R.dll"
-          }
-          $replayFault = Select-String -Path $debuggerLog -Pattern "DUCKHTS_ACCESS_VIOLATION" -Context 0, 160
-          if ($replayFault) {
-            $replayFault | Out-String -Width 400 | Write-Host
-            throw "Full tinytest replay raised an access violation; stack, modules and dump are in the crash evidence"
-          }
-          $replayStopped = Select-String -Path $debuggerLog -Pattern "Breakpoint 0 hit" -Quiet
-          if (-not (Test-Path $marker)) {
-            if (-not $replayStopped) {
-              throw "Full tinytest replay exited early without reaching the debugger breakpoint"
+          # The exit is intermittent: repeat the unchanged suite and stop at the
+          # first fault. Each attempt keeps its own debugger log.
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $debuggerLog = Join-Path $dumpDir ("duckhts-exit-debugger-{0}.log" -f $attempt)
+            Remove-Item -Path $marker -ErrorAction SilentlyContinue
+            & $cdb -G -logou $debuggerLog -cf $debuggerCommands $rscript --vanilla $replay
+            if (-not (Select-String -Path $debuggerLog -Pattern "R\.dll" -Quiet)) {
+              throw "The debugged replay process did not load R.dll"
             }
-            throw "Full tinytest replay stopped at the conditional process-exit breakpoint"
-          }
-          if ($replayStopped) {
-            throw "Full tinytest replay reached the process-exit breakpoint"
+            $replayFault = Select-String -Path $debuggerLog -Pattern $faultPattern -Context 0, 160
+            if ($replayFault) {
+              $replayFault | Out-String -Width 400 | Write-Host
+              throw "Full tinytest replay $attempt raised an access violation; stack, modules and dump are in the crash evidence"
+            }
+            $replayStopped = Select-String -Path $debuggerLog -Pattern "Breakpoint 0 hit" -Quiet
+            if (-not (Test-Path $marker)) {
+              if (-not $replayStopped) {
+                throw "Full tinytest replay $attempt exited early without reaching the debugger breakpoint"
+              }
+              throw "Full tinytest replay $attempt stopped at the conditional process-exit breakpoint"
+            }
+            if ($replayStopped) {
+              throw "Full tinytest replay $attempt reached the process-exit breakpoint"
+            }
+            Write-Host "Full tinytest replay $attempt completed without a fault"
           }
 
       - name: Trace Windows Server 2022 BAM extraction after check failure
@@ -342,7 +355,7 @@ jobs:
             ${{ runner.temp }}/r-crash-dumps/Rscript*.dmp
             ${{ runner.temp }}/r-crash-dumps/R.exe*.dmp
             ${{ runner.temp }}/r-crash-dumps/R_*.dmp
-            ${{ runner.temp }}/r-crash-dumps/duckhts-exit-debugger.log
+            ${{ runner.temp }}/r-crash-dumps/duckhts-exit-debugger*.log
             ${{ runner.temp }}/r-crash-dumps/duckhts-access-violation.dmp
             ${{ runner.temp }}/r-crash-dumps/application-events.txt
             r/Rduckhts/check
