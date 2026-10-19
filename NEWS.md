@@ -2,6 +2,15 @@
 
 # duckhts 2.0.0
 
+- `duckhts_somalier_bam_counts` reads its panel when the query is bound, on
+  the calling thread, instead of in the scan's global init on a DuckDB worker
+  thread. Closing the private panel instance on a worker left a DuckDB
+  `thread_local` that Rtools-built hosts destroy on freed memory when the
+  worker exits, which ended the R process with `0xC0000005` at
+  `dbDisconnect(shutdown = TRUE)` on Windows Server 2022. A prepared
+  statement now keeps the panel it was bound with. The README runtime
+  section documents the host hazard.
+
 - Windows Server 2022 CI checks R-devel and R 4.5.3 and verifies native
   exception capture with a disposable crash probe. The full R 4.5.3 tinytest
   suite also runs under a debugger to locate native process exits;

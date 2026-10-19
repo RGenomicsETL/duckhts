@@ -1,3 +1,14 @@
+# Rduckhts 2.0.0.0.1.8
+
+- The bundled `duckhts_somalier_bam_counts` reads its panel when the query is
+  bound, on the calling thread, instead of on a DuckDB worker thread. On
+  Windows, closing the private panel instance on a worker thread left a
+  DuckDB `thread_local` that the Rtools-built `duckdb` package destroys on
+  freed memory when the worker exits, which ended the R session with status
+  `0xC0000005` at `dbDisconnect(shutdown = TRUE)`, most often on Windows
+  Server 2022. `rduckhts_somalier_bam_counts()` and `rduckhts_ancestry_bam()`
+  are unchanged in behaviour.
+
 # Rduckhts 2.0.0.0.1.6
 
 - webR and r-universe builds compile the bundled extension against its bundled

@@ -64,6 +64,28 @@ typedef enum bam_extract_site_status {
     BAM_SITE_ALIGNMENT_POSITION_UNAVAILABLE
 } bam_extract_site_status_t;
 
+typedef struct bam_extract_site {
+    uint64_t site_index;
+    char *region;
+    uint32_t region_length;
+    uint64_t position1;
+    char allele_a;
+    char allele_b;
+    int32_t tid;
+    bam_extract_site_status_t status;
+    duckhts_bam_site_counts_t counts;
+} bam_extract_site_t;
+
+/* The panel read at bind time. It never changes after bind, so a prepared
+ * statement can run again; workers count into their own copy of the sites. */
+typedef struct bam_extract_panel {
+    bam_extract_site_t *sites;
+    char *region_storage;
+    char *assembly;
+    uint32_t assembly_length;
+    size_t site_count;
+} bam_extract_panel_t;
+
 typedef struct bam_extract_bind {
     char *source_path;
     char *panel_table;
@@ -87,19 +109,8 @@ typedef struct bam_extract_bind {
     uint64_t remote_cache_bytes;
     uint64_t reference_cache_bytes;
     duckhts_bam_site_overlap_policy_t overlap_policy;
+    bam_extract_panel_t panel;
 } bam_extract_bind_t;
-
-typedef struct bam_extract_site {
-    uint64_t site_index;
-    char *region;
-    uint32_t region_length;
-    uint64_t position1;
-    char allele_a;
-    char allele_b;
-    int32_t tid;
-    bam_extract_site_status_t status;
-    duckhts_bam_site_counts_t counts;
-} bam_extract_site_t;
 
 typedef struct bam_extract_order {
     size_t site_offset;
@@ -112,11 +123,10 @@ typedef struct bam_extract_job {
     size_t end;
 } bam_extract_job_t;
 
+/* Per-execution state: the workers' copy of the panel sites, which receives
+ * counts and status, and the job partition. */
 typedef struct bam_extract_global {
     bam_extract_site_t *sites;
-    char *region_storage;
-    char *assembly;
-    uint32_t assembly_length;
     size_t site_count;
     bam_extract_job_t jobs[BAM_EXTRACT_MAX_WORKERS];
     uint32_t job_count;
@@ -426,6 +436,9 @@ static bool set_remote_tuning(htsFile *fp, const char *path,
 static void bam_extract_bind_destroy(void *pointer) {
     bam_extract_bind_t *bind = pointer;
     if (!bind) return;
+    duckdb_free(bind->panel.assembly);
+    duckdb_free(bind->panel.region_storage);
+    duckdb_free(bind->panel.sites);
     free(bind->cram_reference);
     duckdb_free(bind->reference_index_path);
     duckdb_free(bind->index_path);
@@ -440,8 +453,6 @@ static void bam_extract_bind_destroy(void *pointer) {
 static void bam_extract_global_destroy(void *pointer) {
     bam_extract_global_t *global = pointer;
     if (!global) return;
-    duckdb_free(global->assembly);
-    duckdb_free(global->region_storage);
     duckdb_free(global->sites);
     duckdb_free(global);
 }
@@ -562,6 +573,10 @@ static void add_result_column(duckdb_bind_info info, const char *name,
     duckdb_destroy_logical_type(&logical);
 }
 
+static bool load_panel_rows_private(const bam_extract_bind_t *bind,
+                                    bam_extract_panel_t *panel,
+                                    char *error, size_t error_size);
+
 static void bam_extract_bind(duckdb_bind_info info) {
     bam_extract_bind_t *bind = duckdb_malloc(sizeof(*bind));
     char error[BAM_EXTRACT_ERROR_BYTES] = {0};
@@ -676,6 +691,11 @@ static void bam_extract_bind(duckdb_bind_info info) {
         }
     }
 
+    /* Bind runs on the client thread; see load_panel_rows_private. */
+    if (!load_panel_rows_private(bind, &bind->panel, error, sizeof(error))) {
+        goto fail;
+    }
+
     for (unsigned i = 0u; i < BAM_OUT_FIELD_COUNT; i++) {
         duckdb_type type = i == BAM_OUT_SITE_INDEX || i == BAM_OUT_POSITION ||
                            (i >= BAM_OUT_A && i <= BAM_OUT_OTHER)
@@ -727,7 +747,7 @@ static bool execute_query(duckdb_connection connection, const char *sql,
 
 static bool load_panel_rows(duckdb_connection connection,
                             const bam_extract_bind_t *bind,
-                            bam_extract_global_t *global,
+                            bam_extract_panel_t *panel,
                             char *error, size_t error_size) {
     static const char create_parquet[] =
         "CREATE OR REPLACE TEMP TABLE " BAM_EXTRACT_PANEL_TABLE
@@ -774,14 +794,14 @@ static bool load_panel_rows(duckdb_connection connection,
                 "duckhts_somalier_bam_counts: panel workspace exceeds this platform");
             goto cleanup;
         }
-        global->site_count = (size_t)site_count64;
+        panel->site_count = (size_t)site_count64;
         region_bytes = (size_t)region_bytes64;
     }
     duckdb_destroy_data_chunk(&chunk);
     duckdb_destroy_result(&result);
-    if (global->site_count == 0u || global->site_count > bind->max_sites ||
-        global->site_count > SIZE_MAX / sizeof(*global->sites) ||
-        region_bytes > SIZE_MAX - global->site_count) {
+    if (panel->site_count == 0u || panel->site_count > bind->max_sites ||
+        panel->site_count > SIZE_MAX / sizeof(*panel->sites) ||
+        region_bytes > SIZE_MAX - panel->site_count) {
         copy_error(error, error_size,
             "duckhts_somalier_bam_counts: panel is empty, exceeds max_sites, or overflows workspace");
         goto cleanup;
@@ -791,15 +811,15 @@ static bool load_panel_rows(duckdb_connection connection,
     }
     duckdb_destroy_result(&result);
 
-    region_capacity = region_bytes + global->site_count;
-    global->sites = duckdb_malloc(global->site_count * sizeof(*global->sites));
-    global->region_storage = duckdb_malloc(region_capacity);
-    if (!global->sites || !global->region_storage) {
+    region_capacity = region_bytes + panel->site_count;
+    panel->sites = duckdb_malloc(panel->site_count * sizeof(*panel->sites));
+    panel->region_storage = duckdb_malloc(region_capacity);
+    if (!panel->sites || !panel->region_storage) {
         copy_error(error, error_size,
             "duckhts_somalier_bam_counts: out of memory preparing panel");
         goto cleanup;
     }
-    memset(global->sites, 0, global->site_count * sizeof(*global->sites));
+    memset(panel->sites, 0, panel->site_count * sizeof(*panel->sites));
     if (!execute_query(connection, rows, &result, error, error_size)) {
         goto cleanup;
     }
@@ -818,7 +838,7 @@ static bool load_panel_rows(duckdb_connection connection,
             uint32_t assembly_length;
             uint32_t region_length;
             size_t region_item;
-            if (site_offset >= global->site_count) {
+            if (site_offset >= panel->site_count) {
                 copy_error(error, error_size,
                     "duckhts_somalier_bam_counts: panel cardinality changed during preparation");
                 goto cleanup;
@@ -841,16 +861,16 @@ static bool load_panel_rows(duckdb_connection connection,
             assembly_length = duckdb_string_t_length(*assembly);
             region_length = duckdb_string_t_length(*region);
             if (site_offset == 0u) {
-                global->assembly = duckdb_malloc((size_t)assembly_length + 1u);
-                if (!global->assembly) {
+                panel->assembly = duckdb_malloc((size_t)assembly_length + 1u);
+                if (!panel->assembly) {
                     copy_error(error, error_size,
                         "duckhts_somalier_bam_counts: out of memory copying assembly");
                     goto cleanup;
                 }
-                memcpy(global->assembly, duckdb_string_t_data(assembly),
+                memcpy(panel->assembly, duckdb_string_t_data(assembly),
                        assembly_length);
-                global->assembly[assembly_length] = '\0';
-                global->assembly_length = assembly_length;
+                panel->assembly[assembly_length] = '\0';
+                panel->assembly_length = assembly_length;
             }
             region_item = (size_t)region_length + 1u;
             if (region_offset > region_capacity ||
@@ -859,12 +879,12 @@ static bool load_panel_rows(duckdb_connection connection,
                     "duckhts_somalier_bam_counts: panel region storage overflow");
                 goto cleanup;
             }
-            site = &global->sites[site_offset];
+            site = &panel->sites[site_offset];
             site->site_index = ((uint64_t *)duckdb_vector_get_data(
                 vectors[1]))[row];
             site->position1 = ((uint64_t *)duckdb_vector_get_data(
                 vectors[3]))[row];
-            site->region = global->region_storage + region_offset;
+            site->region = panel->region_storage + region_offset;
             site->region_length = region_length;
             memcpy(site->region, duckdb_string_t_data(region), region_length);
             site->region[region_length] = '\0';
@@ -880,7 +900,7 @@ static bool load_panel_rows(duckdb_connection connection,
         copy_error(error, error_size, duckdb_result_error(&result));
         goto cleanup;
     }
-    if (site_offset != global->site_count) {
+    if (site_offset != panel->site_count) {
         copy_error(error, error_size,
             "duckhts_somalier_bam_counts: panel cardinality changed during preparation");
         goto cleanup;
@@ -895,9 +915,14 @@ cleanup:
 
 /* Reads the panel on a private in-memory instance that lives only for this
    call. A connection kept from LOAD would pin the caller's database instance
-   for the life of the process; this one holds nothing after it returns. */
+   for the life of the process; this one holds nothing after it returns.
+   Call it from bind, on the client thread, never from init or scan: closing
+   a DuckDB instance creates a C++ thread_local in the host, and MinGW/Rtools
+   builds of DuckDB destroy that object on freed memory when a worker thread
+   exits (winpthreads runs key destructors in creation order, so emutls frees
+   the storage before libstdc++ runs the destructor). */
 static bool load_panel_rows_private(const bam_extract_bind_t *bind,
-                                    bam_extract_global_t *global,
+                                    bam_extract_panel_t *panel,
                                     char *error, size_t error_size) {
     duckdb_config config = NULL;
     duckdb_database database = NULL;
@@ -932,7 +957,7 @@ static bool load_panel_rows_private(const bam_extract_bind_t *bind,
     if (!execute_query(connection, macro_sql, &result, error, error_size)) {
         goto cleanup;
     }
-    ok = load_panel_rows(connection, bind, global, error, error_size);
+    ok = load_panel_rows(connection, bind, panel, error, error_size);
 
 cleanup:
     duckdb_destroy_result(&result);
@@ -946,8 +971,9 @@ cleanup:
 
 static void bam_extract_global_init(duckdb_init_info info) {
     const bam_extract_bind_t *bind = duckdb_init_get_bind_data(info);
+    const bam_extract_panel_t *panel = &bind->panel;
     bam_extract_global_t *global = duckdb_malloc(sizeof(*global));
-    char error[BAM_EXTRACT_ERROR_BYTES] = {0};
+    size_t sites_bytes;
     uint32_t jobs;
 
     if (!global) {
@@ -956,11 +982,24 @@ static void bam_extract_global_init(duckdb_init_info info) {
         return;
     }
     memset(global, 0, sizeof(*global));
-    if (!load_panel_rows_private(bind, global, error, sizeof(error))) {
-        duckdb_init_set_error(info, error);
+    /* Workers write counts and status into this copy; the region strings
+     * stay in the bind-owned panel, which outlives the scan. */
+    if (!checked_size_product(panel->site_count, sizeof(*panel->sites),
+                              &sites_bytes)) {
+        duckdb_init_set_error(info,
+            "duckhts_somalier_bam_counts: panel copy overflows size_t");
         bam_extract_global_destroy(global);
         return;
     }
+    global->sites = duckdb_malloc(sites_bytes);
+    if (!global->sites) {
+        duckdb_init_set_error(info,
+            "duckhts_somalier_bam_counts: out of memory copying panel sites");
+        bam_extract_global_destroy(global);
+        return;
+    }
+    memcpy(global->sites, panel->sites, sites_bytes);
+    global->site_count = panel->site_count;
 
     jobs = bind->worker_count;
     if ((size_t)jobs > global->site_count) jobs = (uint32_t)global->site_count;
@@ -1098,7 +1137,6 @@ cleanup:
 
 static void write_output_row(duckdb_vector *vectors, idx_t row,
                              const bam_extract_bind_t *bind,
-                             const bam_extract_global_t *global,
                              const bam_extract_site_t *site) {
     uint64_t *validity_a = duckdb_vector_get_validity(vectors[BAM_OUT_A]);
     uint64_t *validity_b = duckdb_vector_get_validity(vectors[BAM_OUT_B]);
@@ -1110,7 +1148,7 @@ static void write_output_row(duckdb_vector *vectors, idx_t row,
     duckdb_vector_assign_string_element(vectors[BAM_OUT_SOURCE_PATH], row,
                                         bind->source_path);
     duckdb_vector_assign_string_element_len(vectors[BAM_OUT_ASSEMBLY], row,
-        global->assembly, global->assembly_length);
+        bind->panel.assembly, bind->panel.assembly_length);
     ((uint64_t *)duckdb_vector_get_data(
         vectors[BAM_OUT_SITE_INDEX]))[row] = site->site_index;
     duckdb_vector_assign_string_element_len(vectors[BAM_OUT_REGION], row,
@@ -1187,7 +1225,7 @@ static void bam_extract_scan(duckdb_function_info info,
             local->have_job = 1u;
         }
         while (row_count < vector_size && local->cursor < local->end) {
-            write_output_row(vectors, row_count, bind, global,
+            write_output_row(vectors, row_count, bind,
                              &global->sites[local->cursor]);
             local->cursor++;
             row_count++;
