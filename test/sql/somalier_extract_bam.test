@@ -223,6 +223,51 @@ SELECT * FROM duckhts_somalier_bam_counts(
 ----
 overlap_policy must be
 
+# The panel is read when the statement is bound. Each execution counts into
+# its own copy of the sites, so a prepared statement runs again unchanged.
+statement ok
+PREPARE somalier_bam_prepared AS
+SELECT site_index::VARCHAR, a::VARCHAR, b::VARCHAR, other::VARCHAR, status
+FROM duckhts_somalier_bam_counts(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  NULL, 'sample-1',
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel.parquet',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
+  reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
+)
+ORDER BY site_index;
+
+query TTTTT
+EXECUTE somalier_bam_prepared;
+----
+0	0	0	0	measured
+1	1	0	0	measured
+2	NULL	NULL	NULL	unavailable_reference_mismatch
+3	NULL	NULL	NULL	unavailable_reference_contig
+
+query TTTTT
+EXECUTE somalier_bam_prepared;
+----
+0	0	0	0	measured
+1	1	0	0	measured
+2	NULL	NULL	NULL	unavailable_reference_mismatch
+3	NULL	NULL	NULL	unavailable_reference_contig
+
+# A missing panel is an error at bind time, before any scan starts.
+statement error
+PREPARE somalier_bam_missing_panel AS
+SELECT * FROM duckhts_somalier_bam_counts(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  NULL, 'sample-1',
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  panel_parquet := '__WORKING_DIRECTORY__/test_somalier_bam_panel_missing.parquet',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai',
+  reference_index_path := '__WORKING_DIRECTORY__/test/data/ce.fa.fai'
+);
+----
+test_somalier_bam_panel_missing.parquet
+
 statement error
 SELECT * FROM duckhts_somalier_bam_counts(
   '__WORKING_DIRECTORY__/test/data/range.bam',

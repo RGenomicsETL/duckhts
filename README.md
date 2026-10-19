@@ -96,6 +96,29 @@ On DuckDB 1.5.x:
   buffers;
 - or use DuckDB 2.0 once it is released. DuckHTS 2.0.0 targets it.
 
+### Known Rtools (MinGW) issue: `thread_local` destructors on worker threads
+
+The CRAN `duckdb` package for Windows is built with Rtools. The
+winpthreads inside its `duckdb.dll` runs thread-exit key destructors in
+creation order, so libgcc’s emulated TLS frees every C++ `thread_local`
+before libstdc++ runs the object’s destructor. mingw-w64 fixed the order
+on 2024-12-05 (commit `8e06daa3`); Rtools45 predates the fix. DuckDB
+creates such a `thread_local` on any thread that closes a DuckDB
+instance, even when its block allocator is inactive. R closes instances
+on the main thread, which never exits this way, so ordinary use is
+unaffected.
+
+An extension that opens and closes its own DuckDB instance inside a
+table function’s init or scan callback does so on a DuckDB worker
+thread. When that worker exits at `dbDisconnect(shutdown = TRUE)`, the
+destructor runs on freed memory. It reads garbage silently, or ends the
+R process with status `0xC0000005` when the heap has already released
+the page; the second outcome is common on Windows Server 2022 and rare
+on Server 2025. Rduckhts 2.0.0.0.1.7 and earlier did this in
+`duckhts_somalier_bam_counts`; from 2.0.0.0.1.8 the panel is read at
+bind time, on the calling thread. Extension authors on Windows R hosts:
+open and close DuckDB instances only in bind.
+
 ## Using DuckHTS with a database file
 
 `LOAD` creates the 57 SQL macros only when the default database is
