@@ -140,8 +140,11 @@ normal fraction is near 1; in that fit the state means lie within the
 noise of each other and whole chromosomes can take any state, so its
 copy numbers are not evidence. Fraction and ploidy trade against each
 other, so all solutions are returned; a ploidy-3 explanation of a
-ploidy-2 genome usually ranks second. The port and its kept upstream
-quirks are documented in the DuckHTS catalog entry and
+ploidy-2 genome usually ranks second. A genome with one altered region
+does not identify the fraction either: a one-copy gain in a share \`m\`
+of cells and a two-copy gain in \`m / 2\` give the same ratio, and the
+prior decides, as in upstream. The port and its kept upstream quirks are
+documented in the DuckHTS catalog entry and
 \`design/depth_fraction_lane.md\`.
 
 ## Examples
@@ -159,7 +162,7 @@ DBI::dbExecute(con, paste(
 best <- rduckhts_depth_state_solutions(con, "bins")
 best[best$solution == 1, c("tumour_fraction", "ploidy", "status")]
 #>   tumour_fraction   ploidy status
-#> 5       0.1011181 2.009539     ok
+#> 7       0.1011181 2.009539     ok
 segments <- rduckhts_depth_state_segments(con, "bins")
 segments[segments$solution == 1 & segments$chrom == "8", c("chrom", "copy_number", "bins")]
 #>    chrom copy_number bins
