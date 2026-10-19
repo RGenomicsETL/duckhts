@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 2.0.0.9000 (development)
+# duckhts 2.0.0
 
 - Copy-number state model over corrected bins
   (https://github.com/RGenomicsETL/duckhts/issues/343, phase 2): a port of the
@@ -16,8 +16,6 @@
   fraction of 0.7 within 0.05 and ploidy 2 within 0.15 and call planted
   whole-chromosome and arm changes. The model holds about `max_cn * 28 + 40`
   bytes per bin, bounded by `max_bins`.
-
-# duckhts 2.0.0
 
 - `duckhts_somalier_bam_counts` reads its panel when the query is bound, on
   the calling thread, instead of in the scan's global init on a DuckDB worker

@@ -1,4 +1,4 @@
-# Rduckhts 2.0.0.9000.0.1.8
+# Rduckhts 2.0.0.0.1.9
 
 - New `rduckhts_depth_state_solutions()` and `rduckhts_depth_state_segments()`
   fit the bundled ichorCNA-style copy-number state model to corrected bins

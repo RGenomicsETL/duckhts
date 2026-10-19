@@ -1,7 +1,8 @@
-This submission updates Rduckhts to 2.0.0.0.1.8 and the bundled DuckHTS
-extension from 1.5.2 to 2.0.0. The packaging revision also keeps webR
-builds on the bundled htslib headers and fixes a Windows process exit at
-`dbDisconnect(shutdown = TRUE)`.
+This submission updates Rduckhts to 2.0.0.0.1.9 and the bundled DuckHTS
+extension from 1.5.2 to 2.0.0. The packaging revisions since 2.0.0.0.1.5
+keep webR builds on the bundled htslib headers, fix a Windows process exit
+at `dbDisconnect(shutdown = TRUE)`, and add the copy-number state model
+wrappers.
 
 This is a major release. Consequence prediction has moved to the separate
 DuckVEP extension and Rduckvep package, and the old bundled DuckVEP interfaces
