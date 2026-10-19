@@ -1,8 +1,9 @@
 # Copy-number fractions from read depth
 
 Status: current implementation guidance for phase 1 (corrected bins and the two
-estimators without a state model); open design for phase 2 (the state model). Public
-issue: https://github.com/RGenomicsETL/duckhts/issues/343.
+estimators without a state model) and phase 2 (the state model,
+`duckhts_depth_state_solutions` and `duckhts_depth_state_segments`). Public issue:
+https://github.com/RGenomicsETL/duckhts/issues/343.
 
 ## Purpose
 
@@ -142,8 +143,25 @@ reference.
 
 ## Phase 2 contract: the state model
 
-Not implemented. The decoder takes the corrected log2 ratios of one sample's kept bins
-in contig and position order and returns:
+Implemented in `src/depth_state_hmm.c` (the engine, no DuckDB dependency),
+`src/depth_state_udf.c` (`__duckhts_depth_state_decode` over one sample's bin lists)
+and `src/depth_sql.c` (the two table macros). The port follows the pinned sources under
+`.sync/ichorCNA-v0.6.1-dl` (tag v0.6.1, tarball SHA-256
+`ebcaec4b0a4dbf8e1248c83a82e2ea317df0febeb05d49c7629982ca23c17cda`) and
+`.sync/HMMcopy-dl` (HMMcopy 1.54.0, SHA-256
+`efa6c46295757dad49d49f1a4c80e6f7730a20ae8207cb4e574cc23c403225c9`). Scope: one
+sample, clonal states 1..`max_cn`, Student's t emission, upstream defaults (no
+homozygous-deletion state, no subclonal states). Upstream quirks kept on purpose, so
+that the two agree: the precision prior is set from the log2 ratios while the emission
+sees natural-log ratios; the initial-distribution update reads the first training bin
+only; the transition prior evaluates `dirichletpdflog(A_prior, A)` in that argument
+order; when the objective decreases, the previous iteration's `n`, `phi` and objective
+are reported while the Viterbi path uses the rejected iteration's emissions and
+transitions. One declared difference: upstream maximises each parameter with L-BFGS-B, the port climbs
+each one-dimensional objective from the same start with a bounded adaptive step; both
+find a local maximum near the start. `close_to_best` is a DuckHTS addition with an
+explicit `close_margin`. The decoder takes the corrected log2 ratios of one sample's
+kept bins in contig and position order and returns:
 
 - **Solutions:** one row per sample and start: normal fraction `n`, ploidy `phi`,
   log-likelihood, share of the genome altered, rank, and status (`ok`, `guard_zero`,

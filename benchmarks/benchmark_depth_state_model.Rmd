@@ -1,0 +1,420 @@
+---
+title: "Depth state model: agreement with ichorCNA v0.6.1, planted gains and scaling"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+---
+
+This report validates phase 2 of the depth fraction lane
+(`design/depth_fraction_lane.md`, https://github.com/RGenomicsETL/duckhts/issues/343):
+`duckhts_depth_state_solutions()` and `duckhts_depth_state_segments()`, a port of the
+ichorCNA copy-number state model. It runs the port and the unmodified upstream R code
+(GavinHaLab/ichorCNA tag v0.6.1 with HMMcopy 1.54.0, `benchmarks/depth_state/upstream_ichorcna.R`)
+on the same corrected bins and compares fraction, ploidy, guard and segments; checks planted
+chromosome-18 gains and samples without change at 0.1×, 0.4× and 1×; and gives the 1×/2×/4×
+scaling evidence `STYLE.md` asks for. No earlier report measures these macros; this is their
+first baseline.
+
+The real bins are the composites of `benchmarks/benchmark_depth_fraction.md`: sums of
+read-name buckets of three registered 30× genomes, corrected with `duckhts_depth_bins()` and
+masked by the leave-one-out panel rule of that report. Upstream cannot take corrected bins
+through its command line, which applies its own loess correction, so its model is entered at
+the function level that `run_ichorCNA` calls after correction: `getDefaultParameters`,
+`HMMsegment` and `correctIntegerCN` with `run_ichorCNA`'s default arguments, plus its guard.
+
+``` sh
+taskset -c 12-19 Rscript -e 'rmarkdown::render("benchmarks/benchmark_depth_state_model.Rmd")'
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+```{r environment, echo=FALSE, message=FALSE}
+stopifnot(requireNamespace("duckhtsbench", quietly = TRUE),
+          requireNamespace("jsonlite", quietly = TRUE),
+          requireNamespace("digest", quietly = TRUE),
+          requireNamespace("knitr", quietly = TRUE))
+Sys.setenv(DUCKHTSBENCH_REGISTRY = normalizePath(
+  "r/duckhtsbench/inst/benchmark_registry.tsv", mustWork = TRUE))
+extension <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"),
+                           mustWork = TRUE)
+duckdb_cli <- Sys.getenv("DUCKDB_CLI", Sys.which("duckdb"))
+stopifnot(nzchar(duckdb_cli), file.exists("/usr/bin/time"))
+duckdb_runtime <- system2(duckdb_cli, "--version", stdout = TRUE)[[1L]]
+revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+src_tree <- system2("git", c("rev-parse", "HEAD:src"), stdout = TRUE)
+if (system2("git", c("diff", "--quiet", "HEAD", "--", "src"), stdout = FALSE, stderr = FALSE) != 0L) {
+  stop("Build source must match the recorded HEAD")
+}
+host_load <- sub(".*load average: ", "", system2("uptime", stdout = TRUE))
+launcher_affinity <- system2("taskset", c("-pc", Sys.getpid()), stdout = TRUE)
+quote_literal <- function(value) paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+results_dir <- "benchmarks/results/depth-state"
+dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
+
+run_untimed <- function(statements, outputs = list()) {
+  scratch <- tempfile("depth-state-untimed-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  paths <- file.path(scratch, paste0(names(outputs), ".csv"))
+  copies <- vapply(seq_along(outputs), function(k) {
+    sprintf("COPY (%s) TO %s (HEADER);", outputs[[k]], quote_literal(paths[[k]]))
+  }, character(1L))
+  sql_path <- file.path(scratch, "script.sql")
+  writeLines(c("SET threads = 4;", sprintf("LOAD %s;", quote_literal(extension)), statements, copies),
+             sql_path)
+  status <- system2(duckdb_cli, c("-unsigned", "-batch", "-bail"), stdin = sql_path,
+                    stdout = "", stderr = "")
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  results <- lapply(paths, utils::read.csv, stringsAsFactors = FALSE)
+  names(results) <- names(outputs)
+  results
+}
+
+run_fresh <- function(query, threads, setup = NULL) {
+  scratch <- tempfile("depth-state-scaling-")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  sql_path <- file.path(scratch, "query.sql")
+  result_path <- file.path(scratch, "result.csv")
+  profile_path <- file.path(scratch, "profile.json")
+  time_path <- file.path(scratch, "time.tsv")
+  writeLines(c(
+    sprintf("SET threads = %d;", threads),
+    "SET max_temp_directory_size = '0KiB';",
+    sprintf("LOAD %s;", quote_literal(extension)),
+    setup,
+    "PRAGMA enable_profiling = 'json';",
+    sprintf("PRAGMA profiling_output = %s;", quote_literal(profile_path)),
+    sprintf("COPY (%s) TO %s (HEADER);", query, quote_literal(result_path)),
+    "PRAGMA disable_profiling;"
+  ), sql_path)
+  status <- system2("/usr/bin/time", c("-f", shQuote("%M\t%e"), "-o", shQuote(time_path),
+                                       "nice", "-n", "-15", shQuote(duckdb_cli), "-unsigned", "-batch", "-bail"),
+                    stdin = sql_path, stdout = FALSE, stderr = FALSE)
+  if (status != 0L) stop("DuckDB CLI failed (status ", status, ")")
+  profile <- jsonlite::fromJSON(profile_path, simplifyVector = TRUE)
+  timing <- utils::read.delim(time_path, header = FALSE, col.names = c("max_rss_kib", "process_seconds"))
+  data.frame(utils::read.csv(result_path, colClasses = "character"),
+             seconds = as.numeric(profile$latency), max_rss_kib = timing$max_rss_kib[[1L]],
+             process_seconds = timing$process_seconds[[1L]], stringsAsFactors = FALSE)
+}
+```
+
+Extension at revision `` `r revision` `` (source tree `` `r src_tree` ``), DuckDB CLI `` `r duckdb_runtime` ``,
+host load `` `r host_load` `` at start, launcher `` `r launcher_affinity` ``.
+
+## Declaration, before any run
+
+Composites, from the design of the depth fraction report: for each of the genomes
+HG00403, NA18507 and HG00188, a pure sample at 0.1×, 0.4× and 1× (10, 40 and 100 of the
+300 read-name buckets); and HG00403 with extra chromosome-18 buckets so that chromosome 18
+has the depth of a one-copy gain in a share `m` of cells, `m` = 0.2 and 0.4 at 0.1×, 0.1 and
+0.2 at 0.4×, 0.04, 0.1 and 0.2 at 1×. The gain series is the dilution series: the same
+change at decreasing share. Each composite is corrected alone with `duckhts_depth_bins()`
+(1 Mb bins, GC from the GRCh38 reference, bins with 5% or more N and the X
+pseudo-autosomal regions removed) and keeps the bins that the other two genomes, at
+30×, correct to a ratio within 0.75 and 1.25 (the panel mask of the depth fraction report).
+Y is dropped; X is decoded and not trained on. Both models run the default grid, normal
+fractions 0.5 to 0.9 at ploidy starts 2 and 3, with `max_cn` 7.
+
+Criteria:
+
+- **A1, best solution.** For every composite, the port and upstream rank the same start first,
+  or their best solutions agree within the A2 tolerances.
+- **A2, parameters.** For the best solution of every composite, the normal fractions differ by at
+  most 0.02 and the ploidies by at most 0.05; the guard decision is the same.
+- **A3, segments.** For the best solution of every composite, the Viterbi states agree on at
+  least 98% of bins.
+- **A4, every start.** Over all composites and starts, at least 90% of the starts have normal
+  fractions within 0.02, ploidies within 0.05 and objectives within 5 of upstream. The rest are
+  listed; a difference on a flat objective is the expected effect of the two optimizers.
+- **G1, gains.** For each gain composite the port's best solution has a ploidy within 0.15 of 2,
+  chromosome 18 at three copies over at least 90% of its kept bins, no other autosome with more
+  than 10% of its bins altered, and a tumour fraction within 0.05 of `m` at 0.4× and 1× and within
+  0.08 at 0.1×.
+- **N1, no change.** For each pure composite, the best solution of the port and of upstream has a
+  tumour fraction of at most 0.02.
+- **S1, scaling.** On synthetic bins in fresh processes with four threads: with one sample, the
+  latency at 2× and 4× bins is at most 2.6× and 6.8× that at 1× (exponent at most 1.4); with
+  four samples of the 1× size, at most 2× the one-sample latency; peak RSS stays under 1 GiB
+  throughout. The model's declared memory is about `max_cn * 28 + 40` bytes a bin per sample
+  in flight.
+
+```{r design, echo=FALSE}
+component <- function(id, genome, contigs, low, high) {
+  data.frame(test_id = id, genome = genome, contigs = contigs, low = low, high = high,
+             stringsAsFactors = FALSE)
+}
+genomes <- c("HG00403", "NA18507", "HG00188")
+depths <- data.frame(label = c("0.1x", "0.4x", "1x"), buckets = c(10L, 40L, 100L))
+gains <- list(`0.1x` = c(0.2, 0.4), `0.4x` = c(0.1, 0.2), `1x` = c(0.04, 0.1, 0.2))
+components <- list()
+design <- list()
+add_test <- function(id, kind, depth, truth, genome_set, parts) {
+  components[[length(components) + 1L]] <<- parts
+  design[[length(design) + 1L]] <<- data.frame(test_id = id, kind = kind, depth = depth, truth = truth,
+                                               genomes = genome_set, stringsAsFactors = FALSE)
+}
+for (d in seq_len(nrow(depths))) {
+  label <- depths$label[[d]]
+  n <- depths$buckets[[d]]
+  for (genome in genomes) {
+    add_test(paste("pure", genome, label), "pure", label, 0, genome,
+             component(paste("pure", genome, label), genome, "all", 0L, n))
+  }
+  for (m in gains[[label]]) {
+    id <- paste("gain chr18", m, label)
+    add_test(id, "gain", label, m, "HG00403", rbind(
+      component(id, "HG00403", "all", 0L, n),
+      component(id, "HG00403", "chr18", n, n + as.integer(round(m * n / 2)))))
+  }
+}
+components <- do.call(rbind, components)
+design <- do.call(rbind, design)
+stopifnot(all(components$high <= 300L), all(components$high > components$low))
+knitr::kable(design, caption = "The composites")
+```
+
+## Execution and provenance
+
+```{r real, echo=FALSE, message=FALSE}
+registry <- duckhtsbench::duckhts_bench_registry()
+identity_of <- function(id) {
+  duckhtsbench:::duckhts_bench_identity_fields(registry$supplier_identity[registry$id == id])
+}
+bucket_ids <- paste0("depth_fraction_", tolower(genomes), "_buckets")
+bucket_paths <- vapply(bucket_ids, duckhtsbench::duckhts_bench_artifact_path, character(1L))
+stopifnot(all(file.exists(bucket_paths)))
+bucket_provenance <- lapply(seq_along(bucket_ids), function(k) {
+  receipt <- utils::read.delim(paste0(bucket_paths[[k]], ".sources.tsv"), colClasses = "character")
+  value <- setNames(receipt$value, receipt$field)
+  stopifnot(value[["artifact_id"]] == bucket_ids[[k]],
+            value[["output_sha256"]] == unname(digest::digest(file = bucket_paths[[k]], algo = "sha256")))
+  data.frame(artifact = bucket_ids[[k]], producer_sha256 = value[["extension_sha256"]],
+             output_sha256 = value[["output_sha256"]])
+})
+knitr::kable(do.call(rbind, bucket_provenance))
+reference_fasta <- duckhtsbench::duckhts_bench_artifact_path("liftover_grch38_fasta")
+stopifnot(file.exists(reference_fasta), file.exists(paste0(reference_fasta, ".fai")))
+duckhtsbench::duckhts_bench_validate_identity("liftover_grch38_fasta", reference_fasta)
+bucket_list <- paste(vapply(bucket_paths, quote_literal, character(1L)), collapse = ", ")
+staged <- run_untimed(character(), list(identity = sprintf(paste(
+  "SELECT sample_id, count(*)::DOUBLE AS rows, sum(reads)::DOUBLE AS reads, max(bucket) AS max_bucket",
+  "FROM read_parquet([%s]) GROUP BY sample_id ORDER BY sample_id"), bucket_list)))$identity
+for (k in seq_along(genomes)) {
+  fields <- identity_of(bucket_ids[[k]])
+  row <- staged[staged$sample_id == genomes[[k]], ]
+  stopifnot(nrow(row) == 1L, row$rows == as.numeric(fields[["rows"]]),
+            row$reads == as.numeric(fields[["reads"]]))
+}
+
+components_sql <- paste(sprintf("(%s, %s, %s, %d, %d)", vapply(components$test_id, quote_literal, ""),
+                                 vapply(components$genome, quote_literal, ""),
+                                 vapply(components$contigs, quote_literal, ""), components$low, components$high),
+                         collapse = ", ")
+corrected_path <- normalizePath(file.path(results_dir, "corrected_bins.parquet"), mustWork = FALSE)
+real_setup <- c(
+  sprintf(paste(
+    "CREATE TABLE gc AS SELECT chrom, start, \"end\", (num_c + num_g) / nullif(num_a + num_c + num_g + num_t, 0) AS gc",
+    "FROM fasta_nuc(%s, bin_width := 1000000) WHERE (chrom IN ('chrX', 'chrY') OR regexp_full_match(chrom, 'chr[0-9]+'))",
+    "AND num_n < 0.05 * seq_len AND NOT (chrom = 'chrX' AND (start < 2781479 OR \"end\" > 155701383));"),
+    quote_literal(reference_fasta)),
+  sprintf(paste("CREATE TABLE buckets AS SELECT sample_id, chrom, start // 1000000 * 1000000 AS start, bucket,",
+                "sum(reads) AS reads FROM read_parquet([%s]) GROUP BY ALL;"), bucket_list),
+  sprintf("CREATE TABLE components AS SELECT * FROM (VALUES %s) v(test_id, genome, contigs, low, high);",
+          components_sql),
+  paste("CREATE MACRO composed_bins(parts) AS TABLE SELECT t.test_id AS sample_id, g.chrom, g.start, g.\"end\",",
+        "coalesce(c.reads, 0) AS reads, g.gc FROM gc g CROSS JOIN (SELECT DISTINCT test_id FROM query_table(parts)) t",
+        "LEFT JOIN (SELECT p.test_id, b.chrom, b.start, sum(b.reads) AS reads FROM query_table(parts) p",
+        "JOIN buckets b ON b.sample_id = p.genome AND b.bucket >= p.low AND b.bucket < p.high",
+        "AND (p.contigs = 'all' OR (p.contigs = 'autosomes' AND b.chrom NOT IN ('chrX', 'chrY')) OR b.chrom = p.contigs)",
+        "GROUP BY ALL) c ON c.test_id = t.test_id AND c.chrom = g.chrom AND c.start = g.start;"),
+  sprintf(paste("CREATE TABLE panel_parts AS SELECT genome AS test_id, genome, 'all' AS contigs, 0 AS low, 300 AS high",
+                "FROM (VALUES %s) v(genome);"), paste0("(", vapply(genomes, quote_literal, character(1L)), ")", collapse = ", ")),
+  "CREATE TABLE panel_bins AS SELECT * FROM composed_bins('panel_parts');",
+  "CREATE TABLE panel AS SELECT * FROM duckhts_depth_bins('panel_bins');",
+  "CREATE TABLE corrected (sample_id VARCHAR, chrom VARCHAR, start BIGINT, \"end\" BIGINT, log2_ratio DOUBLE, kept BOOLEAN);")
+group_sql <- function(genome) {
+  others <- setdiff(genomes, genome)
+  in_list <- function(x) paste(vapply(x, quote_literal, character(1L)), collapse = ", ")
+  tests <- design$test_id[design$genomes == genome]
+  c(sprintf(paste("CREATE OR REPLACE TABLE mask AS SELECT chrom, start FROM panel WHERE kept AND sample_id IN (%s)",
+                  "GROUP BY chrom, start HAVING median(ratio / CASE WHEN chrom IN ('chrX', 'chrY') THEN 0.5 ELSE 1.0 END)",
+                  "BETWEEN 0.75 AND 1.25;"), in_list(others)),
+    sprintf("CREATE OR REPLACE TABLE parts AS SELECT * FROM components WHERE test_id IN (%s);", in_list(tests)),
+    "CREATE OR REPLACE TABLE test_bins AS SELECT b.* FROM composed_bins('parts') b SEMI JOIN mask USING (chrom, start);",
+    paste("INSERT INTO corrected SELECT sample_id, chrom, start, \"end\", log2_ratio, kept",
+          "FROM duckhts_depth_bins('test_bins') WHERE chrom <> 'chrY';"))
+}
+real_results <- run_untimed(c(
+  real_setup,
+  unlist(lapply(genomes, group_sql)),
+  sprintf("COPY (SELECT * FROM corrected WHERE kept ORDER BY sample_id, chrom, start) TO %s (FORMAT parquet);",
+          quote_literal(corrected_path)),
+  "CREATE TABLE solutions AS SELECT * FROM duckhts_depth_state_solutions('corrected');",
+  "CREATE TABLE segments AS SELECT * FROM duckhts_depth_state_segments('corrected');"),
+  list(bins = "SELECT sample_id, chrom, start, \"end\", log2_ratio FROM corrected WHERE kept ORDER BY sample_id, chrom, start",
+       kept = "SELECT sample_id, count(*) FILTER (WHERE kept) AS kept, count(*) AS bins FROM corrected GROUP BY sample_id ORDER BY sample_id",
+       solutions = "SELECT * FROM solutions ORDER BY sample_id, solution",
+       segments = "SELECT * FROM segments ORDER BY sample_id, solution, chrom, start"))
+utils::write.csv(real_results$solutions, file.path(results_dir, "solutions_duckhts.csv"), row.names = FALSE)
+utils::write.csv(real_results$segments, file.path(results_dir, "segments_duckhts.csv"), row.names = FALSE)
+knitr::kable(real_results$kept, caption = "Kept bins per composite after the panel mask")
+```
+
+```{r upstream, echo=FALSE, message=FALSE}
+source("benchmarks/depth_state/upstream_ichorcna.R")
+upstream_env <- load_upstream_ichorcna(".")
+bins <- real_results$bins
+upstream <- lapply(split(bins, bins$sample_id), function(sample_bins) {
+  sample_bins <- sample_bins[order(sample_bins$chrom, sample_bins$start), ]
+  fit <- upstream_state_model(upstream_env, sample_bins[, c("chrom", "start", "end", "log2_ratio")])
+  fit$solutions$sample_id <- sample_bins$sample_id[[1L]]
+  fit$states$sample_id <- sample_bins$sample_id[[1L]]
+  fit$segments$sample_id <- sample_bins$sample_id[[1L]]
+  fit
+})
+upstream_solutions <- do.call(rbind, lapply(upstream, `[[`, "solutions"))
+upstream_states <- do.call(rbind, lapply(upstream, `[[`, "states"))
+upstream_segments <- do.call(rbind, lapply(upstream, `[[`, "segments"))
+utils::write.csv(upstream_solutions, file.path(results_dir, "solutions_upstream.csv"), row.names = FALSE)
+utils::write.csv(upstream_segments, file.path(results_dir, "segments_upstream.csv"), row.names = FALSE)
+```
+
+## Agreement with upstream
+
+```{r agreement, echo=FALSE}
+ours <- real_results$solutions
+joined <- merge(ours, upstream_solutions, by = c("sample_id", "start_normal", "start_ploidy"),
+                suffixes = c("", "_upstream"))
+joined$dn <- abs(joined$normal_fraction - joined$normal_fraction_upstream)
+joined$dphi <- abs(joined$ploidy - joined$ploidy_upstream)
+joined$dlik <- abs(joined$log_likelihood - joined$log_likelihood_upstream)
+joined$within <- joined$dn <= 0.02 & joined$dphi <= 0.05 & joined$dlik <= 5
+best_ours <- ours[ours$solution == 1, ]
+best_upstream <- upstream_solutions[upstream_solutions$solution == 1, ]
+# The port's best solution's Viterbi state of each bin, from its segments.
+best_states <- do.call(rbind, lapply(split(bins, bins$sample_id), function(sample_bins) {
+  segs <- real_results$segments
+  segs <- segs[segs$sample_id == sample_bins$sample_id[[1L]] & segs$solution == 1, ]
+  hit <- vapply(seq_len(nrow(sample_bins)), function(i) {
+    j <- which(segs$chrom == sample_bins$chrom[[i]] & segs$start <= sample_bins$start[[i]] &
+                 segs$end >= sample_bins$end[[i]])
+    if (length(j) == 1L) segs$state[[j]] else NA_integer_
+  }, integer(1L))
+  data.frame(sample_id = sample_bins$sample_id, chrom = sample_bins$chrom, start = sample_bins$start,
+             state = hit, stringsAsFactors = FALSE)
+}))
+agreement <- do.call(rbind, lapply(design$test_id, function(id) {
+  o <- best_ours[best_ours$sample_id == id, ]
+  u <- best_upstream[best_upstream$sample_id == id, ]
+  mine <- best_states[best_states$sample_id == id, ]
+  theirs <- upstream_states[upstream_states$sample_id == id & upstream_states$start_normal == u$start_normal &
+                              upstream_states$start_ploidy == u$start_ploidy, ]
+  both <- merge(mine, theirs, by = c("sample_id", "chrom", "start"), suffixes = c("", "_upstream"))
+  same_start <- o$start_normal == u$start_normal && o$start_ploidy == u$start_ploidy
+  dn <- abs(o$normal_fraction - u$normal_fraction)
+  dphi <- abs(o$ploidy - u$ploidy)
+  data.frame(
+    test_id = id, same_start = same_start, normal_duckhts = o$normal_fraction, normal_upstream = u$normal_fraction,
+    ploidy_duckhts = o$ploidy, ploidy_upstream = u$ploidy, guard_duckhts = o$status == "guard_zero",
+    guard_upstream = u$guard_zero, state_agreement = mean(both$state == both$state_upstream),
+    A1 = same_start || (dn <= 0.02 && dphi <= 0.05),
+    A2 = dn <= 0.02 && dphi <= 0.05 && (o$status == "guard_zero") == u$guard_zero,
+    A3 = mean(both$state == both$state_upstream) >= 0.98, stringsAsFactors = FALSE)
+}))
+utils::write.csv(agreement, file.path(results_dir, "agreement_best.csv"), row.names = FALSE)
+utils::write.csv(joined[, c("sample_id", "start_normal", "start_ploidy", "normal_fraction", "normal_fraction_upstream",
+                            "ploidy", "ploidy_upstream", "log_likelihood", "log_likelihood_upstream", "dn", "dphi", "dlik", "within")],
+                 file.path(results_dir, "agreement_starts.csv"), row.names = FALSE)
+knitr::kable(agreement, digits = 4, caption = "Best solutions: the port against upstream")
+a4_share <- mean(joined$within)
+outside <- joined[!joined$within, c("sample_id", "start_normal", "start_ploidy", "normal_fraction", "normal_fraction_upstream",
+                                    "ploidy", "ploidy_upstream", "dlik")]
+knitr::kable(data.frame(
+  criterion = c("A1", "A2", "A3", "A4"),
+  composites = c(sum(agreement$A1), sum(agreement$A2), sum(agreement$A3), NA),
+  of = c(nrow(agreement), nrow(agreement), nrow(agreement), NA),
+  starts_within = c(NA, NA, NA, sprintf("%.1f%% of %d", 100 * a4_share, nrow(joined))),
+  pass = c(all(agreement$A1), all(agreement$A2), all(agreement$A3), a4_share >= 0.9)))
+if (nrow(outside) > 0) knitr::kable(outside, digits = 4, caption = "Starts outside the A4 tolerances")
+```
+
+## Planted gains and samples without change
+
+```{r gains, echo=FALSE}
+segs <- real_results$segments
+gain_rows <- do.call(rbind, lapply(design$test_id[design$kind == "gain"], function(id) {
+  truth <- design$truth[design$test_id == id]
+  depth <- design$depth[design$test_id == id]
+  o <- best_ours[best_ours$sample_id == id, ]
+  u <- best_upstream[best_upstream$sample_id == id, ]
+  mine <- best_states[best_states$sample_id == id, ]
+  chr18 <- mean(mine$state[mine$chrom == "chr18"] == 3)
+  autosomes <- mine[!mine$chrom %in% c("chrX", "chrY") & mine$chrom != "chr18", ]
+  worst_other <- max(tapply(autosomes$state != 2, autosomes$chrom, mean))
+  tolerance <- if (depth == "0.1x") 0.08 else 0.05
+  data.frame(test_id = id, depth = depth, truth = truth, tumour_fraction = 1 - o$normal_fraction,
+             tumour_fraction_upstream = 1 - u$normal_fraction, ploidy = o$ploidy, status = o$status,
+             chr18_three_copies = chr18, worst_other_altered = worst_other,
+             G1 = abs(o$ploidy - 2) <= 0.15 && chr18 >= 0.9 && worst_other <= 0.1 &&
+               abs((1 - o$normal_fraction) - truth) <= tolerance, stringsAsFactors = FALSE)
+}))
+utils::write.csv(gain_rows, file.path(results_dir, "gains.csv"), row.names = FALSE)
+knitr::kable(gain_rows, digits = 4, caption = "Planted chromosome-18 gains: the best solution of the port")
+pure_rows <- do.call(rbind, lapply(design$test_id[design$kind == "pure"], function(id) {
+  o <- best_ours[best_ours$sample_id == id, ]
+  u <- best_upstream[best_upstream$sample_id == id, ]
+  data.frame(test_id = id, tumour_fraction = 1 - o$normal_fraction, status = o$status,
+             tumour_fraction_upstream = 1 - u$normal_fraction, guard_upstream = u$guard_zero,
+             N1 = (1 - o$normal_fraction) <= 0.02 && (1 - u$normal_fraction) <= 0.02, stringsAsFactors = FALSE)
+}))
+utils::write.csv(pure_rows, file.path(results_dir, "pure.csv"), row.names = FALSE)
+knitr::kable(pure_rows, digits = 4, caption = "Samples without change")
+```
+
+## Scaling
+
+```{r scaling, echo=FALSE}
+synthetic_setup <- function(bins_per_contig, samples) {
+  c("CREATE MACRO ds_u(salt, sample_id, chrom, bin) AS (hash(salt, sample_id, chrom, bin) % 1000003 + 0.5) / 1000003.0;",
+    paste("CREATE MACRO ds_normal(sample_id, chrom, bin) AS",
+          "sqrt(-2 * ln(ds_u('a', sample_id, chrom, bin))) * cos(2 * pi() * ds_u('b', sample_id, chrom, bin));"),
+    sprintf(paste("CREATE TABLE bins AS SELECT 'S' || s AS sample_id, CAST(c AS VARCHAR) AS chrom,",
+                  "b * 1000000 AS start, (b + 1) * 1000000 AS \"end\", true AS kept,",
+                  "log2(CASE WHEN c = 8 THEN 1.15 WHEN c = 13 THEN 0.85 ELSE 1 END) + 0.06 * ds_normal('S' || s, c, b) AS log2_ratio",
+                  "FROM range(1, 23) t(c), range(0, %d) r(b), range(1, %d) q(s);"), bins_per_contig, samples + 1L))
+}
+scaling_runs <- data.frame(label = c("1x bins", "2x bins", "4x bins", "2 samples", "4 samples"),
+                           bins_per_contig = c(136L, 272L, 544L, 136L, 136L), samples = c(1L, 1L, 1L, 2L, 4L))
+scaling <- do.call(rbind, lapply(seq_len(nrow(scaling_runs)), function(k) {
+  run <- run_fresh("SELECT count(*) AS solutions, sum(bins) AS bins FROM duckhts_depth_state_solutions('bins')",
+                   threads = 4, setup = synthetic_setup(scaling_runs$bins_per_contig[[k]], scaling_runs$samples[[k]]))
+  data.frame(scaling_runs[k, ], bins = as.numeric(run$bins), solutions = as.integer(run$solutions),
+             seconds = run$seconds, max_rss_mib = run$max_rss_kib / 1024)
+}))
+utils::write.csv(scaling, file.path(results_dir, "scaling.csv"), row.names = FALSE)
+base <- scaling$seconds[[1L]]
+exponent <- log(scaling$seconds[[3L]] / base) / log(4)
+s1 <- scaling$seconds[[2L]] <= 2.6 * base && scaling$seconds[[3L]] <= 6.8 * base &&
+  scaling$seconds[[5L]] <= 2 * base && all(scaling$max_rss_mib < 1024)
+knitr::kable(scaling, digits = 3, caption = "Fresh processes, four threads, spill forbidden")
+```
+
+The latency exponent over 1×, 2× and 4× bins is `r sprintf("%.2f", exponent)`; S1 `r if (s1) "passes" else "fails"`.
+
+## Findings
+
+- A1 holds for `r sum(agreement$A1)` of `r nrow(agreement)` composites, A2 for `r sum(agreement$A2)`,
+  A3 for `r sum(agreement$A3)`; A4: `r sprintf("%.1f%%", 100 * a4_share)` of starts within tolerance
+  (`r if (a4_share >= 0.9) "passes" else "fails"`).
+- G1 holds for `r sum(gain_rows$G1)` of `r nrow(gain_rows)` gain composites; N1 for
+  `r sum(pure_rows$N1)` of `r nrow(pure_rows)` pure composites.
+- S1 `r if (s1) "passes" else "fails"`: exponent `r sprintf("%.2f", exponent)`, peak RSS
+  `r sprintf("%.0f", max(scaling$max_rss_mib))` MiB.
+
+Every table above is written under `benchmarks/results/depth-state/`.

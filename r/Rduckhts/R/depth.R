@@ -211,3 +211,146 @@ rduckhts_depth_sex_fraction <- function(con, bins_table, reference_table = NULL,
   query <- paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
   .somalier_publish_query(con, query, table_name, overwrite)
 }
+
+.depth_number_list <- function(values, name, check, requirement) {
+  if (!is.numeric(values) || length(values) < 1L || length(values) > 100L ||
+      !all(is.finite(values)) || !all(check(values))) {
+    stop(name, " must be 1 to 100 numbers, each ", requirement, call. = FALSE)
+  }
+  paste0("[", paste(sprintf("%.17g", values), collapse = ", "), "]")
+}
+
+.depth_state_query <- function(con, macro, bins_table, normal_fractions, ploidies, max_cn, txn_e,
+                               txn_strength, max_iter, min_segment_bins, alt_fraction_threshold,
+                               close_margin, max_bins) {
+  .somalier_validate_name(bins_table, "bins_table")
+  arguments <- c(
+    sql_quote_string(con, bins_table),
+    paste0("normal_fractions := ", .depth_number_list(
+      normal_fractions, "normal_fractions", function(x) x > 0 & x < 1, "in (0, 1)")),
+    paste0("ploidies := ", .depth_number_list(
+      ploidies, "ploidies", function(x) x >= 1 & x <= 10, "in [1, 10]")),
+    paste0("max_cn := ", .depth_number(
+      max_cn, "max_cn", function(x) x == floor(x) && x >= 2 && x <= 20, "a whole number in [2, 20]")),
+    paste0("txn_e := ", .depth_number(
+      txn_e, "txn_e", function(x) x > 0 && x < 1, "a number in (0, 1)")),
+    paste0("txn_strength := ", .depth_number(
+      txn_strength, "txn_strength", function(x) x > 0, "a positive number")),
+    paste0("max_iter := ", .depth_number(
+      max_iter, "max_iter", function(x) x == floor(x) && x >= 2 && x <= 1000,
+      "a whole number in [2, 1000]")),
+    paste0("min_segment_bins := ", .depth_number(
+      min_segment_bins, "min_segment_bins", function(x) x == floor(x) && x >= 0 && x <= 1e9,
+      "a whole number in [0, 1e9]")),
+    paste0("alt_fraction_threshold := ", .depth_number(
+      alt_fraction_threshold, "alt_fraction_threshold", function(x) x >= 0 && x <= 1,
+      "a number in [0, 1]")),
+    paste0("close_margin := ", .depth_number(
+      close_margin, "close_margin", function(x) x >= 0, "a number of at least 0")),
+    paste0("max_bins := ", .depth_number(
+      max_bins, "max_bins", function(x) x == floor(x) && x >= 1 && x <= 1e9,
+      "a whole number in [1, 1e9]"))
+  )
+  paste0("SELECT * FROM ", macro, "(", paste(arguments, collapse = ", "), ")")
+}
+
+#' Decode Tumour Fraction, Ploidy and Copy-Number Segments from Corrected Bins
+#'
+#' Fits the copy-number state model of ichorCNA (Adalsteinsson, Ha, Freeman
+#' et al. 2017; GavinHaLab/ichorCNA tag v0.6.1) to each sample's kept
+#' corrected bins: a hidden Markov model over copy numbers 1 to `max_cn` with
+#' a Student's t emission on the log ratio, whose state means follow from the
+#' normal fraction `n` and tumour ploidy `phi`, fitted by expectation
+#' maximisation with the upstream priors from every start of
+#' `ploidies` x `normal_fractions`. Each start gives one solution, ranked by
+#' its objective (data log-likelihood plus log prior).
+#' [rduckhts_depth_state_solutions()] returns the solutions;
+#' [rduckhts_depth_state_segments()] returns their Viterbi segments.
+#'
+#' The model learns from autosomal bins (contigs whose `duckhts_contig_key()`
+#' is not X, Y or MT) and decodes every kept bin. A kept bin without a ratio
+#' takes every state with likelihood 1, as upstream carries it. Upstream's
+#' guard sets the fraction to zero (`status` `guard_zero`) when the longest
+#' altered training segment has at most `min_segment_bins` bins and at most
+#' `alt_fraction_threshold` of the training bins are altered; a solution ranked
+#' below the best with an objective within `close_margin` of it is
+#' `close_to_best`, the rest are `ok`. A sample without copy-number change
+#' therefore reports no fraction, by the guard or by a fit whose normal
+#' fraction is near 1; in that fit the state means lie within the noise of
+#' each other and whole chromosomes can take any state, so its copy numbers
+#' are not evidence. Fraction and ploidy trade against each other,
+#' so all solutions are returned; a ploidy-3 explanation of a ploidy-2 genome
+#' usually ranks second. The port and its kept upstream quirks are documented
+#' in the DuckHTS catalog entry and `design/depth_fraction_lane.md`.
+#'
+#' @param con A DuckDB connection with DuckHTS loaded.
+#' @param bins_table Name of a table or view of corrected bins with
+#'   `sample_id`, `chrom`, `start`, `end`, `log2_ratio` and `kept`, such as
+#'   the output of [rduckhts_depth_bins()]. Restrict contigs and remove problem
+#'   bins in SQL first.
+#' @param normal_fractions Starts of the normal fraction, each in (0, 1).
+#' @param ploidies Starts of the tumour ploidy, each in \[1, 10\]; the EM
+#'   starts from their floor. A normal start of 0.95 runs only at ploidy 2,
+#'   as upstream.
+#' @param max_cn Highest copy-number state, a whole number in \[2, 20\].
+#' @param txn_e Self-transition probability in (0, 1).
+#' @param txn_strength Transition pseudo-counts, positive.
+#' @param max_iter EM iteration cap, a whole number in \[2, 1000\].
+#' @param min_segment_bins,alt_fraction_threshold The guard's two thresholds.
+#' @param close_margin Objective difference below which a lower-ranked
+#'   solution is `close_to_best`.
+#' @param max_bins Kept bins one sample may hold; the model holds about
+#'   `max_cn * 28 + 40` bytes a bin.
+#' @inheritParams rduckhts_depth_bins
+#' @return A data frame (or invisible `TRUE` when `table_name` is given).
+#'   Solutions have one row per sample and start: `sample_id`, `solution`
+#'   (rank, 1 is best), `start_normal`, `start_ploidy`, `normal_fraction`,
+#'   `tumour_fraction`, `ploidy`, `log_likelihood`, `altered_fraction`,
+#'   `iterations`, `status`, `segments`, `bins`, `upstream` and `method`.
+#'   Segments have one row per sample, solution and segment: the solution
+#'   columns through `status`, then `chrom`, `start`, `end`, `bins`, `state`
+#'   (the copy number of the Viterbi state), `copy_number` (after upstream's
+#'   integer correction of high-level amplifications), `median_log2_ratio`,
+#'   `upstream` and `method`.
+#' @examples
+#' con <- rduckhts_connect()
+#' DBI::dbExecute(con, paste(
+#'   "CREATE TEMP TABLE bins AS SELECT 'S1' AS sample_id, CAST(c AS VARCHAR) AS chrom,",
+#'   "b * 1000000 AS start, (b + 1) * 1000000 AS \"end\", true AS kept,",
+#'   "log2(CASE WHEN c = 8 THEN 1.15 ELSE 1 END) +",
+#'   "0.05 * (((b * 37 + c * 11) % 100) / 50.0 - 1) AS log2_ratio",
+#'   "FROM range(1, 23) t(c), range(0, 60) r(b)"
+#' ))
+#' best <- rduckhts_depth_state_solutions(con, "bins")
+#' best[best$solution == 1, c("tumour_fraction", "ploidy", "status")]
+#' segments <- rduckhts_depth_state_segments(con, "bins")
+#' segments[segments$solution == 1 & segments$chrom == "8", c("chrom", "copy_number", "bins")]
+#' DBI::dbDisconnect(con, shutdown = TRUE)
+#' @export
+rduckhts_depth_state_solutions <- function(con, bins_table,
+                                           normal_fractions = c(0.5, 0.6, 0.7, 0.8, 0.9),
+                                           ploidies = c(2, 3), max_cn = 7, txn_e = 0.9999999,
+                                           txn_strength = 1e7, max_iter = 20, min_segment_bins = 50,
+                                           alt_fraction_threshold = 0.05, close_margin = 10,
+                                           max_bins = 1e6, table_name = NULL, overwrite = FALSE) {
+  .somalier_validate_output(con, table_name, overwrite)
+  query <- .depth_state_query(con, "duckhts_depth_state_solutions", bins_table, normal_fractions,
+                              ploidies, max_cn, txn_e, txn_strength, max_iter, min_segment_bins,
+                              alt_fraction_threshold, close_margin, max_bins)
+  .somalier_publish_query(con, query, table_name, overwrite)
+}
+
+#' @rdname rduckhts_depth_state_solutions
+#' @export
+rduckhts_depth_state_segments <- function(con, bins_table,
+                                          normal_fractions = c(0.5, 0.6, 0.7, 0.8, 0.9),
+                                          ploidies = c(2, 3), max_cn = 7, txn_e = 0.9999999,
+                                          txn_strength = 1e7, max_iter = 20, min_segment_bins = 50,
+                                          alt_fraction_threshold = 0.05, close_margin = 10,
+                                          max_bins = 1e6, table_name = NULL, overwrite = FALSE) {
+  .somalier_validate_output(con, table_name, overwrite)
+  query <- .depth_state_query(con, "duckhts_depth_state_segments", bins_table, normal_fractions,
+                              ploidies, max_cn, txn_e, txn_strength, max_iter, min_segment_bins,
+                              alt_fraction_threshold, close_margin, max_bins)
+  .somalier_publish_query(con, query, table_name, overwrite)
+}

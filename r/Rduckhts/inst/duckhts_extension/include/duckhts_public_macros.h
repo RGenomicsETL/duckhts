@@ -15,6 +15,8 @@ static const char *const duckhts_public_macros[] = {
     "duckhts_depth_region_fraction_ref",
     "duckhts_depth_sex_fraction",
     "duckhts_depth_sex_fraction_ref",
+    "duckhts_depth_state_segments",
+    "duckhts_depth_state_solutions",
     "duckhts_duckdb_supports_geometry",
     "duckhts_duckdb_supports_variant",
     "duckhts_duckdb_type_supported",

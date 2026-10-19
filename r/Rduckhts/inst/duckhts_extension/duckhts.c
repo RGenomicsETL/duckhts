@@ -50,6 +50,7 @@ extern bool register_duckhts_roh_sql(duckhts_registration_t *registration);
 extern bool register_duckhts_count_error_functions(duckdb_connection connection);
 extern bool register_duckhts_count_error_sql(duckhts_registration_t *registration);
 extern bool register_duckhts_depth_sql(duckhts_registration_t *registration);
+extern bool register_duckhts_depth_state_functions(duckdb_connection connection);
 extern bool register_duckhts_count_mixture_functions(duckdb_connection connection);
 extern bool register_duckhts_count_mixture_sql(duckhts_registration_t *registration);
 extern void register_duckhts_somalier_contamination_functions(
@@ -249,6 +250,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
     if (!register_duckhts_count_error_functions(connection)) {
         return duckhts_registration_error(&registration,
             "DuckHTS could not register duckhts_count_error_fit");
+    }
+    if (!register_duckhts_depth_state_functions(connection)) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register __duckhts_depth_state_decode");
     }
     if (!register_duckhts_somalier_bam_extract_functions(&registration)) {
         return false;

@@ -50,7 +50,7 @@ writable <- run_phase(file, c(
   "dbDisconnect(con, shutdown = TRUE)"
 ))
 # Public and private macros share one inventory.
-expect_equal(writable$temp, 57L)
+expect_equal(writable$temp, 59L)
 expect_equal(writable$persistent, 0L)
 expect_equal(writable$quoted, '"a"')
 expect_false(writable$second_before)
@@ -59,7 +59,7 @@ expect_equal(writable$second_installed, 1L)
 expect_equal(writable$second_quoted, '"a"')
 expect_equal(writable$cte, '"b"')
 expect_equal(writable$reinstalled, 1L)
-expect_equal(writable$temp_after, 57L)
+expect_equal(writable$temp_after, 59L)
 
 # A read-only file: LOAD succeeds, installation works inside a transaction that is
 # rolled back, and the file is left byte-identical.
@@ -75,9 +75,9 @@ readonly <- run_phase(file, c(
   "result$temp_after <- length(macro_catalog(con, 'temp'))",
   "dbDisconnect(con, shutdown = TRUE)"
 ))
-expect_equal(readonly$temp, 57L)
+expect_equal(readonly$temp, 59L)
 expect_equal(readonly$persistent, 0L)
-expect_equal(readonly$temp_after, 57L)
+expect_equal(readonly$temp_after, 59L)
 expect_identical(unname(tools::md5sum(file)), readonly_before)
 
 # Installation inside a caller transaction is rolled back with that transaction.
