@@ -125,11 +125,13 @@ DBI::dbExecute(con, paste(
   "b * 1000000 AS start, (b + 1) * 1000000 AS \"end\", true AS kept,",
   "log2(CASE WHEN c = 8 THEN 1.15 ELSE 1 END) +",
   "0.05 * (((b * 37 + c * 11) \% 100) / 50.0 - 1) AS log2_ratio",
-  "FROM range(1, 23) t(c), range(0, 60) r(b)"
+  "FROM range(1, 23) t(c), range(0, CASE WHEN c = 8 THEN 60 ELSE 20 END) r(b)"
 ))
-best <- rduckhts_depth_state_solutions(con, "bins")
-best[best$solution == 1, c("tumour_fraction", "ploidy", "status")]
-segments <- rduckhts_depth_state_segments(con, "bins")
-segments[segments$solution == 1 & segments$chrom == "8", c("chrom", "copy_number", "bins")]
+# Chromosome 8 has 60 bins so the gain passes the 50-bin guard. One start
+# keeps the example short; the default grid has ten.
+best <- rduckhts_depth_state_solutions(con, "bins", normal_fractions = 0.7, ploidies = 2)
+best[, c("tumour_fraction", "ploidy", "status")]
+segments <- rduckhts_depth_state_segments(con, "bins", normal_fractions = 0.7, ploidies = 2)
+segments[segments$chrom == "8", c("chrom", "copy_number", "bins")]
 DBI::dbDisconnect(con, shutdown = TRUE)
 }
