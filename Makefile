@@ -119,13 +119,15 @@ release: build_extension_library_release build_extension_with_metadata_release
 # `emcc --print-file-name` returns a bare name until the pic variant is built;
 # Emscripten 3.1 shipped libcompiler_rt.a prebuilt. Build the relocatable variant
 # on demand, then take the first archive that resolves to a path: the pic variant
-# under the side-module flag first, the plain archive as the fallback.
+# under the side-module flag first, the plain archive as the fallback. The recipes
+# expand it inside `$( ... )` with a space after the opening parenthesis: the
+# value starts with a subshell, and `$((` would be an arithmetic expansion.
 WASM_BUILTINS_ARCHIVE = \
 	(embuilder build --pic libclang_rt.builtins || embuilder build --pic compiler_rt) > /dev/null 2>&1; \
 	for name in libclang_rt.builtins.a libcompiler_rt.a; do \
 		for flags in -sSIDE_MODULE=2 ""; do \
 			path=$$(emcc $$flags --print-file-name=$$name 2> /dev/null); \
-			case $$path in /*) printf '%s' "$$path"; exit 0;; esac; \
+			if [ -n "$$path" ] && [ "$${path\#/}" != "$$path" ]; then printf '%s' "$$path"; exit 0; fi; \
 		done; \
 	done; \
 	echo "duckhts: no compiler builtins archive resolves for the wasm side module" >&2; exit 1
@@ -134,14 +136,14 @@ ifneq ($(DUCKDB_WASM_PLATFORM),)
 link_wasm_debug:
 	@set -e; WASM_LINK_RSP=""; \
 	if [ -f "$(EXTENSION_BUILD_PATH)/debug/wasm_link_inputs.rsp" ]; then WASM_LINK_RSP="@$(EXTENSION_BUILD_PATH)/debug/wasm_link_inputs.rsp"; fi; \
-	builtins=$$($(WASM_BUILTINS_ARCHIVE)); \
+	builtins=$$( $(WASM_BUILTINS_ARCHIVE) ); \
 	echo "wasm builtins archive: $$builtins"; \
 	emcc $(EXTENSION_BUILD_PATH)/debug/$(EXTENSION_LIB_FILENAME) $$WASM_LINK_RSP "$$builtins" -o $(EXTENSION_BUILD_PATH)/debug/$(EXTENSION_FILENAME_NO_METADATA) -O3 -g -fwasm-exceptions -sWASM_BIGINT -sSIDE_MODULE=2 -sEXPORTED_FUNCTIONS="_$(EXTENSION_NAME)_init_c_api"
 
 link_wasm_release:
 	@set -e; WASM_LINK_RSP=""; \
 	if [ -f "$(EXTENSION_BUILD_PATH)/release/wasm_link_inputs.rsp" ]; then WASM_LINK_RSP="@$(EXTENSION_BUILD_PATH)/release/wasm_link_inputs.rsp"; fi; \
-	builtins=$$($(WASM_BUILTINS_ARCHIVE)); \
+	builtins=$$( $(WASM_BUILTINS_ARCHIVE) ); \
 	echo "wasm builtins archive: $$builtins"; \
 	emcc $(EXTENSION_BUILD_PATH)/release/$(EXTENSION_LIB_FILENAME) $$WASM_LINK_RSP "$$builtins" -o $(EXTENSION_BUILD_PATH)/release/$(EXTENSION_FILENAME_NO_METADATA) -O3 -fwasm-exceptions -sWASM_BIGINT -sSIDE_MODULE=2 -sEXPORTED_FUNCTIONS="_$(EXTENSION_NAME)_init_c_api"
 endif
