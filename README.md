@@ -58,70 +58,9 @@ DuckDB 1.2 SQL. For duckdb-wasm, check the embedded DuckDB engine
 version rather than comparing npm package version numbers with DuckDB
 release numbers.
 
-### Known DuckDB 1.5.x issues
-
-Two DuckDB 1.5.x bugs affect a hash aggregate whose states have a
-destructor. In DuckHTS, these states are:
-
-- the native aggregates behind `duckhts_count_error_fit` and the ROH
-  macros (`duckhts_roh`, `duckhts_roh_af_table`,
-  `duckhts_roh_af_table_bcftools`, `duckhts_roh_ancestry`,
-  `duckhts_roh_counts`, `duckhts_roh_counts_fitted`);
-- the ordered `list(... ORDER BY ...)` site profiles of
-  `duckhts_somalier_matched_contamination`, and the ordered genetic-map
-  lists of the ROH macros.
-
-These states grow with the input. The two bugs are:
-
-- **An out-of-memory error can end the process.** DuckDB must read
-  spilled states back to destroy them. When the query is already out of
-  memory, that read fails inside a destructor, and the process aborts
-  instead of returning the error
-  (<https://github.com/duckdb/duckdb/issues/26441>). The fix
-  (<https://github.com/duckdb/duckdb/pull/26847>) is in the DuckDB 2.0
-  branch only.
-- **A failed query can keep its memory.** On DuckDB 1.5.1 to 1.5.6, when
-  a query fails while a hash aggregate with few groups fills, with 5 or
-  more threads, DuckDB never destroys the states, not even at process
-  exit (<https://github.com/duckdb/duckdb/issues/26871>). Their native
-  buffers stay allocated, and stay charged against `max_cell_bytes` or
-  `max_site_bytes`, until the process ends. DuckDB 2.0 development
-  builds destroy them.
-
-On DuckDB 1.5.x:
-
-- raise `memory_limit`, or make the batch smaller, for example fewer
-  samples per query;
-- restart the process after a failed query that held large native
-  buffers;
-- or use DuckDB 2.0 once it is released. DuckHTS 2.0.0 targets it.
-
-### Known Rtools (MinGW) issue: `thread_local` destructors on worker threads
-
-The CRAN `duckdb` package for Windows is built with Rtools. The
-winpthreads inside its `duckdb.dll` runs thread-exit key destructors in
-creation order, so libgcc’s emulated TLS frees every C++ `thread_local`
-before libstdc++ runs the object’s destructor. mingw-w64 fixed the order
-on 2024-12-05 (commit `8e06daa3`); Rtools45 predates the fix. DuckDB
-creates such a `thread_local` on any thread that closes a DuckDB
-instance, even when its block allocator is inactive. R closes instances
-on the main thread, which never exits this way, so ordinary use is
-unaffected.
-
-An extension that opens and closes its own DuckDB instance inside a
-table function’s init or scan callback does so on a DuckDB worker
-thread. When that worker exits at `dbDisconnect(shutdown = TRUE)`, the
-destructor runs on freed memory. It reads garbage silently, or ends the
-R process with status `0xC0000005` when the heap has already released
-the page; the second outcome is common on Windows Server 2022 and rare
-on Server 2025. Rduckhts 2.0.0.0.1.7 and earlier did this in
-`duckhts_somalier_bam_counts`; from 2.0.0.0.1.8 the panel is read at
-bind time, on the calling thread. Extension authors on Windows R hosts:
-open and close DuckDB instances only in bind.
-
 ## Using DuckHTS with a database file
 
-`LOAD` creates the 57 SQL macros only when the default database is
+`LOAD` creates the 59 SQL macros only when the default database is
 writable and in memory. With a file-backed or read-only default database
 it registers native functions and leaves the database file untouched;
 the macros are then installed as connection-local `TEMP` macros.
@@ -137,7 +76,7 @@ dbGetQuery(con, "
   WHERE function_name IN (SELECT name FROM duckhts_macro_definitions())
   GROUP BY ALL")
 #>   database_name duckhts_macros
-#> 1          temp             57
+#> 1          temp             59
 dbGetQuery(con, "SELECT duckhts__quote_ident('my column') AS quoted")
 #>        quoted
 #> 1 "my column"
@@ -251,6 +190,8 @@ This section is generated from `functions.yaml`.
 | [`duckhts_depth_region_fraction_ref`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_depth_region_fraction_ref)   | table_macro | `rduckhts_depth_region_fraction`      | Estimate regional depth shifts and reference-calibrated uncertainty.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | [`duckhts_depth_sex_fraction`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_depth_sex_fraction)                 | table_macro | `rduckhts_depth_sex_fraction`         | Estimate the share of a second genome of the other sex from the depth of X and Y relative to the autosomes.                                                                                                                                                                                                                                                                                                                                                                                               |
 | [`duckhts_depth_sex_fraction_ref`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_depth_sex_fraction_ref)         | table_macro | `rduckhts_depth_sex_fraction`         | Estimate sex-copy mixture fractions using XX and XY reference bins.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| [`duckhts_depth_state_solutions`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_depth_state_solutions)           | table_macro | `rduckhts_depth_state_solutions`      | Fit the ichorCNA copy-number state model to corrected bins: tumour fraction, ploidy and rank of every start.                                                                                                                                                                                                                                                                                                                                                                                              |
+| [`duckhts_depth_state_segments`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_depth_state_segments)             | table_macro | `rduckhts_depth_state_segments`       | Viterbi copy-number segments of every solution of the ichorCNA state model over corrected bins.                                                                                                                                                                                                                                                                                                                                                                                                           |
 | [`duckhts_bam_mismatch_counts`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_bam_mismatch_counts)               | table       | `rduckhts_bam_mismatch_counts`        | Count aligned read bases against the reference by mate, cycle, base quality and substitution, optionally leaving out masked positions such as known variants.                                                                                                                                                                                                                                                                                                                                             |
 | [`duckhts_bam_mate_overlap_counts`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_bam_mate_overlap_counts)       | table       | `rduckhts_bam_mate_overlap_counts`    | Count where read 1 and read 2 of one fragment agree and disagree at the positions both align to, by base quality and base, as an estimate of sequencing error.                                                                                                                                                                                                                                                                                                                                            |
 | [`duckhts_bam_bed_coverage`](r/Rduckhts/inst/function_catalog/reference.md#duckhts_bam_bed_coverage)                     | table       | `rduckhts_bam_bed_coverage`           | Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.                   |
@@ -1636,6 +1577,72 @@ non-default S3 endpoints or path-style access.
 See the htslib S3 plugin documentation for full details, URL syntax, and
 short‑lived credentials support:
 <https://www.htslib.org/doc/htslib-s3-plugin.html>
+
+## Known host issues
+
+Hazards of the DuckDB and R hosts that DuckHTS runs in, with the
+versions they apply to.
+
+### Known DuckDB 1.5.x issues
+
+Two DuckDB 1.5.x bugs affect a hash aggregate whose states have a
+destructor. In DuckHTS, these states are:
+
+- the native aggregates behind `duckhts_count_error_fit` and the ROH
+  macros (`duckhts_roh`, `duckhts_roh_af_table`,
+  `duckhts_roh_af_table_bcftools`, `duckhts_roh_ancestry`,
+  `duckhts_roh_counts`, `duckhts_roh_counts_fitted`);
+- the ordered `list(... ORDER BY ...)` site profiles of
+  `duckhts_somalier_matched_contamination`, and the ordered genetic-map
+  lists of the ROH macros.
+
+These states grow with the input. The two bugs are:
+
+- **An out-of-memory error can end the process.** DuckDB must read
+  spilled states back to destroy them. When the query is already out of
+  memory, that read fails inside a destructor, and the process aborts
+  instead of returning the error
+  (<https://github.com/duckdb/duckdb/issues/26441>). The fix
+  (<https://github.com/duckdb/duckdb/pull/26847>) is in the DuckDB 2.0
+  branch only.
+- **A failed query can keep its memory.** On DuckDB 1.5.1 to 1.5.6, when
+  a query fails while a hash aggregate with few groups fills, with 5 or
+  more threads, DuckDB never destroys the states, not even at process
+  exit (<https://github.com/duckdb/duckdb/issues/26871>). Their native
+  buffers stay allocated, and stay charged against `max_cell_bytes` or
+  `max_site_bytes`, until the process ends. DuckDB 2.0 development
+  builds destroy them.
+
+On DuckDB 1.5.x:
+
+- raise `memory_limit`, or make the batch smaller, for example fewer
+  samples per query;
+- restart the process after a failed query that held large native
+  buffers;
+- or use DuckDB 2.0 once it is released. DuckHTS 2.0.0 targets it.
+
+### Known Rtools (MinGW) issue: `thread_local` destructors on worker threads
+
+The CRAN `duckdb` package for Windows is built with Rtools. The
+winpthreads inside its `duckdb.dll` runs thread-exit key destructors in
+creation order, so libgcc’s emulated TLS frees every C++ `thread_local`
+before libstdc++ runs the object’s destructor. mingw-w64 fixed the order
+on 2024-12-05 (commit `8e06daa3`); Rtools45 predates the fix. DuckDB
+creates such a `thread_local` on any thread that closes a DuckDB
+instance, even when its block allocator is inactive. R closes instances
+on the main thread, which never exits this way, so ordinary use is
+unaffected.
+
+An extension that opens and closes its own DuckDB instance inside a
+table function’s init or scan callback does so on a DuckDB worker
+thread. When that worker exits at `dbDisconnect(shutdown = TRUE)`, the
+destructor runs on freed memory. It reads garbage silently, or ends the
+R process with status `0xC0000005` when the heap has already released
+the page; the second outcome is common on Windows Server 2022 and rare
+on Server 2025. Rduckhts 2.0.0.0.1.7 and earlier did this in
+`duckhts_somalier_bam_counts`; from 2.0.0.0.1.8 the panel is read at
+bind time, on the calling thread. Extension authors on Windows R hosts:
+open and close DuckDB instances only in bind.
 
 ## Development
 
