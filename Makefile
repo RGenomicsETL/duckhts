@@ -123,14 +123,15 @@ release: build_extension_library_release build_extension_with_metadata_release
 # expand it inside `$( ... )` with a space after the opening parenthesis: the
 # value starts with a subshell, and `$((` would be an arithmetic expansion.
 WASM_BUILTINS_ARCHIVE = \
-	(embuilder build --pic libclang_rt.builtins || embuilder build --pic compiler_rt) > /dev/null 2>&1; \
+	embuilder build --pic libclang_rt.builtins > /dev/null 2>&1 || \
+		embuilder build --pic compiler_rt > /dev/null 2>&1 || true; \
 	for name in libclang_rt.builtins.a libcompiler_rt.a; do \
 		for flags in -sSIDE_MODULE=2 ""; do \
-			path=$$(emcc $$flags --print-file-name=$$name 2> /dev/null); \
-			if [ -n "$$path" ] && [ "$${path\#/}" != "$$path" ]; then printf '%s' "$$path"; exit 0; fi; \
+			path=$$(emcc $$flags --print-file-name=$$name 2> /dev/null || true); \
+			if [ -n "$$path" ] && [ "$${path\#/}" != "$$path" ] && [ -f "$$path" ]; then printf '%s' "$$path"; exit 0; fi; \
 		done; \
 	done; \
-	echo "duckhts: no compiler builtins archive resolves for the wasm side module" >&2; exit 1
+	echo "duckhts: no compiler builtins archive resolves for the wasm side module; emcc $$(emcc --version 2> /dev/null | head -n 1)" >&2; exit 1
 
 ifneq ($(DUCKDB_WASM_PLATFORM),)
 link_wasm_debug:
