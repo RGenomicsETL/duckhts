@@ -2,6 +2,8 @@
 
 ## Rduckhts 2.0.0.0.1.9
 
+CRAN release: 2026-10-20
+
 - New
   [`rduckhts_depth_state_solutions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_depth_state_solutions.md)
   and
