@@ -2,6 +2,15 @@
 
 # duckhts 2.0.0
 
+- DuckDB-Wasm side-module link under Emscripten 6: the community-extensions
+  toolchain for DuckDB 2.0 (extension-ci-tools v2.0-cyanoptera, Emscripten 6.0.9)
+  renames compiler-rt's archive to `libclang_rt.builtins.a` and no longer ships its
+  relocatable variant prebuilt, so `emcc --print-file-name=libcompiler_rt.a`
+  returned a bare name and the `wasm_eh` link failed
+  (https://github.com/duckdb/community-extensions/pull/3119). The Makefile now
+  builds the relocatable builtins on demand and resolves the archive under either
+  name, so the side module still embeds the long-double helpers instead of
+  importing them. Emscripten 3.1 builds are unchanged.
 - Copy-number state model over corrected bins
   (https://github.com/RGenomicsETL/duckhts/issues/343, phase 2): a port of the
   ichorCNA v0.6.1 hidden Markov model with HMMcopy's forward-backward and
