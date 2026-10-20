@@ -109,61 +109,6 @@ separate interface version; it does not imply support for DuckDB 1.2 SQL.
 For duckdb-wasm, check the embedded DuckDB engine version rather than comparing
 npm package version numbers with DuckDB release numbers.
 
-### Known DuckDB 1.5.x issues
-
-Two DuckDB 1.5.x bugs affect a hash aggregate whose states have a destructor.
-In DuckHTS, these states are:
-
-- the native aggregates behind `duckhts_count_error_fit` and the ROH macros
-  (`duckhts_roh`, `duckhts_roh_af_table`, `duckhts_roh_af_table_bcftools`,
-  `duckhts_roh_ancestry`, `duckhts_roh_counts`, `duckhts_roh_counts_fitted`);
-- the ordered `list(... ORDER BY ...)` site profiles of
-  `duckhts_somalier_matched_contamination`, and the ordered genetic-map lists
-  of the ROH macros.
-
-These states grow with the input. The two bugs are:
-
-- **An out-of-memory error can end the process.** DuckDB must read spilled
-  states back to destroy them. When the query is already out of memory, that
-  read fails inside a destructor, and the process aborts instead of returning
-  the error (https://github.com/duckdb/duckdb/issues/26441). The fix
-  (https://github.com/duckdb/duckdb/pull/26847) is in the DuckDB 2.0 branch
-  only.
-- **A failed query can keep its memory.** On DuckDB 1.5.1 to 1.5.6, when a
-  query fails while a hash aggregate with few groups fills, with 5 or more
-  threads, DuckDB never destroys the states, not even at process exit
-  (https://github.com/duckdb/duckdb/issues/26871). Their native buffers stay
-  allocated, and stay charged against `max_cell_bytes` or `max_site_bytes`,
-  until the process ends. DuckDB 2.0 development builds destroy them.
-
-On DuckDB 1.5.x:
-
-- raise `memory_limit`, or make the batch smaller, for example fewer samples
-  per query;
-- restart the process after a failed query that held large native buffers;
-- or use DuckDB 2.0 once it is released. DuckHTS 2.0.0 targets it.
-
-### Known Rtools (MinGW) issue: `thread_local` destructors on worker threads
-
-The CRAN `duckdb` package for Windows is built with Rtools. The winpthreads
-inside its `duckdb.dll` runs thread-exit key destructors in creation order,
-so libgcc's emulated TLS frees every C++ `thread_local` before libstdc++ runs
-the object's destructor. mingw-w64 fixed the order on 2024-12-05
-(commit `8e06daa3`); Rtools45 predates the fix. DuckDB creates such a
-`thread_local` on any thread that closes a DuckDB instance, even when its
-block allocator is inactive. R closes instances on the main thread, which
-never exits this way, so ordinary use is unaffected.
-
-An extension that opens and closes its own DuckDB instance inside a table
-function's init or scan callback does so on a DuckDB worker thread. When that
-worker exits at `dbDisconnect(shutdown = TRUE)`, the destructor runs on freed
-memory. It reads garbage silently, or ends the R process with status
-`0xC0000005` when the heap has already released the page; the second outcome
-is common on Windows Server 2022 and rare on Server 2025. Rduckhts
-2.0.0.0.1.7 and earlier did this in `duckhts_somalier_bam_counts`; from
-2.0.0.0.1.8 the panel is read at bind time, on the calling thread. Extension
-authors on Windows R hosts: open and close DuckDB instances only in bind.
-
 ## Using DuckHTS with a database file
 
 `LOAD` creates the `r local({ k <- rduckhts_connect(); n <- dbGetQuery(k, "SELECT count(*) AS n FROM duckhts_macro_definitions()")$n; dbDisconnect(k, shutdown = TRUE); n })` SQL macros only when the default database is writable
@@ -827,6 +772,65 @@ You can also configure htslib-specific settings like `HTS_S3_ADDRESS_STYLE`, `HT
 
 See the htslib S3 plugin documentation for full details, URL syntax, and short‑lived credentials support:
 https://www.htslib.org/doc/htslib-s3-plugin.html
+
+## Known host issues
+
+Hazards of the DuckDB and R hosts that DuckHTS runs in, with the versions they apply to.
+
+### Known DuckDB 1.5.x issues
+
+Two DuckDB 1.5.x bugs affect a hash aggregate whose states have a destructor.
+In DuckHTS, these states are:
+
+- the native aggregates behind `duckhts_count_error_fit` and the ROH macros
+  (`duckhts_roh`, `duckhts_roh_af_table`, `duckhts_roh_af_table_bcftools`,
+  `duckhts_roh_ancestry`, `duckhts_roh_counts`, `duckhts_roh_counts_fitted`);
+- the ordered `list(... ORDER BY ...)` site profiles of
+  `duckhts_somalier_matched_contamination`, and the ordered genetic-map lists
+  of the ROH macros.
+
+These states grow with the input. The two bugs are:
+
+- **An out-of-memory error can end the process.** DuckDB must read spilled
+  states back to destroy them. When the query is already out of memory, that
+  read fails inside a destructor, and the process aborts instead of returning
+  the error (https://github.com/duckdb/duckdb/issues/26441). The fix
+  (https://github.com/duckdb/duckdb/pull/26847) is in the DuckDB 2.0 branch
+  only.
+- **A failed query can keep its memory.** On DuckDB 1.5.1 to 1.5.6, when a
+  query fails while a hash aggregate with few groups fills, with 5 or more
+  threads, DuckDB never destroys the states, not even at process exit
+  (https://github.com/duckdb/duckdb/issues/26871). Their native buffers stay
+  allocated, and stay charged against `max_cell_bytes` or `max_site_bytes`,
+  until the process ends. DuckDB 2.0 development builds destroy them.
+
+On DuckDB 1.5.x:
+
+- raise `memory_limit`, or make the batch smaller, for example fewer samples
+  per query;
+- restart the process after a failed query that held large native buffers;
+- or use DuckDB 2.0 once it is released. DuckHTS 2.0.0 targets it.
+
+### Known Rtools (MinGW) issue: `thread_local` destructors on worker threads
+
+The CRAN `duckdb` package for Windows is built with Rtools. The winpthreads
+inside its `duckdb.dll` runs thread-exit key destructors in creation order,
+so libgcc's emulated TLS frees every C++ `thread_local` before libstdc++ runs
+the object's destructor. mingw-w64 fixed the order on 2024-12-05
+(commit `8e06daa3`); Rtools45 predates the fix. DuckDB creates such a
+`thread_local` on any thread that closes a DuckDB instance, even when its
+block allocator is inactive. R closes instances on the main thread, which
+never exits this way, so ordinary use is unaffected.
+
+An extension that opens and closes its own DuckDB instance inside a table
+function's init or scan callback does so on a DuckDB worker thread. When that
+worker exits at `dbDisconnect(shutdown = TRUE)`, the destructor runs on freed
+memory. It reads garbage silently, or ends the R process with status
+`0xC0000005` when the heap has already released the page; the second outcome
+is common on Windows Server 2022 and rare on Server 2025. Rduckhts
+2.0.0.0.1.7 and earlier did this in `duckhts_somalier_bam_counts`; from
+2.0.0.0.1.8 the panel is read at bind time, on the calling thread. Extension
+authors on Windows R hosts: open and close DuckDB instances only in bind.
 
 ## Development
 
