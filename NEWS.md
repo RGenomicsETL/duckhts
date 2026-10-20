@@ -1,5 +1,13 @@
 # DuckHTS Extension News
 
+# duckhts 2.0.0.9000 (development)
+
+- The distribution pipeline builds with the toolchain duckdb/community-extensions uses
+  for DuckDB 2.0 (extension-ci-tools v2.0-cyanoptera at DuckDB commit d54cbbe3 until the
+  v2.0.0 tag exists, Emscripten 6.0.9) and also runs on pushes to `develop`, so a wasm
+  link or toolchain failure is caught here rather than on a community pull request. The
+  `extension-ci-tools` submodule moves to that branch; its C API makefiles are unchanged.
+
 # duckhts 2.0.0
 
 - DuckDB-Wasm side-module link under Emscripten 6: the community-extensions
