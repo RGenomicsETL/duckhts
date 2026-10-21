@@ -2,14 +2,12 @@ if (requireNamespace("tinytest", quietly = TRUE)) {
   # HTSlib writes directly to the process stderr stream, outside R sinks.
   diagnostics_file <- tempfile("rduckhts-tinytest-stderr-")
 
-  r_libraries <- paste(.libPaths(), collapse = .Platform$path.sep)
   expression <- "tinytest::test_package('Rduckhts')"
   status <- suppressWarnings(system2(
     file.path(R.home("bin"), "Rscript"),
     c("--vanilla", "-e", shQuote(expression)),
     stdout = "",
-    stderr = diagnostics_file,
-    env = paste0("R_LIBS=", shQuote(r_libraries))
+    stderr = diagnostics_file
   ))
   diagnostics <- readLines(diagnostics_file, warn = FALSE)
 

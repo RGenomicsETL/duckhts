@@ -37,7 +37,7 @@ test: install
 	R -e "source(system.file('tinytest', 'runner.R', package = '$(PKG_NAME)', mustWork = TRUE))"
 
 test2:
-	R -e "source('inst/tinytest/runner.R')"
+	R -e "library(Rduckhts); tinytest::run_test_dir('inst/tinytest')"
 test-integration: install
 	R -e "source('inst/tinytest/test_integration.R')"
 
