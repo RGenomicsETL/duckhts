@@ -1318,6 +1318,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_bgzip",
       "description": "Compress a plain file to BGZF and return the created output path and byte counts.",
+      "details": {
+        "Execution": "Compression runs during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE do not create output or remove input files. Each execution enforces overwrite; keep=FALSE removes the input only after successful completion."
+      },
       "examples": [
         "SELECT * FROM bgzip('regions.bed');"
       ]
@@ -1330,6 +1333,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_bgunzip",
       "description": "Decompress a BGZF-compressed file and return the created output path and byte counts.",
+      "details": {
+        "Execution": "Decompression runs during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE do not create output or remove input files. Each execution enforces overwrite; keep=FALSE removes the input only after successful completion."
+      },
       "examples": [
         "SELECT * FROM bgunzip('regions.bed.gz');"
       ]

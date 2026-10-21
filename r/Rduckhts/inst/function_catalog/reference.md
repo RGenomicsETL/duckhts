@@ -2630,6 +2630,10 @@ Returns:
 table
 ```
 
+### Execution
+
+Compression runs during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE do not create output or remove input files. Each execution enforces overwrite; keep=FALSE removes the input only after successful completion.
+
 ### Examples
 
 ```sql
@@ -2651,6 +2655,10 @@ Returns:
 ```
 table
 ```
+
+### Execution
+
+Decompression runs during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE do not create output or remove input files. Each execution enforces overwrite; keep=FALSE removes the input only after successful completion.
 
 ### Examples
 

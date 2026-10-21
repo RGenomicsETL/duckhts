@@ -45,7 +45,8 @@ run_case() {
     (exec_sql "$sql") >"$dir/query.log" 2>&1 &
     reader=$!
     for ((i = 0; i < 400; i++)); do
-        if grep -q wait_for_partner "/proc/$reader/wchan" 2>/dev/null; then
+        # Query initialization can open the FIFO on a DuckDB worker thread.
+        if grep -q wait_for_partner /proc/"$reader"/task/*/wchan 2>/dev/null; then
             blocked=true
             break
         fi

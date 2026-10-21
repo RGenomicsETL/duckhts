@@ -2,6 +2,9 @@
 
 # duckhts 2.0.0
 
+- BGZF compression and decompression run during query execution, not binding.
+  Prepared queries support DuckDB 2.0 rebinding without duplicate file writes or
+  premature input removal. Overwrite protection and failure cleanup remain in effect.
 - Low-pass count-mixture queries support DuckDB 2.0 window binding while retaining
   block-size validation and the existing block assignment.
 - Cgranges mutators reject NULL names and coordinates and retain intervals with

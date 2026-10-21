@@ -1,5 +1,8 @@
 # Rduckhts 2.0.0.0.1.10
 
+- `rduckhts_bgzip()` and `rduckhts_bgunzip()` support DuckDB 2.0 rebinding. The
+  bundled functions write once per execution and retain overwrite protection and
+  failure cleanup; query preparation does not create output or remove input files.
 - `rduckhts_count_mixture_lowpass()` supports DuckDB 2.0 window binding while
   retaining block-size validation and block assignment.
 - Bundled cgranges mutators reject NULL names and coordinates and retain intervals
