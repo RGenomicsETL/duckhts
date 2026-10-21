@@ -1129,7 +1129,7 @@ LEFT JOIN (
                  non_reference_only := false)
 ) a ON s.chrom = a.CHROM AND s.pos = a.POS AND s.ref = a.REF AND s.alt = a.match_alt;
 ----
-physical_plan	<REGEX>:.*HASH_JOIN.*
+physical_plan	<REGEX>:.*(HASH_JOIN|Hash Join).*
 
 query II
 EXPLAIN SELECT s.request_id, a.record_index, a.alt_index
@@ -1140,7 +1140,7 @@ LEFT JOIN (
                  non_reference_only := false)
 ) a ON s.chrom = a.CHROM AND s.pos = a.POS AND s.ref = a.REF AND s.alt = a.match_alt;
 ----
-physical_plan	<!REGEX>:.*BLOCKWISE_NL_JOIN.*
+physical_plan	<!REGEX>:.*(BLOCKWISE_NL_JOIN|Blockwise NL Join).*
 
 query I
 SELECT 42;
