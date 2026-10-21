@@ -1,5 +1,7 @@
 # Rduckhts 2.0.0.0.1.10
 
+- Package tests check single lateral expansion and invalid-SQL rejection on
+  DuckDB 1.5 and 2.0, including delimiter-CTE plans and parser/catalog diagnostics.
 - `rduckhts_bgzip()` and `rduckhts_bgunzip()` support DuckDB 2.0 rebinding. The
   bundled functions write once per execution and retain overwrite protection and
   failure cleanup; query preparation does not create output or remove input files.

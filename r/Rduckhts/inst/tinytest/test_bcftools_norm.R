@@ -486,19 +486,19 @@ test_bcftools_norm <- function() {
   plan_site <- DBI::dbGetQuery(
     con,
     sprintf(
-      "EXPLAIN SELECT chrom, pos_normed FROM duckhts_bcftools_norm('norm_plan_wide', %s)",
+      "EXPLAIN (FORMAT JSON) SELECT chrom, pos_normed FROM duckhts_bcftools_norm('norm_plan_wide', %s)",
       quoted_fasta
     )
   )
   plan_site_text <- paste(plan_site$explain_value, collapse = "\n")
-  expect_false(grepl("LEFT_DELIM_JOIN", plan_site_text, fixed = TRUE))
+  expect_false(grepl("LEFT_DELIM_JOIN|__duckdb_delim_", plan_site_text))
   expect_false(grepl("payload", plan_site_text, fixed = TRUE))
   expect_false(grepl("__duckhts_chrom", plan_site_text, fixed = TRUE))
 
   plan_split <- DBI::dbGetQuery(
     con,
     sprintf(
-      "EXPLAIN SELECT * FROM duckhts_bcftools_norm('norm_seq', %s, split_multiallelic := true)",
+      "EXPLAIN (FORMAT JSON) SELECT * FROM duckhts_bcftools_norm('norm_seq', %s, split_multiallelic := true)",
       quoted_fasta
     )
   )
@@ -511,7 +511,9 @@ test_bcftools_norm <- function() {
       length(match_positions)
     }
   }
-  expect_equal(fixed_count("LEFT_DELIM_JOIN", plan_split_text), 1)
+  # One lateral expansion: a delimiter join in 1.x, a delimiter CTE in 2.0.
+  expect_equal(fixed_count("LEFT_DELIM_JOIN", plan_split_text) +
+                 fixed_count("__duckdb_delim_", plan_split_text), 1)
   expect_equal(fixed_count("bcftools_norm_row", plan_split_text), 1)
 
   phased_fields_path <- system.file(

@@ -2,6 +2,8 @@
 
 # duckhts 2.0.0
 
+- SQL and R conformance checks cover DuckDB 2.0 grouping, delimiter-CTE plans,
+  and invalid-SQL diagnostics while checking the same results and rejection cases.
 - BGZF compression and decompression run during query execution, not binding.
   Prepared queries support DuckDB 2.0 rebinding without duplicate file writes or
   premature input removal. Overwrite protection and failure cleanup remain in effect.
