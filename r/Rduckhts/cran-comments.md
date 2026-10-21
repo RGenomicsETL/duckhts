@@ -12,7 +12,8 @@ extension and its public SQL API are unchanged.
 - GitHub Actions: R-release and R-devel on Linux, macOS and Windows;
   Fedora GCC 16 and Clang 22; Linux and Windows ARM64; sanitizers;
   webR/duckdb-wasm; DuckDB 2.0.
-- Win-builder: pending.
+- Win-builder R-devel: source tarball submitted on 2026-10-21; results are
+  delivered to the maintainer by email.
 
 The CRAN noLD failure is recorded at
 https://www.stats.ox.ac.uk/pub/bdr/noLD/Rduckhts.out.
