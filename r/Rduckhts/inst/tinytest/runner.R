@@ -18,16 +18,19 @@ if (requireNamespace("tinytest", quietly = TRUE)) {
   }
 
   expected_patterns <- c(
-    "^\\[W::accept_mismatch\\] ",
+    "^\\[W::accept_mismatch\\] [^[]+$",
     "^\\[W::bam_hdr_read\\] EOF marker is absent\\. The input is probably truncated$",
-    "^\\[W::bcf_handle_decode_diagnostic\\] ",
-    "^\\[W::bcf_hdr_check_sanity\\] ",
-    "^\\[W::fai_get_val\\] Reference .* not found in FASTA file, returning empty sequence$",
-    paste0("^\\[W::hts_reglist_create\\] Region '.*' specifies an unknown ",
-           "reference name\\. Continue anyway$"),
+    "^\\[W::bcf_handle_decode_diagnostic\\] [^[]+$",
+    "^\\[W::bcf_hdr_check_sanity\\] [^[]+$",
+    paste0("^\\[W::fai_get_val\\] Reference chr1:1-100 not found in FASTA ",
+           "file, returning empty sequence$"),
+    paste0("^\\[W::hts_reglist_create\\] Region 'empty[1-8]' specifies an ",
+           "unknown reference name\\. Continue anyway$"),
     "^\\[W::sam_hdr_create\\] Ignored @HD type record without VN tag$",
     "^\\[W::sam_read1_sam\\] Parse error at line 4$",
-    "^\\[W::vcf_parse\\] Contig '.*' is not defined in the header",
+    paste0("^\\[W::vcf_parse\\] Contig '(22|broken|next|chr1|chr3|chrMix)?' ",
+           "is not defined in the header(\\. \\(Quick workaround: index the ",
+           "file with tabix\\.\\))?$"),
     "^\\[W::vcf_parse\\] Missing headers may cause later processing to fail$",
     "^\\[W::vcf_parse\\] POS is 0, this is probably wrong$"
   )
