@@ -401,36 +401,46 @@ test_bcf_index_snapshot <- function() {
         quote(path), tolower(tidy), if (explicit) paste0(",index_path:=", quote(index)) else "",
         switch(mode, auto = "", region = ",region:='chr3:20-40,chr3:20-20'",
                sequential = ",scan_mode:='sequential'"))
-      # R DuckDB's EXECUTE bookkeeping coerces the first column to numeric.
-      # Keep POS first while retaining every column for exact row comparison.
+      # Compare every typed column in a deterministic row order.
       projection <- "SELECT POS, * EXCLUDE (POS) FROM "
       sql <- paste0(projection, source, " ORDER BY ALL")
       expected <- dbGetQuery(con, paste0(projection, if (tidy) "expected_tidy" else "expected_sites",
         if (mode == "region") " WHERE CHROM='chr3'" else "", " ORDER BY ALL"))
       expect_equal(dbGetQuery(con, sql), expected)
-      dbExecute(con, paste("PREPARE index_scan AS", sql))
-      dbExecute(con, paste("PREPARE index_count AS SELECT count(*) AS n FROM", source))
-      for (damage in c("missing", "corrupt", "empty", "shifted", "identical")) {
-        if (damage == "missing") expect_true(file.rename(index, hidden))
-        else if (damage == "corrupt") writeLines("broken index", index)
-        else if (damage == "identical") dbGetQuery(con, build)
-        else {
+      # Submit the query before changing the index. SQL PREPARE can rebind at
+      # EXECUTE and must then see a matching data/index pair.
+      read_during_index_change <- function(query, damage) {
+        dbGetQuery(con, build)
+        if (damage == "identical") {
+          index_bytes <- readBin(index, "raw", n = file.info(index)$size)
+        }
+        result <- dbSendQuery(con, query)
+        on.exit({
+          dbClearResult(result)
+          if (file.exists(hidden)) unlink(hidden)
+        })
+        if (damage == "missing") {
+          expect_true(file.rename(index, hidden))
+        } else if (damage == "corrupt") {
+          writeLines("broken index", index)
+        } else if (damage == "identical") {
+          writeBin(index_bytes, index)
+        } else {
           replacement <- paste0(damage, ".", if (kind == "bcf") "bcf.csi" else paste0("vcf.gz.index.", kind))
           expect_true(file.copy(fixture(replacement), index, overwrite = TRUE))
         }
-        # After bind, all mutations retain the original exact rows, including
-        # valid unrelated indexes and matching counts with different offsets.
-        expect_equal(dbGetQuery(con, "EXECUTE index_scan"), expected)
-        expect_equal(dbGetQuery(con, "EXECUTE index_count")$n[[1]], nrow(expected))
+        dbFetch(result)
+      }
+      for (damage in c("missing", "corrupt", "empty", "shifted", "identical")) {
+        expect_equal(read_during_index_change(sql, damage), expected)
+        count_sql <- paste("SELECT count(*) AS n FROM", source)
+        expect_equal(read_during_index_change(count_sql, damage)$n[[1]], nrow(expected))
         expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
         if (damage %in% c("missing", "corrupt")) {
           if (mode == "region") expect_error(dbGetQuery(con, sql), pattern = "region query requires an index")
           else expect_equal(dbGetQuery(con, sql), expected) # New bind: streaming fallback.
         }
       }
-      dbExecute(con, "DEALLOCATE index_scan")
-      dbExecute(con, "DEALLOCATE index_count")
-      if (file.exists(hidden)) unlink(hidden)
     }
     # A replacement data+index pair supplied before bind defines a new plan.
     expect_true(file.copy(fixture(paste0("shifted.", if (kind == "bcf") "bcf" else "vcf.gz")),

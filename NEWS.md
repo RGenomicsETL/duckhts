@@ -5,6 +5,9 @@
 - Rduckhts packaging revision 0.1.10 enforces the open upper endpoint of
   `af_clamp` with an explicit `< 0.5` comparison and checks the package under
   a pinned R-devel runtime configured with `--disable-long-double`.
+- BCF conformance tests exercise index snapshots during an active query and keep
+  matching data/index pairs across prepared executions, including DuckDB 2.0's
+  C table-function rebinding. The scanning contract documents this query lifetime.
 - DuckDB-Wasm side-module link under Emscripten 6: the community-extensions
   toolchain for DuckDB 2.0 (extension-ci-tools v2.0-cyanoptera, Emscripten 6.0.9)
   renames compiler-rt's archive to `libclang_rt.builtins.a` and no longer ships its

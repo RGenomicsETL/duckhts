@@ -418,7 +418,7 @@ Typed regions: regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] se
 
 ### Scanning
 
-scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change the plan. Supply an initially matching pair and keep data/header contents unchanged; this is not a snapshot or validation of an unrelated index. Reprepare to use a new index.
+scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change that bound plan. SQL prepared statements can rebind at execution and then resolve the current index; PREPARE does not pin an index across executions. Supply a matching data/index pair whenever a query binds and keep data/header contents unchanged during its execution. This is not a data snapshot or validation of an unrelated index.
 
 ### Offsets
 

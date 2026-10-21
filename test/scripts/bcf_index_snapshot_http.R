@@ -64,25 +64,30 @@ test_bcf_index_snapshot_http <- function(extension) {
                sequential = ",scan_mode:='sequential'"), ")")
       oracle <- if (mode == "region") expected[expected$CHROM == "chr3", ] else expected
       rownames(oracle) <- NULL
-      DBI::dbExecute(con, paste0("PREPARE snapshot_rows AS ", projection, reader, " ORDER BY ALL"))
-      DBI::dbExecute(con, paste("PREPARE snapshot_count AS SELECT count(*) AS n FROM", reader))
-      for (damage in c("missing", "corrupt", "empty", "shifted", "identical")) {
-        if (damage == "missing") unlink(local_index)
-        else if (damage == "corrupt") writeLines("broken index", local_index)
-        else {
+      read_during_index_change <- function(query, damage) {
+        stopifnot(file.copy(original_index, local_index, overwrite = TRUE))
+        unlink(list.files(cache, full.names = TRUE))
+        result <- DBI::dbSendQuery(con, query)
+        on.exit(DBI::dbClearResult(result))
+        if (damage == "missing") {
+          unlink(local_index)
+        } else if (damage == "corrupt") {
+          writeLines("broken index", local_index)
+        } else {
           replacement <- if (damage == "identical") original_index else
             fixture(paste0(damage, ".", if (kind == "bcf") "bcf.csi" else paste0("vcf.gz.index.", kind)))
           stopifnot(file.copy(replacement, local_index, overwrite = TRUE))
         }
-        # Remove downloaded copies too: a local cached file must not hide a
-        # reader that incorrectly reloads a missing/replaced remote index.
+        # A downloaded copy must not hide a reader that reloads the changed index.
         unlink(list.files(cache, full.names = TRUE))
-        stopifnot(identical(DBI::dbGetQuery(con, "EXECUTE snapshot_rows"), oracle),
-                  DBI::dbGetQuery(con, "EXECUTE snapshot_count")$n[[1]] == nrow(oracle))
+        DBI::dbFetch(result)
+      }
+      for (damage in c("missing", "corrupt", "empty", "shifted", "identical")) {
+        rows <- read_during_index_change(paste0(projection, reader, " ORDER BY ALL"), damage)
+        count <- read_during_index_change(paste("SELECT count(*) AS n FROM", reader), damage)
+        stopifnot(identical(rows, oracle), count$n[[1]] == nrow(oracle))
         checks <- checks + 1L
       }
-      DBI::dbExecute(con, "DEALLOCATE snapshot_rows")
-      DBI::dbExecute(con, "DEALLOCATE snapshot_count")
     }
     unlink(c(local_path, local_index))
   }

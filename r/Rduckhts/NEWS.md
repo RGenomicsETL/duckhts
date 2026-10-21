@@ -3,6 +3,9 @@
 - `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
   explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
   and no-long-double R builds.
+- BCF tests support DuckDB 2.0 prepared-statement rebinding. Index-replacement
+  tests retain all row/count checks and change sidecars only after starting the
+  query; the reader documentation explains the index snapshot lifetime.
 
 # Rduckhts 2.0.0.0.1.9
 
