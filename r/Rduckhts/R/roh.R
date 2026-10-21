@@ -329,7 +329,8 @@ rduckhts_roh_counts <- function(
   if (ancestry) {
     .somalier_validate_name(reference_table, "reference_table")
     .somalier_validate_name(proportions_table, "proportions_table")
-    af_clamp <- .roh_number(af_clamp, "af_clamp", maximum = 0.49999999999999994)
+    af_clamp <- .roh_number(af_clamp, "af_clamp", maximum = 0.5,
+                            include_maximum = FALSE)
     arguments <- c(sql_quote_string(con, reference_table),
                    sql_quote_string(con, proportions_table))
     macro <- "duckhts_roh_ancestry"
@@ -369,12 +370,17 @@ rduckhts_roh_counts <- function(
           vapply(limits, format, character(1L), scientific = FALSE, trim = TRUE))
 }
 
-# A finite number in [0, maximum], formatted with full precision for SQL.
-.roh_number <- function(value, name, maximum = Inf) {
-  if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
-      value < 0 || value > maximum) {
+# A finite nonnegative number, formatted with full precision for SQL.
+.roh_number <- function(value, name, maximum = Inf, include_maximum = TRUE) {
+  valid <- is.numeric(value) && length(value) == 1L && is.finite(value)
+  if (valid) {
+    valid <- value >= 0 && if (include_maximum) value <= maximum else value < maximum
+  }
+  if (!valid) {
+    endpoint <- if (include_maximum) "]" else ")"
     stop(name, " must be one finite number in [0, ",
-         if (is.finite(maximum)) format(maximum) else "Inf", "]", call. = FALSE)
+         if (is.finite(maximum)) format(maximum) else "Inf", endpoint,
+         call. = FALSE)
   }
   sprintf("%.17g", value)
 }

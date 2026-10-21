@@ -1,3 +1,9 @@
+# Rduckhts 2.0.0.0.1.10
+
+- `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
+  explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
+  and no-long-double R builds.
+
 # Rduckhts 2.0.0.0.1.9
 
 - New `rduckhts_depth_state_solutions()` and `rduckhts_depth_state_segments()`
