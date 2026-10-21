@@ -3,9 +3,6 @@
 - `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
   explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
   and no-long-double R builds.
-- Package tests replay captured child-process diagnostics on failure, while
-  keeping expected HTSlib output from intentionally malformed fixtures out of
-  successful check logs.
 
 # Rduckhts 2.0.0.0.1.9
 
