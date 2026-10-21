@@ -21,9 +21,9 @@ if (requireNamespace("tinytest", quietly = TRUE)) {
            "reference name\\. Continue anyway$"),
     "^\\[W::sam_hdr_create\\] Ignored @HD type record without VN tag$",
     "^\\[W::sam_read1_sam\\] Parse error at line 4$",
-    "^\\[W::vcf_parse\\] Contig '.*' is not defined in the header",
-    "^\\[W::vcf_parse\\] Missing headers may cause later processing to fail$",
-    "^\\[W::vcf_parse\\] POS is 0, this is probably wrong$"
+    "^(\\[W::vcf_parse\\] )+Contig '.*' is not defined in the header",
+    "^(\\[W::vcf_parse\\] )+Missing headers may cause later processing to fail$",
+    "^(\\[W::vcf_parse\\] )+POS is 0, this is probably wrong$"
   )
   expected_htslib_warning <- rep(FALSE, length(diagnostics))
   for (pattern in expected_patterns) {
