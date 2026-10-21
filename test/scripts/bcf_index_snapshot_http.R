@@ -2,6 +2,7 @@
 # Rscript test/scripts/bcf_index_snapshot_http.R build/release/duckhts.duckdb_extension
 # Uses the benchmark environment's DBI/duckdb/callr plus httpuv's real Range server.
 test_bcf_index_snapshot_http <- function(extension) {
+  sys.source("r/Rduckhts/inst/tinytest/bcf_snapshot_query.R", envir = environment())
   stopifnot(requireNamespace("httpuv", quietly = TRUE),
             requireNamespace("callr", quietly = TRUE))
   extension <- normalizePath(extension, mustWork = TRUE)
@@ -40,7 +41,9 @@ test_bcf_index_snapshot_http <- function(extension) {
   DBI::dbExecute(con, paste("LOAD", quote(extension)))
   DBI::dbExecute(con, "SET threads=4")
   fixture <- function(suffix) file.path(fixtures, paste0("bcf_scan_contigs.", suffix))
-  checks <- 0L
+  bind_checks <- 0L
+  control_checks <- 0L
+  result_checks <- 0L
   for (kind in c("bcf", "tbi", "csi")) for (explicit in c(FALSE, TRUE)) {
     suffix <- if (kind == "bcf") "bcf" else "full.vcf.gz"
     source <- fixture(suffix)
@@ -64,7 +67,39 @@ test_bcf_index_snapshot_http <- function(extension) {
                sequential = ",scan_mode:='sequential'"), ")")
       oracle <- if (mode == "region") expected[expected$CHROM == "chr3", ] else expected
       rownames(oracle) <- NULL
-      read_during_index_change <- function(query, damage) {
+      # Populate the remote-index cache so both the served index and every
+      # downloaded copy participate in the deterministic bind-time rewrite.
+      stopifnot(identical(DBI::dbGetQuery(con, paste0(projection, reader, " ORDER BY ALL")), oracle))
+      index_paths <- c(local_index, list.files(cache, full.names = TRUE))
+      min_shift <- if (kind == "tbi") 0L else 14L
+      for (replacement in c("empty", "shifted", "identical")) {
+        replacement_path <- if (replacement == "identical") local_path else
+          fixture(paste0(replacement, ".", if (kind == "bcf") "bcf" else "vcf.gz"))
+        for (count in c(FALSE, TRUE)) {
+          sql <- .bcf_snapshot_query(con, reader, local_path, index_paths,
+                                     replacement_path, min_shift, count)
+          observed <- DBI::dbGetQuery(con, sql)
+          if (count) stopifnot(observed$n[[1]] == nrow(oracle))
+          else stopifnot(identical(observed, oracle))
+        }
+        bind_checks <- bind_checks + 1L
+      }
+      # Indexed reads must fail when the shifted offsets are bound before the
+      # reader: invalid BCF block headers or unsatisfiable VCF HTTP ranges.
+      shifted_path <- fixture(paste0("shifted.", if (kind == "bcf") "bcf" else "vcf.gz"))
+      sql <- .bcf_snapshot_query(con, reader, local_path, index_paths, shifted_path,
+                                 min_shift, replace_before_bind = TRUE)
+      if (mode == "sequential") {
+        stopifnot(identical(DBI::dbGetQuery(con, sql), oracle))
+      } else {
+        error <- tryCatch(DBI::dbGetQuery(con, sql), error = identity)
+        stopifnot(inherits(error, "error"))
+        stopifnot(grepl("read_bcf: failed to read or parse BCF/VCF record",
+                        conditionMessage(error), fixed = TRUE))
+      }
+      control_checks <- control_checks + 1L
+      # Preserve completed-result lifetime checks separately from scan checks.
+      fetch_after_index_change <- function(query, damage) {
         stopifnot(file.copy(original_index, local_index, overwrite = TRUE))
         unlink(list.files(cache, full.names = TRUE))
         result <- DBI::dbSendQuery(con, query)
@@ -83,15 +118,17 @@ test_bcf_index_snapshot_http <- function(extension) {
         DBI::dbFetch(result)
       }
       for (damage in c("missing", "corrupt", "empty", "shifted", "identical")) {
-        rows <- read_during_index_change(paste0(projection, reader, " ORDER BY ALL"), damage)
-        count <- read_during_index_change(paste("SELECT count(*) AS n FROM", reader), damage)
+        rows <- fetch_after_index_change(paste0(projection, reader, " ORDER BY ALL"), damage)
+        count <- fetch_after_index_change(paste("SELECT count(*) AS n FROM", reader), damage)
         stopifnot(identical(rows, oracle), count$n[[1]] == nrow(oracle))
-        checks <- checks + 1L
+        result_checks <- result_checks + 1L
       }
     }
     unlink(c(local_path, local_index))
   }
-  cat("BCF HTTP index snapshots:", checks, "exact-row/count cases; 4 requested workers, tidy output: OK\n")
+  cat("BCF HTTP:", bind_checks, "after-bind rewrite cases,", control_checks,
+      "before-bind controls,", result_checks,
+      "result-lifetime cases; exact rows/counts, 4 requested workers: OK\n")
 }
 
 args <- commandArgs(TRUE)

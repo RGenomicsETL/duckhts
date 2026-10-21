@@ -251,6 +251,88 @@ EXECUTE bcf_prepared_stats('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.shi
 ----
 10
 
+# Index builders write during binding: reset, bind the reader, then replace.
+# A late reload would see the empty index instead of the bound count.
+query I
+SELECT count(*)
+FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) restored
+CROSS JOIN read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi') records
+CROSS JOIN bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) replaced
+WHERE restored.success AND replaced.success;
+----
+5
+
+# Moving the same rewrite ahead of reader binding must change the count.
+query I
+SELECT count(*)
+FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) restored
+CROSS JOIN bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) replaced
+CROSS JOIN read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi') records
+WHERE restored.success AND replaced.success;
+----
+0
+
+# A late reload of the shifted index would use incompatible record offsets.
+query I
+WITH observed AS MATERIALIZED (
+  SELECT records.*
+  FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+    index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) restored
+  CROSS JOIN read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+    index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi') records
+  CROSS JOIN bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.shifted.bcf',
+    index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) replaced
+  WHERE restored.success AND replaced.success
+)
+SELECT count(*) FROM (
+  (SELECT * FROM observed EXCEPT ALL SELECT * FROM bcf_scan_expected)
+  UNION ALL (SELECT * FROM bcf_scan_expected EXCEPT ALL SELECT * FROM observed)
+);
+----
+0
+
+query I
+WITH observed AS MATERIALIZED (
+  SELECT records.*
+  FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1) restored
+  CROSS JOIN read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.full.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', region := 'chr3:20-40,chr3:20-20') records
+  CROSS JOIN bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.shifted.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test_vcf_reload.tbi', threads := 1) replaced
+  WHERE restored.success AND replaced.success
+)
+SELECT count(*) FROM (
+  (SELECT * FROM observed EXCEPT ALL SELECT * FROM bcf_scan_expected WHERE CHROM = 'chr3')
+  UNION ALL (SELECT * FROM bcf_scan_expected WHERE CHROM = 'chr3' EXCEPT ALL SELECT * FROM observed)
+);
+----
+0
+
+# Binding the shifted index before the reader must reject its invalid offsets.
+statement error
+SELECT records.ID
+FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) restored
+CROSS JOIN bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.shifted.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi', threads := 1) replaced
+CROSS JOIN read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/test_bcf_reload.csi') records
+WHERE restored.success AND replaced.success;
+----
+read_bcf: failed to read or parse BCF/VCF record
+
+query I
+SELECT 4242;
+----
+4242
+
 statement ok
 CREATE MACRO bcf_scan_difference(header_kind, index_kind, mode) AS TABLE
 WITH observed AS MATERIALIZED (

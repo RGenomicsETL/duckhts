@@ -374,6 +374,8 @@ test_bcf_record_cache <- function() {
 }
 
 test_bcf_index_snapshot <- function() {
+  sys.source(system.file("tinytest", "bcf_snapshot_query.R", package = "Rduckhts",
+                         mustWork = TRUE), envir = environment())
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
   directory <- tempfile("duckhts-bcf-snapshot-")
@@ -392,8 +394,9 @@ test_bcf_index_snapshot <- function() {
     expect_true(file.copy(fixture(suffix), path, overwrite = TRUE))
     index <- if (explicit) file.path(directory, "private.index") else paste0(path, ".", index_suffix)
     hidden <- paste0(index, ".hidden")
+    min_shift <- if (kind == "tbi") 0L else 14L
     build <- sprintf("SELECT * FROM bcf_index(%s,index_path:=%s,min_shift:=%d,threads:=1)",
-                     quote(path), quote(index), if (kind == "tbi") 0L else 14L)
+                     quote(path), quote(index), min_shift)
     for (workers in c(1L, 4L)) for (tidy in c(FALSE, TRUE)) for (mode in c("auto", "region", "sequential")) {
       dbExecute(con, sprintf("SET threads=%d", workers))
       dbGetQuery(con, build)
@@ -407,9 +410,35 @@ test_bcf_index_snapshot <- function() {
       expected <- dbGetQuery(con, paste0(projection, if (tidy) "expected_tidy" else "expected_sites",
         if (mode == "region") " WHERE CHROM='chr3'" else "", " ORDER BY ALL"))
       expect_equal(dbGetQuery(con, sql), expected)
-      # Submit the query before changing the index. SQL PREPARE can rebind at
-      # EXECUTE and must then see a matching data/index pair.
-      read_during_index_change <- function(query, damage) {
+      # Rewrites in bind callbacks occur after read_bcf binds and before it scans.
+      for (replacement in c("empty", "shifted", "identical")) {
+        replacement_path <- if (replacement == "identical") path else
+          fixture(paste0(replacement, ".", if (kind == "bcf") "bcf" else "vcf.gz"))
+        for (count in c(FALSE, TRUE)) {
+          bound_sql <- .bcf_snapshot_query(con, source, path, index,
+                                           replacement_path, min_shift, count)
+          observed <- dbGetQuery(con, bound_sql)
+          if (count) expect_equal(observed$n[[1]], nrow(expected))
+          else expect_equal(observed, expected)
+        }
+      }
+      # Before reader binding, the shifted BCF offset hits an invalid BGZF header;
+      # shifted Tabix offsets are beyond this local VCF's EOF (bcftools agrees).
+      # Sequential mode ignores either index and must return the complete file.
+      shifted_path <- fixture(paste0("shifted.", if (kind == "bcf") "bcf" else "vcf.gz"))
+      control_sql <- .bcf_snapshot_query(con, source, path, index, shifted_path,
+                                         min_shift, replace_before_bind = TRUE)
+      if (mode == "sequential") {
+        expect_equal(dbGetQuery(con, control_sql), expected)
+      } else if (kind == "bcf") {
+        expect_error(dbGetQuery(con, control_sql),
+                     pattern = "read_bcf: failed to read or parse BCF/VCF record")
+      } else {
+        expect_equal(dbGetQuery(con, control_sql), expected[FALSE, ])
+      }
+      # Completed results also remain valid after later file changes. This does
+      # not test scan overlap: dbSendQuery can finish the scan before returning.
+      fetch_after_index_change <- function(query, damage) {
         dbGetQuery(con, build)
         if (damage == "identical") {
           index_bytes <- readBin(index, "raw", n = file.info(index)$size)
@@ -432,9 +461,9 @@ test_bcf_index_snapshot <- function() {
         dbFetch(result)
       }
       for (damage in c("missing", "corrupt", "empty", "shifted", "identical")) {
-        expect_equal(read_during_index_change(sql, damage), expected)
+        expect_equal(fetch_after_index_change(sql, damage), expected)
         count_sql <- paste("SELECT count(*) AS n FROM", source)
-        expect_equal(read_during_index_change(count_sql, damage)$n[[1]], nrow(expected))
+        expect_equal(fetch_after_index_change(count_sql, damage)$n[[1]], nrow(expected))
         expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
         if (damage %in% c("missing", "corrupt")) {
           if (mode == "region") expect_error(dbGetQuery(con, sql), pattern = "region query requires an index")
