@@ -5,6 +5,42 @@ test_cgranges_api <- function() {
   con <- rduckhts_connect()
   on.exit(dbDisconnect(con, shutdown = TRUE))
 
+  for (operation in c("create", "index", "destroy")) {
+    expect_error(DBI::dbGetQuery(con, paste0("SELECT duckhts_cgranges_", operation, "(NULL)")),
+                 pattern = "name must be non-null")
+  }
+  DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('null_labels')")
+  for (arguments in c("NULL, 'chr1', 10, 20", "'null_labels', NULL, 10, 20",
+                       "'null_labels', 'chr1', NULL, 20",
+                       "'null_labels', 'chr1', 10, NULL, 'label'")) {
+    expect_error(DBI::dbGetQuery(con, paste0("SELECT duckhts_cgranges_add(", arguments, ")")),
+                 pattern = "name, chrom, start, and end must be non-null")
+  }
+  DBI::dbGetQuery(con, "SELECT duckhts_cgranges_destroy('null_labels')")
+  # A non-NULL label establishes the registry payload type.
+  for (type in c("VARCHAR", "BIGINT", "DOUBLE", "BOOLEAN")) {
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('null_labels')")
+    anchor <- DBI::dbGetQuery(con, paste0(
+      "SELECT duckhts_cgranges_add('null_labels', 'chr1', 10, 20, '1'::", type, ") AS ok"))
+    expect_true(anchor$ok[[1]])
+    added <- DBI::dbGetQuery(con, paste0(
+      "SELECT duckhts_cgranges_add('null_labels', 'chr1', 10, 20, NULL::", type, ") AS ok"))
+    expect_true(added$ok[[1]])
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_index('null_labels')")
+    labels <- DBI::dbGetQuery(con, paste(
+      "SELECT label FROM duckhts_cgranges_overlaps('null_labels', 'chr1', 10, 20)",
+      "ORDER BY interval_ordinal"))
+    expect_equal(is.na(labels$label), c(FALSE, TRUE))
+    DBI::dbGetQuery(con, "SELECT duckhts_cgranges_destroy('null_labels')")
+  }
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE null_coord AS SELECT 'chr1' AS chrom,",
+    "NULL::BIGINT AS start, 20::BIGINT AS stop"))
+  expect_error(DBI::dbGetQuery(con, paste(
+    "SELECT * FROM duckhts_cgranges_from_table('null_coord_idx', 'null_coord',",
+    "'chrom', 'start', 'stop')")),
+    pattern = "name, chrom, start, and end must be non-null")
+
   expect_equal(
     DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('r_idx') AS ok")$ok[1],
     TRUE

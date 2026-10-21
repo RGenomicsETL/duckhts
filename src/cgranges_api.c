@@ -1561,6 +1561,7 @@ static bool register_scalar_bool_1(duckdb_connection connection, duckhts_cgrange
     duckdb_scalar_function_add_parameter(fn, varchar_type);
     duckdb_scalar_function_set_return_type(fn, bool_type);
     duckdb_scalar_function_set_volatile(fn);
+    duckdb_scalar_function_set_special_handling(fn);
     retain_registry(reg);
     duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
     duckdb_scalar_function_set_function(fn, func);
@@ -1605,6 +1606,7 @@ bool register_duckhts_cgranges_functions(duckdb_connection connection) {
             if (payload_types[i]) duckdb_scalar_function_add_parameter(fn, payload_types[i]);
             duckdb_scalar_function_set_return_type(fn, bool_type);
             duckdb_scalar_function_set_volatile(fn);
+            duckdb_scalar_function_set_special_handling(fn);
             retain_registry(reg);
             duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
             duckdb_scalar_function_set_function(fn, cgranges_add_scalar);

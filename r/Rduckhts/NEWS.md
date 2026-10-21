@@ -1,5 +1,9 @@
 # Rduckhts 2.0.0.0.1.10
 
+- `rduckhts_count_mixture_lowpass()` supports DuckDB 2.0 window binding while
+  retaining block-size validation and block assignment.
+- Bundled cgranges mutators reject NULL names and coordinates and retain intervals
+  with NULL labels, including constant NULL arguments under DuckDB 2.0.
 - `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
   explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
   and no-long-double R builds.
