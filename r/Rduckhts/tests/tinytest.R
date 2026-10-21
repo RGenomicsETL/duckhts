@@ -1,5 +1,1 @@
-if (requireNamespace("tinytest", quietly = TRUE)) {
-  tinytest::test_package("Rduckhts")
-} else {
-  message("tinytest not available; skipping tests")
-}
+source(system.file("tinytest", "runner.R", package = "Rduckhts", mustWork = TRUE))

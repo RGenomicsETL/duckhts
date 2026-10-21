@@ -34,10 +34,10 @@ rd:
 	R -e 'roxygen2::roxygenize(".",load_code=NULL)'
 
 test: install
-	R -e "tinytest::test_package('$(PKG_NAME)')"
+	R -e "source(system.file('tinytest', 'runner.R', package = '$(PKG_NAME)', mustWork = TRUE))"
 
-test2: 
-	R -e "library(Rduckhts); tinytest::run_test_dir('inst/tinytest')"
+test2:
+	R -e "source('inst/tinytest/runner.R')"
 test-integration: install
 	R -e "source('inst/tinytest/test_integration.R')"
 

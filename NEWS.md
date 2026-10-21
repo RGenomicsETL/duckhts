@@ -5,6 +5,8 @@
 - Rduckhts packaging revision 0.1.10 enforces the open upper endpoint of
   `af_clamp` with an explicit `< 0.5` comparison and checks the package under
   a pinned R-devel runtime configured with `--disable-long-double`.
+- R package checks suppress known HTSlib warnings from intentionally malformed
+  fixtures, while treating every other HTSlib warning as a test failure.
 - DuckDB-Wasm side-module link under Emscripten 6: the community-extensions
   toolchain for DuckDB 2.0 (extension-ci-tools v2.0-cyanoptera, Emscripten 6.0.9)
   renames compiler-rt's archive to `libclang_rt.builtins.a` and no longer ships its
