@@ -31,41 +31,73 @@ if (requireNamespace("tinytest", quietly = TRUE)) {
     "^\\[W::vcf_parse\\] Missing headers may cause later processing to fail$",
     "^\\[W::vcf_parse\\] POS is 0, this is probably wrong$"
   )
+  consume_warning_message <- function(message, pending_prefixes) {
+    message <- trimws(message)
+    if (!nzchar(message)) {
+      return(list(pending = pending_prefixes, warning = FALSE,
+                  ordinary = FALSE, unexpected = FALSE))
+    }
+    if (length(pending_prefixes) == 0L) {
+      return(list(pending = pending_prefixes, warning = FALSE,
+                  ordinary = TRUE, unexpected = FALSE))
+    }
+    candidates <- paste(pending_prefixes, message)
+    matching_prefix <- vapply(candidates, function(candidate) {
+      any(vapply(expected_patterns, grepl, logical(1L), x = candidate))
+    }, logical(1L))
+    if (!any(matching_prefix)) {
+      return(list(pending = pending_prefixes, warning = FALSE,
+                  ordinary = FALSE, unexpected = TRUE))
+    }
+    used_prefix <- which(matching_prefix)[[1L]]
+    list(pending = pending_prefixes[-used_prefix], warning = TRUE,
+         ordinary = FALSE, unexpected = FALSE)
+  }
+
   warning_prefix <- "\\[W::[^]]+\\]"
-  leading_warning_prefixes <- paste0("^(", warning_prefix, "[[:space:]]*)+")
   expected_htslib_warning <- rep(FALSE, length(diagnostics))
   unexpected_htslib_warning <- rep(FALSE, length(diagnostics))
   pending_warning_prefixes <- character()
 
   for (index in seq_along(diagnostics)) {
     line <- diagnostics[[index]]
-    prefix_text <- regmatches(
-      line, regexpr(leading_warning_prefixes, line)
-    )
-    if (length(prefix_text) > 0L) {
-      prefixes <- regmatches(
-        prefix_text, gregexpr(warning_prefix, prefix_text)
-      )[[1L]]
-      pending_warning_prefixes <- c(pending_warning_prefixes, prefixes)
-      message <- sub(leading_warning_prefixes, "", line)
-      expected_htslib_warning[[index]] <- TRUE
-    } else if (length(pending_warning_prefixes) > 0L) {
-      message <- line
-      expected_htslib_warning[[index]] <- TRUE
-    } else {
-      next
+    prefix_positions <- gregexpr(warning_prefix, line)[[1L]]
+    prefix_lengths <- attr(prefix_positions, "match.length")
+    line_warning <- FALSE
+    line_ordinary <- FALSE
+    cursor <- 1L
+
+    if (prefix_positions[[1L]] >= 0L) {
+      for (prefix_index in seq_along(prefix_positions)) {
+        prefix_position <- prefix_positions[[prefix_index]]
+        consumed <- consume_warning_message(
+          substr(line, cursor, prefix_position - 1L),
+          pending_warning_prefixes
+        )
+        pending_warning_prefixes <- consumed$pending
+        line_warning <- line_warning || consumed$warning
+        line_ordinary <- line_ordinary || consumed$ordinary
+        unexpected_htslib_warning[[index]] <-
+          unexpected_htslib_warning[[index]] || consumed$unexpected
+
+        prefix_length <- prefix_lengths[[prefix_index]]
+        prefix <- substr(line, prefix_position,
+                         prefix_position + prefix_length - 1L)
+        pending_warning_prefixes <- c(pending_warning_prefixes, prefix)
+        line_warning <- TRUE
+        cursor <- prefix_position + prefix_length
+      }
     }
 
-    if (!nzchar(message)) next
-    candidates <- paste(pending_warning_prefixes, message)
-    matching_prefix <- vapply(candidates, function(candidate) {
-      any(vapply(expected_patterns, grepl, logical(1L), x = candidate))
-    }, logical(1L))
-    if (!any(matching_prefix)) {
-      unexpected_htslib_warning[[index]] <- TRUE
-      next
-    }
-    pending_warning_prefixes <- pending_warning_prefixes[-which(matching_prefix)[[1L]]]
+    consumed <- consume_warning_message(
+      substr(line, cursor, nchar(line)), pending_warning_prefixes
+    )
+    pending_warning_prefixes <- consumed$pending
+    line_warning <- line_warning || consumed$warning
+    line_ordinary <- line_ordinary || consumed$ordinary
+    unexpected_htslib_warning[[index]] <-
+      unexpected_htslib_warning[[index]] || consumed$unexpected
+    expected_htslib_warning[[index]] <- line_warning && !line_ordinary
   }
 
   if (any(unexpected_htslib_warning) || length(pending_warning_prefixes) > 0L) {
