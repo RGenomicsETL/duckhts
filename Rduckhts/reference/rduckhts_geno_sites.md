@@ -127,16 +127,16 @@ DBI::dbWriteTable(con, "requests", data.frame(
   ref = "A", alt = c("G", "T")))
 rduckhts_geno_sites(con, path, "requests", "GRCh38", format_fields = c("GP", "DS"))
 #>   request_id  build chrom pos ref alt record_index full_alt alt_index
-#> 1          2 GRCh38  chr1 100   A   T           NA     NULL        NA
-#> 2          1 GRCh38  chr1 100   A   G            0     C, G         2
-#> 3          1 GRCh38  chr1 100   A   G            1     C, G         2
+#> 1          1 GRCh38  chr1 100   A   G            0     C, G         2
+#> 2          1 GRCh38  chr1 100   A   G            1     C, G         2
+#> 3          2 GRCh38  chr1 100   A   T           NA     NULL        NA
 #>                                                                                                                                                                                                      calls
-#> 1                                                                                                                                                                                                     NULL
+#> 1 0.00, 1.00, 2.00, 0.00, 1.00, 1.00, 2.00, NA, NA, 1.00, 1.00, 1.00, 1.00, 0.00, 0.00, NA, NA, NA, 0.10, 0.80, 0.05, 0.02, 0.02, 0.01, 0.01, 0.02, 0.03, 0.04, 0.90, 0.00, NA, 0.90, 0.06, 0.94, 1.00, NA
 #> 2 0.00, 1.00, 2.00, 0.00, 1.00, 1.00, 2.00, NA, NA, 1.00, 1.00, 1.00, 1.00, 0.00, 0.00, NA, NA, NA, 0.10, 0.80, 0.05, 0.02, 0.02, 0.01, 0.01, 0.02, 0.03, 0.04, 0.90, 0.00, NA, 0.90, 0.06, 0.94, 1.00, NA
-#> 3 0.00, 1.00, 2.00, 0.00, 1.00, 1.00, 2.00, NA, NA, 1.00, 1.00, 1.00, 1.00, 0.00, 0.00, NA, NA, NA, 0.10, 0.80, 0.05, 0.02, 0.02, 0.01, 0.01, 0.02, 0.03, 0.04, 0.90, 0.00, NA, 0.90, 0.06, 0.94, 1.00, NA
+#> 3                                                                                                                                                                                                     NULL
 #>         match_status
-#> 1 allele_not_at_site
+#> 1            matched
 #> 2            matched
-#> 3            matched
+#> 3 allele_not_at_site
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
