@@ -28,11 +28,25 @@ case "$PROFILE" in
 esac
 IMAGE="${DUCKHTS_FEDORA_IMAGE:-$DEFAULT_IMAGE}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/cran_flavour_common.sh"
+DUCKHTS_CHECK_OUT="${DUCKHTS_CHECK_OUT:-$REPO_ROOT/check-artifacts/fedora-${PROFILE}}"
+export DUCKHTS_IMAGE_REF="$IMAGE"
 
 if [[ "${DUCKHTS_FEDORA_CONTAINER:-0}" != "1" ]]; then
     RLIBS_CACHE="${DUCKHTS_FEDORA_RLIBS:-${HOME}/.cache/duckhts-fedora-${PROFILE}-r-libs}"
     mkdir -p "$RLIBS_CACHE"
-    exec docker run --rm \
+    # Pass a pre-built tarball and an output directory through to the container.
+    extra=()
+    if [[ -n "${DUCKHTS_TARBALL:-}" ]]; then
+        extra+=(-v "$(cd "$(dirname "$DUCKHTS_TARBALL")" && pwd):/in:ro"
+                -e "DUCKHTS_TARBALL=/in/$(basename "$DUCKHTS_TARBALL")"
+                -e DUCKHTS_TARBALL_SHA256)
+    fi
+    if [[ -n "${DUCKHTS_CHECK_OUT:-}" ]]; then
+        mkdir -p "$DUCKHTS_CHECK_OUT"
+        extra+=(-v "$(cd "$DUCKHTS_CHECK_OUT" && pwd):/out" -e DUCKHTS_CHECK_OUT=/out)
+    fi
+    exec docker run --rm "${extra[@]}" \
         -v "$REPO_ROOT:/repo" \
         -v "$RLIBS_CACHE:/root/R-libs" \
         -w /repo \
@@ -143,32 +157,18 @@ mkdir -p /root/R-libs
 export R_LIBS_USER=/root/R-libs
 
 DEPS_LOG=/tmp/rduckhts-fedora-dependencies.log
-if ! R -q -e '
-    packages <- c("DBI", "duckdb", "Rtinycc", "tinytest")
-    installed <- rownames(installed.packages(lib.loc = Sys.getenv("R_LIBS_USER")))
-    needed <- setdiff(packages, installed)
-    if (length(needed)) {
-        install.packages(
-            needed,
-            lib = Sys.getenv("R_LIBS_USER"),
-            repos = "https://cloud.r-project.org"
-        )
-    }
-' >"$DEPS_LOG" 2>&1; then
-    tail -n 200 "$DEPS_LOG" >&2
-    exit 1
-fi
-tail -n 20 "$DEPS_LOG"
+cran_flavour_refresh_deps "$DEPS_LOG" DBI duckdb Rtinycc tinytest
 
 CHECK_ROOT="$(mktemp -d /tmp/rduckhts-fedora-check.XXXXXX)"
 cd "$CHECK_ROOT"
-R CMD build --no-manual "$REPO_ROOT/r/Rduckhts"
-PACKAGE_TARBALL="$(find "$CHECK_ROOT" -maxdepth 1 -name 'Rduckhts_*.tar.gz' -print -quit)"
-test -n "$PACKAGE_TARBALL"
+PACKAGE_TARBALL="$(cran_flavour_stage_tarball "$CHECK_ROOT" "$REPO_ROOT")"
+cran_flavour_receipt "$DUCKHTS_CHECK_OUT" "$PACKAGE_TARBALL" "$REPO_ROOT" "fedora-${PROFILE}"
+cp "$DEPS_LOG" "$DUCKHTS_CHECK_OUT/dependencies.log"
 set +e
 R CMD check --as-cran --no-manual "$PACKAGE_TARBALL"
 check_status=$?
 set -e
+cran_flavour_keep_evidence "$DUCKHTS_CHECK_OUT" "$CHECK_ROOT"
 
 CHECK_LOG="$CHECK_ROOT/Rduckhts.Rcheck/00check.log"
 test -f "$CHECK_LOG"
