@@ -1,6 +1,13 @@
 # Changelog
 
-## Rduckhts 2.0.1.0.1.0
+## Rduckhts 2.0.1.0.1.1
+
+- Three long tests (`test_count_error_fit.R`,
+  `test_depth_state_model.R`, `test_ancestry.R`) run only when
+  `NOT_CRAN=true` or `TT_AT_HOME=TRUE`, which keeps the whole check
+  under CRAN’s 10 minute limit on Windows R-devel (the incoming check of
+  2.0.1.0.1.0 reported 11 minutes). CI sets `NOT_CRAN=true` and still
+  runs them.
 
 - [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bed.md)
   has a runnable example that indexes intervals with
@@ -9,6 +16,7 @@
   0-based and half-open like BED and that `end` is a reserved SQL word,
   so the column is written `"end"` (see
   <https://github.com/RGenomicsETL/duckhts/issues/356>).
+
 - The Parquet converters check a local output path with the file system
   instead of a DuckDB `glob()` query. The query failed on a Windows
   R-devel check, which made
@@ -17,27 +25,33 @@
   of “Output already exists”. URLs, object stores and paths starting
   with `~` (resolved against DuckDB’s home directory) still use
   `glob()`.
+
 - Package tests check single lateral expansion and invalid-SQL rejection
   on DuckDB 1.5 and 2.0, including delimiter-CTE plans and
   parser/catalog diagnostics.
+
 - [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bgzip.md)
   and
   [`rduckhts_bgunzip()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bgunzip.md)
   support DuckDB 2.0 rebinding. The bundled functions write once per
   execution and retain overwrite protection and failure cleanup; query
   preparation does not create output or remove input files.
+
 - [`rduckhts_count_mixture_lowpass()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_mixture_lowpass.md)
   supports DuckDB 2.0 window binding while retaining block-size
   validation and block assignment.
+
 - Bundled cgranges mutators reject NULL names and coordinates and retain
   intervals with NULL labels, including constant NULL arguments under
   DuckDB 2.0. An index whose first intervals have NULL labels can now
   gain a typed label later without writing to unallocated label storage;
   the earlier intervals keep their NULL.
+
 - [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
   enforces the open upper endpoint of `af_clamp` with an explicit
   `< 0.5` comparison, so `0.5` is rejected consistently on standard and
   no-long-double R builds.
+
 - BCF tests support DuckDB 2.0 prepared-statement rebinding. Index
   rewrites between reader binding and scanning have deterministic
   before-bind controls. Row/count and result-lifetime checks remain; the
