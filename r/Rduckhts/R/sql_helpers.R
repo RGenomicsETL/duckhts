@@ -90,6 +90,12 @@ sql_map_literal <- function(con, x, name = "column_map", allow_empty = FALSE) {
 }
 
 duckdb_path_exists <- function(con, path) {
+  # A plain local path needs no database round trip: the glob() query below
+  # failed on CRAN's Windows R-devel check, which left the existence unknown.
+  # glob() stays for URLs and object stores, which R cannot inspect.
+  if (!grepl("^[A-Za-z][A-Za-z0-9+.-]*://", path)) {
+    return(file.exists(path))
+  }
   child_pattern <- paste0(sub("/+$", "", path), "/**")
   tryCatch(
     isTRUE(DBI::dbGetQuery(

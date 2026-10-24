@@ -66,6 +66,15 @@ expect_error(
 )
 
 with_duckhts_con({
+  # Local output paths are checked on the file system, files and directories alike.
+  existing_file <- tempfile(fileext = ".parquet")
+  existing_dir <- tempfile("parquet-dir-")
+  writeLines("x", existing_file)
+  dir.create(existing_dir)
+  expect_true(Rduckhts:::duckdb_path_exists(con, existing_file))
+  expect_true(Rduckhts:::duckdb_path_exists(con, existing_dir))
+  expect_false(Rduckhts:::duckdb_path_exists(con, tempfile(fileext = ".parquet")))
+  unlink(c(existing_file, existing_dir), recursive = TRUE)
   bcf_path <- system.file("extdata", "formatcols.vcf.gz", package = "Rduckhts")
   expect_true(file.exists(bcf_path))
   out <- tempfile(fileext = ".parquet")

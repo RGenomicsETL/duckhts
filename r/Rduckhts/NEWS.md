@@ -1,5 +1,9 @@
 # Rduckhts 2.0.0.0.1.10
 
+- The Parquet converters check a local output path with the file system instead of a
+  DuckDB `glob()` query. The query failed on a Windows R-devel check, which made
+  `rduckhts_bcf_convert_parquet()` and its siblings report that the output could not be
+  checked instead of "Output already exists". URLs and object stores still use `glob()`.
 - Package tests check single lateral expansion and invalid-SQL rejection on
   DuckDB 1.5 and 2.0, including delimiter-CTE plans and parser/catalog diagnostics.
 - `rduckhts_bgzip()` and `rduckhts_bgunzip()` support DuckDB 2.0 rebinding. The
