@@ -4,6 +4,121 @@
 
 require duckhts
 
+# Planning does not create output or remove input, even with keep=FALSE.
+statement ok
+COPY (SELECT 'prepared' AS text) TO '__WORKING_DIRECTORY__/writer_prepared.txt' (FORMAT CSV, HEADER FALSE);
+
+statement ok
+EXPLAIN SELECT * FROM bgzip('__WORKING_DIRECTORY__/writer_prepared.txt',
+  output_path := '__WORKING_DIRECTORY__/writer_prepared.gz', threads := 1, keep := FALSE);
+
+query II
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.gz'));
+----
+1	0
+
+statement ok
+PREPARE prepared_bgzip AS SELECT success FROM bgzip('__WORKING_DIRECTORY__/writer_prepared.txt',
+  output_path := '__WORKING_DIRECTORY__/writer_prepared.gz', threads := 1, keep := FALSE);
+
+query II
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.gz'));
+----
+1	0
+
+query I
+EXECUTE prepared_bgzip;
+----
+1
+
+query II
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.gz'));
+----
+0	1
+
+statement error
+EXECUTE prepared_bgzip;
+----
+already exists
+
+statement ok
+EXPLAIN SELECT * FROM bgunzip('__WORKING_DIRECTORY__/writer_prepared.gz',
+  output_path := '__WORKING_DIRECTORY__/writer_prepared.txt', threads := 1, keep := FALSE);
+
+query II
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.gz'));
+----
+0	1
+
+statement ok
+PREPARE prepared_bgunzip AS SELECT success FROM bgunzip('__WORKING_DIRECTORY__/writer_prepared.gz',
+  output_path := '__WORKING_DIRECTORY__/writer_prepared.txt', threads := 1, keep := FALSE);
+
+query II
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.gz'));
+----
+0	1
+
+query I
+EXECUTE prepared_bgunzip;
+----
+1
+
+query II
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared.gz'));
+----
+1	0
+
+statement error
+EXECUTE prepared_bgunzip;
+----
+already exists
+
+query I
+SELECT content = ('prepared' || chr(10)) FROM read_text('__WORKING_DIRECTORY__/writer_prepared.txt');
+----
+1
+
+# Explicit overwrite permits each execution, with fresh result state.
+statement ok
+PREPARE repeated_bgzip AS SELECT success FROM bgzip('__WORKING_DIRECTORY__/writer_prepared.txt',
+  output_path := '__WORKING_DIRECTORY__/writer_prepared.gz', threads := 1, overwrite := TRUE);
+
+query I
+EXECUTE repeated_bgzip;
+----
+1
+
+query I
+EXECUTE repeated_bgzip;
+----
+1
+
+statement ok
+PREPARE repeated_bgunzip AS SELECT success FROM bgunzip('__WORKING_DIRECTORY__/writer_prepared.gz',
+  output_path := '__WORKING_DIRECTORY__/writer_prepared.txt', threads := 1, overwrite := TRUE);
+
+query I
+EXECUTE repeated_bgunzip;
+----
+1
+
+query I
+EXECUTE repeated_bgunzip;
+----
+1
+
+query I
+SELECT content = ('prepared' || chr(10)) FROM read_text('__WORKING_DIRECTORY__/writer_prepared.txt');
+----
+1
+
 statement ok
 COPY (SELECT 'sentinel' AS text) TO '__WORKING_DIRECTORY__/writer_sentinel.txt' (FORMAT CSV, HEADER FALSE);
 
@@ -82,22 +197,3 @@ already exists
 statement ok
 SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_no_clobber',
   '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, overwrite := TRUE);
-
-# bgzip writes at execution, not at bind. DuckDB 2.0, and R's prepare-then-execute,
-# bind a statement twice; a bind that wrote the output made the second bind fail.
-statement ok
-PREPARE bgzip_once AS SELECT success FROM bgzip('__WORKING_DIRECTORY__/test/data/targets.bed',
-  output_path := '__WORKING_DIRECTORY__/writer_bgzip_prepared.bed.gz', keep := true);
-
-query I
-EXECUTE bgzip_once;
-----
-true
-
-statement error
-EXECUTE bgzip_once;
-----
-already exists
-
-statement ok
-DEALLOCATE bgzip_once;

@@ -1,37 +1,35 @@
-This submission updates Rduckhts to 2.0.0.0.1.9 and the bundled DuckHTS
-extension from 1.5.2 to 2.0.0.
+This corrective release updates Rduckhts from 2.0.0.0.1.9 to
+2.0.0.0.1.10. It fixes CRAN's no-long-double validation failure:
+`af_clamp = 0.5` is rejected with a direct open-endpoint comparison
+before SQL evaluation.
 
-This is a major release. Consequence prediction has moved to the separate
-DuckVEP extension and Rduckvep package, and the old bundled DuckVEP interfaces
-are removed. It adds genotype, depth, ancestry and sequencing-QC workflows,
-and connection-local macro loading for database files. It also replaces the
-deprecated SQL lambda syntax, addressing the DuckDB 2.0 reverse-dependency
-failure reported in https://github.com/RGenomicsETL/duckhts/issues/352. Full
-details are in NEWS.md.
+The bundled extension also supports DuckDB 2.0 low-pass window binding,
+explicit NULL handling in cgranges mutators, and execution-scoped BGZF
+compression/decompression. Tests distinguish BCF index binding from
+prepared-statement rebinding. Public SQL and R signatures are unchanged.
+Tinytest runs directly in-process.
 
-## Test environments
+## Completed checks
 
-The exact source tarball passed `R CMD check --as-cran` on Ubuntu 24.04 with
-R 4.6.0: 0 errors, 0 warnings and 1 note. The note reports
-`-mno-omit-leaf-frame-pointer`, which is supplied by R rather than the package.
+Package sources at revision 7111af111e98d36eb387bde0f037461693a55648:
 
-GitHub Actions checked Ubuntu R-release and R-devel, Fedora 44 with GCC and
-Clang, Windows x86_64 and ARM64, macOS ARM64, Linux ARM64, sanitizers,
-webR/duckdb-wasm and DuckDB 2.0. The R macOS builder (r-release, arm64)
-checked the same tarball: Status OK, tests included.
+- Ubuntu 24.04, R 4.6.0, source-tarball `R CMD check --as-cran --no-manual`:
+  0 errors, 0 warnings, 2 NOTEs. These concern update frequency and
+  `-mno-omit-leaf-frame-pointer`, which is present in `R CMD config CFLAGS`.
+- R-devel r90728 configured with `--disable-long-double`, source-tarball
+  `R CMD check --as-cran --no-manual`: 0 errors, 0 warnings, 1 update-frequency NOTE.
+- Full in-process package suite: 8,309 results passed on each of R DuckDB
+  1.5.5 and the r-universe 1.99.99.9001 package with the v2.0.0 engine.
+- All 67 extension SQL conformance files passed on DuckDB 1.5.2 and 2.0.0.
+- AddressSanitizer and UndefinedBehaviorSanitizer extension gates passed.
 
-Earlier 2.0.0 revisions intermittently ended the Windows test process with
-status 0xC0000005 at `dbDisconnect(shutdown = TRUE)`, on Win-builder
-R-oldrelease and on Windows Server 2022. A debugger capture showed a C++
-`thread_local` destructor inside the `duckdb` package running on freed memory
-when a DuckDB worker thread exits, because the winpthreads in Rtools runs
-thread-exit key destructors in creation order (fixed in mingw-w64 on
-2024-12-05, after Rtools45). The bundled extension triggered it by closing a
-private DuckDB instance on a worker thread; it now does that on the calling
-thread only, and the Windows Server 2022 check replays the full test suite
-under a debugger three times to confirm. Win-builder R-oldrelease (R 4.5.3,
-Windows Server 2022) then checked this revision: tests OK in 367 s, with one
-NOTE for an example above 10 s of CPU time; that example is shortened in the
-submitted tarball.
+## Pending release checks
+
+Fresh Win-builder results and current-head GitHub Actions/Codex review are
+required before submission. Earlier Windows checks do not certify this tarball.
+No CRAN submission has been made for this release candidate.
+
+The CRAN noLD failure is recorded at
+https://www.stats.ox.ac.uk/pub/bdr/noLD/Rduckhts.out.
 
 There are no reverse dependencies on CRAN.

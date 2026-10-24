@@ -166,9 +166,21 @@ run_lowpass_tests <- function() {
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 1, 0), "artefact_weight")
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, -1), "homozygosity_excess")
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, min_blocks = 1), "min_blocks")
+  expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, block_bases = 0.5), "block_bases")
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, max_candidates = 65), "max_candidates")
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, max_state_bytes = .5), "max_state_bytes")
   expect_error(rduckhts_count_mixture_lowpass(con, "counts", 0, 0, 0, max_depth = 8.5), "max_depth")
+
+  # Blocks use 1-based positions, restart per contig, and are shared by candidates.
+  block_counts <- data.frame(
+    sample_id = "blocks", candidate = "one", chrom = c(rep("1", 5), rep("2", 2)),
+    pos = c(1, 16, 17, 32, 33, 1, 17), ref_count = 1L, alt_count = 1L,
+    other_count = 0L, sample_af = 0.2, candidate_af = 0.2)
+  block_counts <- rbind(block_counts, transform(block_counts, candidate = "two"))
+  dbWriteTable(con, "block_edges", block_counts)
+  block_fit <- rduckhts_count_mixture_lowpass(
+    con, "block_edges", 0.01, 0.02, 0, block_bases = 16, min_blocks = 2)
+  expect_equal(block_fit$blocks, rep(5, 4))
 
   # Parallel reduction preserves fits and statuses at vector-sized input.
   set.seed(332)

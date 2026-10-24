@@ -44,10 +44,9 @@ run_case() {
     fi
     (exec_sql "$sql") >"$dir/query.log" 2>&1 &
     reader=$!
-    # bgzip opens its input in init, which DuckDB may run off the calling thread:
-    # look at every thread of the reader.
     for ((i = 0; i < 400; i++)); do
-        if grep -qs wait_for_partner /proc/$reader/task/*/wchan; then
+        # Query initialization can open the FIFO on a DuckDB worker thread.
+        if grep -q wait_for_partner /proc/"$reader"/task/*/wchan 2>/dev/null; then
             blocked=true
             break
         fi

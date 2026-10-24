@@ -38,8 +38,10 @@ An automatic or explicit-region `read_bcf` plan retains its bind-time parsed
 CSI/TBI index until the plan is destroyed. This applies to automatic index
 discovery and `index_path`, locally and remotely. Removal, in-place corruption,
 or replacement of the index after bind cannot change that plan's offsets or
-metadata counts; identical rebuilding also leaves the plan valid. Reprepare to
-resolve a new index. Without a usable index at bind, auto mode streams and a
+metadata counts; identical rebuilding also leaves the plan valid. SQL prepared
+statements can rebind at execution, resolving the current index. DuckDB 2.0
+always rebinds C table functions; `PREPARE` does not extend the index snapshot
+across executions. Without a usable index at bind, auto mode streams and a
 region query errors. Sequential mode does not load an index.
 
 The caller must supply an initially matching data/index pair and keep the data

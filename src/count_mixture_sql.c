@@ -35,7 +35,8 @@ static const char *const mixture_sql[] = {
     "candidates AS (SELECT DISTINCT smp, cand FROM raw), "
     "candidate_sizes AS (SELECT smp, CASE WHEN count(*) > " DUCKHTS_WHOLE_OPTION("max_candidates")
     " THEN error('max_candidates exceeded') ELSE count(*) END AS nc FROM candidates GROUP BY smp), "
-    "site_data AS (SELECT smp, chr, bp, first(r) AS r, first(a) AS a, first(o) AS o, first(f) AS f, "
+    "site_data AS (SELECT smp, chr, bp, (bp-1)//" DUCKHTS_WHOLE_OPTION("block_bases")
+    " AS block_bin, first(r) AS r, first(a) AS a, first(o) AS o, first(f) AS f, "
     "CASE WHEN count(*) != count(DISTINCT cand) THEN error('duplicate site keys') "
     "WHEN count(DISTINCT struct_pack(r := r, a := a, o := o, f := f)) != 1 "
     "THEN error('counts and sample_af must agree across candidates') "
@@ -44,12 +45,11 @@ static const char *const mixture_sql[] = {
     "(g IS NOT NULL AND (NOT isfinite(g) OR g < 0 OR g > 1))) "
     "THEN error('frequencies must be finite and in [0,1]') "
     "ELSE count(g) END AS nf FROM raw GROUP BY smp, chr, bp), ",
-    "block_option AS (SELECT " DUCKHTS_WHOLE_OPTION("block_bases") " AS bb), "
     "prepared AS (SELECT s.smp, c.cand, s.chr, s.bp, s.r, s.a, s.o, s.f, r.g, "
     "s.nf = n.nc AND s.f IS NOT NULL AND s.r IS NOT NULL AND s.a IS NOT NULL AND s.o IS NOT NULL AS usable, "
     "coalesce(s.r::HUGEINT+s.a::HUGEINT > " DUCKHTS_WHOLE_OPTION("max_depth") ", false) AS excluded, "
-    "dense_rank() OVER (PARTITION BY s.smp ORDER BY s.chr, (s.bp-1)//b.bb)-1 AS block "
-    "FROM site_data s CROSS JOIN block_option b JOIN candidates c ON s.smp = c.smp JOIN candidate_sizes n ON s.smp = n.smp "
+    "dense_rank() OVER (PARTITION BY s.smp ORDER BY s.chr, s.block_bin)-1 AS block "
+    "FROM site_data s JOIN candidates c ON s.smp = c.smp JOIN candidate_sizes n ON s.smp = n.smp "
     "LEFT JOIN raw r ON s.smp = r.smp AND c.cand = r.cand AND s.chr = r.chr AND s.bp = r.bp), ",
     "effective AS (SELECT *, CASE WHEN usable AND NOT excluded THEN r+a ELSE 0 END AS n, "
     "CASE WHEN usable AND NOT excluded THEN a ELSE 0 END AS alt, "

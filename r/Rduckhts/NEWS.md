@@ -5,20 +5,29 @@
   `duckhts_cgranges_count_overlaps()`. It states that the intervals are 0-based and
   half-open like BED and that `end` is a reserved SQL word, so the column is written
   `"end"` (see https://github.com/RGenomicsETL/duckhts/issues/356).
-- `rduckhts_bgzip()`, `rduckhts_bgunzip()` and the indexing wrappers that call them work with
-  DuckDB 2.0, whose R client binds a statement twice: the compression now happens when the
-  query runs. `rduckhts_count_mixture_lowpass()` no longer fails to bind on DuckDB 2.0.
-- Tests no longer depend on engine wording or plan shape: the malformed-SQL check in
-  `rduckhts_geno_sites()` asserts only that the call fails, and the split-normalization plan
-  check accepts DuckDB 2.0's plan.
-- The prepared index-replacement test in `test_bcf.R` follows the engine: DuckDB 2.0
-  rebinds a prepared statement at each `EXECUTE`, so the changed index must give the
-  same rows or error as a fresh query, while DuckDB 1.5 keeps the original rows. This
-  fixes the "Invalid BGZF header" test failure seen with DuckDB 2.0.0 on CRAN's Fedora
-  checks and in the DuckDB reverse-dependency check.
+- The Parquet converters check a local output path with the file system instead of a
+  DuckDB `glob()` query. The query failed on a Windows R-devel check, which made
+  `rduckhts_bcf_convert_parquet()` and its siblings report that the output could not be
+  checked instead of "Output already exists". URLs, object stores and paths starting
+  with `~` (resolved against DuckDB's home directory) still use `glob()`.
+- Package tests check single lateral expansion and invalid-SQL rejection on
+  DuckDB 1.5 and 2.0, including delimiter-CTE plans and parser/catalog diagnostics.
+- `rduckhts_bgzip()` and `rduckhts_bgunzip()` support DuckDB 2.0 rebinding. The
+  bundled functions write once per execution and retain overwrite protection and
+  failure cleanup; query preparation does not create output or remove input files.
+- `rduckhts_count_mixture_lowpass()` supports DuckDB 2.0 window binding while
+  retaining block-size validation and block assignment.
+- Bundled cgranges mutators reject NULL names and coordinates and retain intervals
+  with NULL labels, including constant NULL arguments under DuckDB 2.0.
+  An index whose first intervals have NULL labels can now gain a typed label later
+  without writing to unallocated label storage; the earlier intervals keep their NULL.
 - `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
   explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
   and no-long-double R builds.
+- BCF tests support DuckDB 2.0 prepared-statement rebinding. Index rewrites
+  between reader binding and scanning have deterministic before-bind controls.
+  Row/count and result-lifetime checks remain; the reader documentation explains
+  the index snapshot lifetime.
 
 # Rduckhts 2.0.0.0.1.9
 
