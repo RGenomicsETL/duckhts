@@ -1,4 +1,7 @@
 library(tinytest)
+# Slow on CRAN's Windows machines: the incoming check's total time must stay under 10
+# minutes. Runs when NOT_CRAN=true (CI, devtools, rcmdcheck) or TT_AT_HOME=TRUE.
+if (!at_home()) exit_file("long-running; set NOT_CRAN=true to run it")
 library(DBI)
 
 # Synthetic corrected bins with a known truth, as in test/sql/depth_state_model.test:
