@@ -1,4 +1,9 @@
-# Rduckhts 2.0.1.0.1.0
+# Rduckhts 2.0.1.0.1.1
+
+- Three long tests (`test_count_error_fit.R`, `test_depth_state_model.R`, `test_ancestry.R`) run only
+  when `NOT_CRAN=true` or `TT_AT_HOME=TRUE`, which keeps the whole check under CRAN's 10 minute
+  limit on Windows R-devel (the incoming check of 2.0.1.0.1.0 reported 11 minutes). CI sets
+  `NOT_CRAN=true` and still runs them.
 
 - `rduckhts_bed()` has a runnable example that indexes intervals with
   `duckhts_cgranges_from_table()` and counts overlaps with
