@@ -1349,7 +1349,8 @@ true	true
 query I
 WITH reference AS (SELECT sample_id, chrom, unnest(duckhts_roh_segments(list(pos ORDER BY pos),
     list(af ORDER BY pos), list(ref_count::INTEGER ORDER BY pos), list(alt_count::INTEGER ORDER BY pos), 1e-3, 0.0,
-    NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r FROM roh_counts_clean GROUP BY ALL),
+    NULL::BIGINT[], NULL::DOUBLE[], NULL::DOUBLE, 6.7e-8, 5e-9)) AS r
+    FROM roh_counts_clean GROUP BY sample_id, chrom),
 flat AS (SELECT sample_id AS sample, chrom, r.start AS start, r."end" AS "end", r."end" - r.start + 1 AS length,
     r.n_markers AS n_markers, r.quality AS quality FROM reference),
 macro AS (SELECT * FROM duckhts_roh_counts('roh_counts_clean'))

@@ -2,6 +2,27 @@
 
 # duckhts 2.0.0
 
+- `duckhts_cgranges_add()` no longer writes to unallocated label storage when an index
+  starts with NULL labels and a typed label is added later (a segmentation fault); the
+  earlier intervals keep their NULL label.
+- Low-pass compatibility benchmarks record matched 1×/2×/4× workloads on DuckDB
+  1.5 and 2.0, with memory ceilings and exact keyed result comparisons.
+- SQL and R conformance checks cover DuckDB 2.0 grouping, delimiter-CTE plans,
+  and invalid-SQL diagnostics while checking the same results and rejection cases.
+- BGZF compression and decompression run during query execution, not binding.
+  Prepared queries support DuckDB 2.0 rebinding without duplicate file writes or
+  premature input removal. Overwrite protection and failure cleanup remain in effect.
+- Low-pass count-mixture queries support DuckDB 2.0 window binding while retaining
+  block-size validation and the existing block assignment.
+- Cgranges mutators reject NULL names and coordinates and retain intervals with
+  NULL labels, including constant NULL arguments under DuckDB 2.0.
+- Rduckhts packaging revision 0.1.10 enforces the open upper endpoint of
+  `af_clamp` with an explicit `< 0.5` comparison and checks the package under
+  a pinned R-devel runtime configured with `--disable-long-double`.
+- BCF conformance tests rewrite indexes between reader binding and scanning,
+  with before-bind controls, and keep matching data/index pairs across prepared
+  executions. The scanning contract documents DuckDB 2.0's C table-function
+  rebinding and the index snapshot lifetime.
 - DuckDB-Wasm side-module link under Emscripten 6: the community-extensions
   toolchain for DuckDB 2.0 (extension-ci-tools v2.0-cyanoptera, Emscripten 6.0.9)
   renames compiler-rt's archive to `libclang_rt.builtins.a` and no longer ships its

@@ -38,6 +38,22 @@ FROM duckhts_count_mixture_lowpass('lowpass',0,0,0,block_bases:=2);
 ----
 true
 
+# Blocks use 1-based positions, restart per contig, and are shared by candidates.
+statement ok
+CREATE TABLE block_edges AS
+SELECT 'blocks' AS sample_id, candidate, chrom, pos, 1 AS ref_count, 1 AS alt_count,
+0 AS other_count, 0.2 AS sample_af, 0.2 AS candidate_af
+FROM (VALUES ('1', 1), ('1', 16), ('1', 17), ('1', 32), ('1', 33),
+             ('2', 1), ('2', 17)) s(chrom, pos)
+CROSS JOIN (VALUES ('one'), ('two')) c(candidate);
+
+query III
+SELECT min(blocks), max(blocks), count(*)
+FROM duckhts_count_mixture_lowpass('block_edges', seq_error := 0.01,
+  artefact_weight := 0.02, homozygosity_excess := 0, block_bases := 16, min_blocks := 2);
+----
+5	5	4
+
 # A one-ulp-scale difference is not a matched frequency, including a zero-read site.
 statement ok
 CREATE TABLE almost AS SELECT * REPLACE ('almost' AS candidate,

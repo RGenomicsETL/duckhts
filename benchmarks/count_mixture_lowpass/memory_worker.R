@@ -34,8 +34,17 @@ result <- dbGetQuery(con, query)
 elapsed <- proc.time()[["elapsed"]] - start
 dbExecute(con, "PRAGMA disable_profiling")
 p <- jsonlite::fromJSON(profile, simplifyVector = FALSE)
-saveRDS(list(result = result, seconds = elapsed, buffer_bytes = p$system_peak_buffer_memory,
-             temp_bytes = p$system_peak_temp_dir_size, sites = size, groups = groups,
+if (is.null(p$system)) {
+  buffer_bytes <- p$system_peak_buffer_memory
+  temp_bytes <- p$system_peak_temp_dir_size
+} else {
+  buffer_bytes <- p$system$peak_buffer_memory
+  temp_bytes <- p$system$peak_temp_dir_size
+}
+stopifnot(length(buffer_bytes) == 1L, length(temp_bytes) == 1L,
+          is.finite(buffer_bytes), is.finite(temp_bytes), buffer_bytes >= 0, temp_bytes >= 0)
+saveRDS(list(result = result, seconds = elapsed, buffer_bytes = buffer_bytes,
+             temp_bytes = temp_bytes, sites = size, groups = groups,
              samples = samples, candidates = candidates, output_rows = nrow(result),
              input_rows = size*groups, decoded_bytes = size*groups*56, threads = threads), output)
 dbDisconnect(con, shutdown = TRUE)

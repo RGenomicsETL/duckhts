@@ -1,0 +1,171 @@
+---
+title: "Low-pass query compatibility: DuckDB 1.5 and 2.0"
+output: github_document
+params:
+  run: false
+  baseline_extension: ""
+  candidate_extension: ""
+  duckdb2_library: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+## Workload and checks
+
+This repeats the synthetic scaling workload from
+[the low-pass calibration report](benchmark_count_mixture_lowpass.md).
+The existing `count_mixture_lowpass/memory_worker.R` generates the input view.
+No external corpus is needed.
+
+The site axis has 100,000, 200,000, and 400,000 sites, with one sample and candidate.
+The group axis has 100,000 sites and (samples, candidates) of (1,1), (2,1), and (2,2).
+Each query returns one unrelated-model row per sample/candidate pair.
+All positions fit within one 1 Mb block per group. This tests input scaling,
+not scaling in the number of jackknife blocks.
+
+Each configuration runs three times, sequentially, in fresh R processes.
+Each query uses one DuckDB thread, a 3 GB memory limit, and CPU affinity 0–5.
+Query time excludes startup, extension loading, and view creation.
+Peak process RSS includes those costs. DuckDB profiling supplies peak buffers and spill.
+
+The memory ceiling is unchanged: 512 MiB plus three times modeled live state
+(768 bytes per SQL input row and 1,024 bytes per native block/group).
+Every run must satisfy that ceiling for RSS and buffers, without spill.
+Results are aligned by `(sample, candidate, relationship_model)`; SQL row order
+is not specified. Duplicate keys fail the check. Every column must then be
+identical to baseline, including counters, fit values, statuses, and missing
+values. No rows or results are filtered.
+
+The baseline is built from source revision
+`0d765acb8f8eaf16931852ac37079c5668cd6c51`.
+The candidate runs on both R DuckDB engines. Comparing baseline and candidate
+on DuckDB 1.5 isolates the SQL change; comparing engines also includes engine changes.
+The baseline query is rejected by DuckDB 2.0's window binder, so it has no 2.0 timing.
+
+## Reproduction
+
+Build the baseline from an archive of its revision and build the candidate
+with `make release -j2`. Run from the repository root after other build and test jobs finish:
+
+```r
+rmarkdown::render("benchmarks/benchmark_duckdb2_lowpass.Rmd", params = list(
+  run = TRUE,
+  baseline_extension = Sys.getenv("BASELINE_EXTENSION"),
+  candidate_extension = Sys.getenv("CANDIDATE_EXTENSION"),
+  duckdb2_library = Sys.getenv("DUCKDB2_R_LIB")
+))
+```
+
+Both extensions use the same release build settings. The measurement chunk
+starts each worker with `taskset -c 0-5`. Set `run = FALSE` to render stored results.
+
+```{r measure, include=FALSE}
+results_path <- "benchmarks/count_mixture_lowpass/results/duckdb2_compatibility.csv"
+if (params$run) local({
+  stopifnot(system2("git", c("diff", "--quiet", "HEAD", "--",
+    "src/count_mixture_sql.c", "src/count_mixture_model.c", "src/count_mixture_udf.c")) == 0L)
+  revision <- system2("git", c("rev-parse", "HEAD"), stdout = TRUE)
+  extensions <- c(baseline = normalizePath(params$baseline_extension, mustWork = TRUE),
+                  candidate = normalizePath(params$candidate_extension, mustWork = TRUE))
+  library2 <- normalizePath(params$duckdb2_library, mustWork = TRUE)
+  scratch <- tempfile("lowpass-compatibility-", tmpdir = dirname(tempdir()))
+  dir.create(scratch)
+  message("Worker results and diagnostics: ", scratch)
+  variants <- c("baseline_1.5", "candidate_1.5", "candidate_2.0")
+  references <- list()
+  runs <- list()
+  old_library <- Sys.getenv("R_LIBS_USER", unset = NA_character_)
+  on.exit(if (is.na(old_library)) Sys.unsetenv("R_LIBS_USER") else
+    Sys.setenv(R_LIBS_USER = old_library))
+  cpu_model <- sub("^model name[[:space:]]*:[[:space:]]*", "",
+                   grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[1])
+  for (variant in variants) {
+    if (variant == "candidate_2.0") Sys.setenv(R_LIBS_USER = library2)
+    else if (is.na(old_library)) Sys.unsetenv("R_LIBS_USER")
+    else Sys.setenv(R_LIBS_USER = old_library)
+    extension <- extensions[[if (variant == "baseline_1.5") "baseline" else "candidate"]]
+    extension_hash <- strsplit(system2("sha256sum", shQuote(extension), stdout = TRUE), " ")[[1]][1]
+    engine <- system2("Rscript", c("--vanilla", "-e", shQuote(paste(
+      "con <- DBI::dbConnect(duckdb::duckdb(shared_home=FALSE));",
+      "v <- DBI::dbGetQuery(con, 'PRAGMA version');",
+      "cat(v$library_version, v$source_id, paste0('R-package-', utils::packageVersion('duckdb')));",
+      "DBI::dbDisconnect(con, shutdown=TRUE)"))), stdout = TRUE)
+    stopifnot(length(engine) == 1L, grepl("^v[12]\\.", engine))
+    for (axis in c("sites", "groups")) for (factor in c(1L, 2L, 4L)) {
+      sites <- 100000L * if (axis == "sites") factor else 1L
+      groups <- if (axis == "groups") factor else 1L
+      for (repeat_id in 1:3) {
+        key <- paste(axis, factor, repeat_id, sep = "-")
+        output <- file.path(scratch, paste0(variant, "-", key, ".rds"))
+        log <- paste0(output, ".log")
+        rss <- paste0(output, ".rss")
+        status <- system2("/usr/bin/time", c("-f", "%M", "-o", shQuote(rss),
+          "taskset", "-c", "0-5", "Rscript", "--vanilla",
+          shQuote(c("benchmarks/count_mixture_lowpass/memory_worker.R", "unordered",
+                    sites, 1L, output, extension, groups))), stdout = log, stderr = log)
+        if (status != 0L) stop("Worker failed; retained log: ", log)
+        result <- readRDS(output)
+        stopifnot(!anyDuplicated(result$result[c("sample", "candidate", "relationship_model")]))
+        result$result <- result$result[order(result$result$sample, result$result$candidate,
+                                             result$result$relationship_model), , drop = FALSE]
+        rownames(result$result) <- NULL
+        if (variant == "baseline_1.5") references[[key]] <- result$result
+        exact <- identical(result$result, references[[key]])
+        peak_rss <- as.numeric(readLines(rss)) * 1024
+        ceiling_bytes <- 512 * 1024^2 + 3 * (result$input_rows * 768 + groups * 1024)
+        runs[[length(runs) + 1L]] <- data.frame(
+          variant, engine, R_version = R.version.string, cpu_model,
+          source_revision = if (variant == "baseline_1.5")
+            "0d765acb8f8eaf16931852ac37079c5668cd6c51" else revision,
+          extension_sha256 = extension_hash, axis, factor, repeat_id,
+          sites, samples = result$samples, candidates = result$candidates,
+          input_rows = result$input_rows, output_rows = result$output_rows,
+          threads = result$threads, seconds = result$seconds, rss_bytes = peak_rss,
+          buffer_bytes = result$buffer_bytes, spill_bytes = result$temp_bytes,
+          ceiling_bytes, exact,
+          result_sha256 = digest::digest(result$result, algo = "sha256"))
+        write.csv(do.call(rbind, runs), results_path, row.names = FALSE)
+        stopifnot(exact, result$output_rows == groups, peak_rss <= ceiling_bytes,
+                  result$buffer_bytes <= ceiling_bytes, result$temp_bytes == 0)
+      }
+    }
+  }
+})
+runs <- read.csv(results_path)
+stopifnot(nrow(runs) == 54L, all(runs$exact), all(runs$spill_bytes == 0),
+          all(runs$rss_bytes <= runs$ceiling_bytes),
+          all(runs$buffer_bytes <= runs$ceiling_bytes))
+```
+
+## Results
+
+```{r provenance}
+knitr::kable(unique(runs[c("variant", "engine", "source_revision", "extension_sha256")]))
+knitr::kable(unique(runs[c("R_version", "cpu_model")]))
+```
+
+```{r measurements}
+grouped <- split(runs, interaction(runs$variant, runs$axis, runs$factor, drop = TRUE))
+summary <- do.call(rbind, lapply(grouped, function(x) data.frame(
+  variant = x$variant[1], axis = x$axis[1], factor = x$factor[1],
+  input_rows = x$input_rows[1], output_rows = x$output_rows[1], threads = x$threads[1],
+  median_seconds = median(x$seconds), min_seconds = min(x$seconds), max_seconds = max(x$seconds),
+  peak_rss_MiB = max(x$rss_bytes)/1024^2,
+  peak_buffers_MiB = max(x$buffer_bytes)/1024^2, ceiling_MiB = x$ceiling_bytes[1]/1024^2)))
+rownames(summary) <- NULL
+knitr::kable(summary, digits = 3)
+```
+
+All 54 results match their baseline exactly. All runs satisfy the memory ceilings
+without spill. The one-times workloads are shorter than five seconds; under the
+existing declaration, this does not support a timing-exponent verdict.
+The table reports all timing ranges rather than selecting favorable runs.
+
+The historical identical workload is retained in
+[count_mixture_lowpass/results/scaling.csv](count_mixture_lowpass/results/scaling.csv).
+Its environment differs from this run, so it is context rather than a regression control.
+This report measures only the low-pass query. It does not measure cgranges
+throughput or BGZF compression/decompression throughput.

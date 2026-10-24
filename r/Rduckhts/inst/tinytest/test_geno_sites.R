@@ -207,7 +207,8 @@ test_geno_regions_var_and_sites <- function() {
   bad("SELECT 1 AS request_id, 'GRCh38' AS build, 'chr1' AS chrom, '100' AS pos, 'A' AS ref, 'C' AS alt", "integer type")
   bad("SELECT 1 AS request_id, 'GRCh38' AS build, 'chr1' AS chrom, 100 AS pos, 'A' AS ref", "missing required column")
   bad(paste0(head_sql, ", 1 AS calls"), "reserved output column")
-  bad("SELEC nonsense", "Parser Error|syntax")
+  bad("SELECT (", "Parser Error|syntax")
+  bad("SELEC nonsense", "Parser Error|syntax|Table with name SELEC does not exist")
   # An error raised by the native scan still cleans up the plan variable.
   expect_error(rduckhts_geno_sites(con, fixture("geno_ps_type.bcf"), DBI::SQL(head_sql), "GRCh38"),
                pattern = "requires an index")
