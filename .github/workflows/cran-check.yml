@@ -225,7 +225,9 @@ jobs:
 
       - name: Replay full R 4.5.3 tinytest suite under CDB
         if: always() && matrix.config.os == 'windows-2022' && matrix.config.r == '4.5.3'
-        timeout-minutes: 28
+        # The suite under a debugger took 15 minutes on the first run and passed 28 on two later
+        # ones without a failure in the log (runs 40089926308 and 40124453788): only the clock stopped it.
+        timeout-minutes: 50
         shell: pwsh
         run: |
           $checkLibrary = "r/Rduckhts/check/Rduckhts.Rcheck"
