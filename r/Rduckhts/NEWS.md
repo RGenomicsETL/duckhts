@@ -3,7 +3,8 @@
 - The Parquet converters check a local output path with the file system instead of a
   DuckDB `glob()` query. The query failed on a Windows R-devel check, which made
   `rduckhts_bcf_convert_parquet()` and its siblings report that the output could not be
-  checked instead of "Output already exists". URLs and object stores still use `glob()`.
+  checked instead of "Output already exists". URLs, object stores and paths starting
+  with `~` (resolved against DuckDB's home directory) still use `glob()`.
 - Package tests check single lateral expansion and invalid-SQL rejection on
   DuckDB 1.5 and 2.0, including delimiter-CTE plans and parser/catalog diagnostics.
 - `rduckhts_bgzip()` and `rduckhts_bgunzip()` support DuckDB 2.0 rebinding. The
@@ -13,6 +14,8 @@
   retaining block-size validation and block assignment.
 - Bundled cgranges mutators reject NULL names and coordinates and retain intervals
   with NULL labels, including constant NULL arguments under DuckDB 2.0.
+  An index whose first intervals have NULL labels can now gain a typed label later
+  without writing to unallocated label storage; the earlier intervals keep their NULL.
 - `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
   explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
   and no-long-double R builds.

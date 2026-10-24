@@ -93,7 +93,9 @@ duckdb_path_exists <- function(con, path) {
   # A plain local path needs no database round trip: the glob() query below
   # failed on CRAN's Windows R-devel check, which left the existence unknown.
   # glob() stays for URLs and object stores, which R cannot inspect.
-  if (!grepl("^[A-Za-z][A-Za-z0-9+.-]*://", path)) {
+  # A leading ~ is resolved against DuckDB's home_directory, which may differ
+  # from R's, so such paths keep the DuckDB check.
+  if (!grepl("^[A-Za-z][A-Za-z0-9+.-]*://", path) && !startsWith(path, "~")) {
     return(file.exists(path))
   }
   child_pattern <- paste0(sub("/+$", "", path), "/**")

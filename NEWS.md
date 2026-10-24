@@ -2,6 +2,9 @@
 
 # duckhts 2.0.0
 
+- `duckhts_cgranges_add()` no longer writes to unallocated label storage when an index
+  starts with NULL labels and a typed label is added later (a segmentation fault); the
+  earlier intervals keep their NULL label.
 - Low-pass compatibility benchmarks record matched 1×/2×/4× workloads on DuckDB
   1.5 and 2.0, with memory ceilings and exact keyed result comparisons.
 - SQL and R conformance checks cover DuckDB 2.0 grouping, delimiter-CTE plans,
