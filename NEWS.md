@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts 2.0.0.9000 (development)
+# duckhts 2.0.1
 
 - DuckDB 2.0 binds a prepared statement again at every `EXECUTE`, so a prepared
   BCF/VCF scan reads an index that was changed after `PREPARE`; the retained-plan
