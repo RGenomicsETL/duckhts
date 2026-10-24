@@ -387,8 +387,8 @@ munge_out[, c("chrom", "pos", "id", "ref", "alt", "alleles_swapped", "filter", "
 ```
 
     ##   chrom pos  id ref alt alleles_swapped filter  af  es   ns
-    ## 1  chrF   2 rs2   C   A            TRUE   <NA> 0.1 0.2 1000
-    ## 2  chrF   2 rs1   C   A           FALSE   <NA> 0.1 0.2 1000
+    ## 1  chrF   2 rs1   C   A           FALSE   <NA> 0.1 0.2 1000
+    ## 2  chrF   2 rs2   C   A            TRUE   <NA> 0.1 0.2 1000
 
 ``` r
 unlink(c(munge_fasta, paste0(munge_fasta, ".fai")))

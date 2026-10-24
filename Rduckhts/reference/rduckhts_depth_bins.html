@@ -19,7 +19,7 @@ retain zero ratios when their bin and stratum rules pass."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.9000.0.1.9</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.1.0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -159,13 +159,13 @@ not X, Y or MT. Restrict contigs and remove problem bins in SQL first.</p>
 <span class="r-in"><span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 2200</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="fu">rduckhts_depth_bins</span><span class="op">(</span><span class="va">con</span>, <span class="st">"bins"</span><span class="op">)</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"chrom"</span>, <span class="st">"start"</span>, <span class="st">"reads"</span>, <span class="st">"ratio"</span>, <span class="st">"kept"</span><span class="op">)</span><span class="op">]</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   chrom   start reads     ratio kept</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 1    21 4.8e+07   604 0.9741935 TRUE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 2    21 4.9e+07   612 0.9870968 TRUE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 3    21 5.0e+07   620 1.0000000 TRUE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 4    21 5.1e+07   628 1.0129032 TRUE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 5    21 5.2e+07   636 1.0225080 TRUE</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> 6    21 5.3e+07   600 0.9677419 TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   chrom start reads     ratio kept</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1     1 0e+00   628 1.0129032 TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2     1 1e+06   636 1.0258065 TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3     1 2e+06   600 0.9677419 TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4     1 3e+06   608 0.9806452 TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5     1 4e+06   616 0.9935484 TRUE</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 6     1 5e+06   624 1.0064516 TRUE</span>
 <span class="r-in"><span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>

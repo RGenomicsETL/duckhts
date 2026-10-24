@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.9000.0.1.9</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.1.0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -38,6 +38,21 @@
       <small>Source: <a href="https://github.com/RGenomicsETL/duckhts/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="2.0.1.0.1.0" id="rduckhts-201010">Rduckhts 2.0.1.0.1.0<a class="anchor" aria-label="anchor" href="#rduckhts-201010"></a></h2>
+<ul><li>
+<code><a href="../reference/rduckhts_bed.html">rduckhts_bed()</a></code> has a runnable example that indexes intervals with <code>duckhts_cgranges_from_table()</code> and counts overlaps with <code>duckhts_cgranges_count_overlaps()</code>. It states that the intervals are 0-based and half-open like BED and that <code>end</code> is a reserved SQL word, so the column is written <code>"end"</code> (see <a href="https://github.com/RGenomicsETL/duckhts/issues/356" class="external-link uri">https://github.com/RGenomicsETL/duckhts/issues/356</a>).</li>
+<li>The Parquet converters check a local output path with the file system instead of a DuckDB <code>glob()</code> query. The query failed on a Windows R-devel check, which made <code><a href="../reference/rduckhts_bcf_convert_parquet.html">rduckhts_bcf_convert_parquet()</a></code> and its siblings report that the output could not be checked instead of “Output already exists”. URLs, object stores and paths starting with <code>~</code> (resolved against DuckDB’s home directory) still use <code>glob()</code>.</li>
+<li>Package tests check single lateral expansion and invalid-SQL rejection on DuckDB 1.5 and 2.0, including delimiter-CTE plans and parser/catalog diagnostics.</li>
+<li>
+<code><a href="../reference/rduckhts_bgzip.html">rduckhts_bgzip()</a></code> and <code><a href="../reference/rduckhts_bgunzip.html">rduckhts_bgunzip()</a></code> support DuckDB 2.0 rebinding. The bundled functions write once per execution and retain overwrite protection and failure cleanup; query preparation does not create output or remove input files.</li>
+<li>
+<code><a href="../reference/rduckhts_count_mixture_lowpass.html">rduckhts_count_mixture_lowpass()</a></code> supports DuckDB 2.0 window binding while retaining block-size validation and block assignment.</li>
+<li>Bundled cgranges mutators reject NULL names and coordinates and retain intervals with NULL labels, including constant NULL arguments under DuckDB 2.0. An index whose first intervals have NULL labels can now gain a typed label later without writing to unallocated label storage; the earlier intervals keep their NULL.</li>
+<li>
+<code><a href="../reference/rduckhts_roh.html">rduckhts_roh()</a></code> enforces the open upper endpoint of <code>af_clamp</code> with an explicit <code>&lt; 0.5</code> comparison, so <code>0.5</code> is rejected consistently on standard and no-long-double R builds.</li>
+<li>BCF tests support DuckDB 2.0 prepared-statement rebinding. Index rewrites between reader binding and scanning have deterministic before-bind controls. Row/count and result-lifetime checks remain; the reader documentation explains the index snapshot lifetime.</li>
+</ul></div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="2.0.0.0.1.9" id="rduckhts-200019">Rduckhts 2.0.0.0.1.9<a class="anchor" aria-label="anchor" href="#rduckhts-200019"></a></h2><p class="text-muted">CRAN release: 2026-10-20</p>
 <ul><li>New <code><a href="../reference/rduckhts_depth_state_solutions.html">rduckhts_depth_state_solutions()</a></code> and <code><a href="../reference/rduckhts_depth_state_solutions.html">rduckhts_depth_state_segments()</a></code> fit the bundled ichorCNA-style copy-number state model to corrected bins from <code><a href="../reference/rduckhts_depth_bins.html">rduckhts_depth_bins()</a></code>: tumour fraction, ploidy and rank of every start, and each solution’s copy-number segments. Arguments are checked in R before any query; <code>table_name</code> publishes the result as a table.</li>

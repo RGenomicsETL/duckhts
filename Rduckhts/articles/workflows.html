@@ -20,7 +20,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.0.9000.0.1.9</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.1.0.1.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -413,8 +413,8 @@ indexing. See Nicola Asuni (2018) <a href="https://doi.org/10.1101/473744" class
 <span></span>
 <span><span class="va">munge_out</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"chrom"</span>, <span class="st">"pos"</span>, <span class="st">"id"</span>, <span class="st">"ref"</span>, <span class="st">"alt"</span>, <span class="st">"alleles_swapped"</span>, <span class="st">"filter"</span>, <span class="st">"af"</span>, <span class="st">"es"</span>, <span class="st">"ns"</span><span class="op">)</span><span class="op">]</span></span></code></pre></div>
 <pre><code><span><span class="co">##   chrom pos  id ref alt alleles_swapped filter  af  es   ns</span></span>
-<span><span class="co">## 1  chrF   2 rs2   C   A            TRUE   &lt;NA&gt; 0.1 0.2 1000</span></span>
-<span><span class="co">## 2  chrF   2 rs1   C   A           FALSE   &lt;NA&gt; 0.1 0.2 1000</span></span></code></pre>
+<span><span class="co">## 1  chrF   2 rs1   C   A           FALSE   &lt;NA&gt; 0.1 0.2 1000</span></span>
+<span><span class="co">## 2  chrF   2 rs2   C   A            TRUE   &lt;NA&gt; 0.1 0.2 1000</span></span></code></pre>
 <div class="sourceCode" id="cb36"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span><span class="va">munge_fasta</span>, <span class="st">".fai"</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span></code></pre></div>
 </div>
