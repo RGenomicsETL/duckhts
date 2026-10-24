@@ -1,4 +1,4 @@
-# Rduckhts 2.0.1.0.1.9
+# Rduckhts 2.0.1.0.1.0
 
 - `rduckhts_bgzip()`, `rduckhts_bgunzip()` and the indexing wrappers that call them work with
   DuckDB 2.0, whose R client binds a statement twice: the compression now happens when the
