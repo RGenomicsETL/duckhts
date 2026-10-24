@@ -418,7 +418,7 @@ Typed regions: regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] se
 
 ### Scanning
 
-scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change the plan. Supply an initially matching pair and keep data/header contents unchanged; this is not a snapshot or validation of an unrelated index. Reprepare to use a new index.
+scan_mode='sequential' streams without loading an index. auto streams if no usable index was available at bind; region queries require one. Index-only counts do not validate data contents. Automatic/region plans retain the parsed bind-time index, including remote/explicit index_path: subsequent index removal, replacement or corruption does not change that bound plan. SQL prepared statements can rebind at execution and then resolve the current index; PREPARE does not pin an index across executions. Supply a matching data/index pair whenever a query binds and keep data/header contents unchanged during its execution. This is not a data snapshot or validation of an unrelated index.
 
 ### Offsets
 
@@ -2364,7 +2364,7 @@ counts_table is the sample-by-panel relation from duckhts_somalier_vcf_counts() 
 
 ### Metrics
 
-Follows Somalier v0.3.4 relate.nim. autosomal_depth_mean is the mean A+B depth of autosomal sites with other <= 10% of all reads and A+B >= min_depth. An X or Y site is usable when other <= 4%, A+B >= min_sex_site_depth and its B balance is homozygous (below hom_balance_cutoff, above one minus it, or A or B zero) or heterozygous (between min_het_balance and one minus it); x_hom_ref, x_het and x_hom_alt count usable X sites by genotype. x_depth_ratio and y_depth_ratio are 2 * mean A+B depth over usable sites / autosomal_depth_mean, so a diploid X is about 2 and a single X about 1. x_het_hom_alt_ratio is x_het / x_hom_alt (Infinity when there is no hom-alt site and some het site, NULL when both are zero), the statistic Somalier thresholds. Ratios are NULL without usable sites or autosomal depth; the integer counts stay exact zeros. Floating means can differ from Somalier's running mean in the last bits.
+Follows Somalier v0.3.4 relate.nim. autosomal_depth_mean is the mean A+B depth of autosomal sites with other <= 10% of all reads and A+B >= min_depth. An X or Y site is usable when other <= 4%, A+B >= min_sex_site_depth and its B balance is homozygous (below hom_balance_cutoff, above one minus it, or A or B zero) or heterozygous (between min_het_balance and one minus it); x_hom_ref, x_het and x_hom_alt count usable X sites by genotype in the panel's A/B order (allele_a below allele_b), so hom_ref means A/A and hom_alt means B/B, not REF/REF and ALT/ALT of any sites VCF; Somalier 0.3.5 and later reorient its reported hom-ref and hom-alt counts through --sites, which this function does not do. x_depth_ratio and y_depth_ratio are 2 * mean A+B depth over usable sites / autosomal_depth_mean, so a diploid X is about 2 and a single X about 1. x_het_hom_alt_ratio is x_het / x_hom_alt (Infinity when there is no hom-alt site and some het site, NULL when both are zero), the statistic Somalier thresholds. Ratios are NULL without usable sites or autosomal depth; the integer counts stay exact zeros. Floating means can differ from Somalier's running mean in the last bits.
 
 ### Call
 
@@ -2630,6 +2630,10 @@ Returns:
 table
 ```
 
+### Execution
+
+Compression runs during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE do not create output or remove input files. Each execution enforces overwrite; keep=FALSE removes the input only after successful completion.
+
 ### Examples
 
 ```sql
@@ -2651,6 +2655,10 @@ Returns:
 ```
 table
 ```
+
+### Execution
+
+Decompression runs during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE do not create output or remove input files. Each execution enforces overwrite; keep=FALSE removes the input only after successful completion.
 
 ### Examples
 

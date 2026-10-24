@@ -603,6 +603,24 @@ rduckhts_bigwig <- function(
 #'
 #' @return Invisible TRUE on success
 #'
+#' @examples
+#' con <- rduckhts_connect()
+#'
+#' # Intervals are 0-based and half-open, like BED: keep BED starts as they are.
+#' DBI::dbExecute(con, 'CREATE TABLE tiles AS SELECT * FROM (VALUES
+#'   (\'CHROMOSOME_I\', 0, 10), (\'CHROMOSOME_I\', 10, 20)) t(chrom, start, "end")')
+#' DBI::dbGetQuery(con, "SELECT * FROM duckhts_cgranges_from_table(
+#'   'tiles_idx', 'tiles', 'chrom', 'start', 'end')")
+#'
+#' # end is a reserved SQL word: quote the column as "end" in the select list and
+#' # pass that column, not the string 'end', to the scalar functions.
+#' rduckhts_bed(con, "targets", system.file("extdata", "targets.bed", package = "Rduckhts"))
+#' DBI::dbGetQuery(con, 'SELECT chrom, start, "end",
+#'   duckhts_cgranges_count_overlaps(\'tiles_idx\', chrom, start, "end") AS tiles
+#'   FROM targets')
+#'
+#' DBI::dbDisconnect(con, shutdown = TRUE)
+#'
 #' @export
 rduckhts_bed <- function(
   con,

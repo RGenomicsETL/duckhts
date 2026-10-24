@@ -246,4 +246,52 @@ test_indexes_bgzip <- function() {
   )
 }
 
+test_bgzip_execution <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  directory <- tempfile("duckhts-bgzip-execution-")
+  dir.create(directory)
+  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
+  plain <- file.path(directory, "prepared input.txt")
+  compressed <- paste0(plain, ".gz")
+  contents <- c("first record", "second record")
+  writeLines(contents, plain)
+  quote <- function(path) as.character(dbQuoteString(con, path))
+
+  for (operation in c("bgzip", "bgunzip")) {
+    input <- if (operation == "bgzip") plain else compressed
+    output <- if (operation == "bgzip") compressed else plain
+    input_size <- file.info(input)$size
+    query <- sprintf("SELECT * FROM %s(%s, output_path:=%s, threads:=1, keep:=FALSE)",
+                     operation, quote(input), quote(output))
+    dbGetQuery(con, paste("EXPLAIN", query))
+    expect_true(file.exists(input))
+    expect_false(file.exists(output))
+    statement <- paste0("prepared_", operation)
+    dbExecute(con, paste("PREPARE", statement, "AS", query))
+    expect_true(file.exists(input))
+    expect_false(file.exists(output))
+    result <- dbGetQuery(con, paste("EXECUTE", statement))
+    expect_equal(nrow(result), 1L)
+    expect_true(result$success[[1]])
+    expect_false(file.exists(input))
+    expect_true(file.exists(output))
+    expect_equal(result$bytes_in[[1]], input_size)
+    expect_equal(result$bytes_out[[1]], file.info(output)$size)
+    expect_error(dbGetQuery(con, paste("EXECUTE", statement)), pattern = "already exists")
+  }
+  expect_equal(readLines(plain), contents)
+
+  # Each execution gets fresh output counters and may explicitly replace output.
+  query <- sprintf(paste0("SELECT * FROM bgzip(%s, output_path:=%s, threads:=1, ",
+                          "keep:=TRUE, overwrite:=TRUE)"), quote(plain), quote(compressed))
+  dbExecute(con, paste("PREPARE repeated_bgzip AS", query))
+  expect_false(file.exists(compressed))
+  first <- dbGetQuery(con, "EXECUTE repeated_bgzip")
+  second <- dbGetQuery(con, "EXECUTE repeated_bgzip")
+  expect_equal(second, first)
+  expect_equal(readLines(plain), contents)
+}
+
 test_indexes_bgzip()
+test_bgzip_execution()

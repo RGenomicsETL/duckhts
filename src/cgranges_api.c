@@ -819,6 +819,42 @@ static duckhts_cgr_label_kind_t normalized_label_kind_from_type(duckdb_type type
     }
 }
 
+/* Label storage for a payload whose kind was ORDINAL while intervals were
+ * added with NULL labels. ensure_payload_capacity() only grows the arrays of
+ * the current kind, and returns early while capacity remains, so a kind chosen
+ * after the first interval must allocate its own array here. */
+static int allocate_label_storage(duckhts_cgranges_payload_t *payload, duckhts_cgr_label_kind_t kind,
+                                  char *err, size_t errlen) {
+    size_t i;
+    if (payload->cap == 0) return 0; /* ensure_payload_capacity allocates it with the kind set */
+    switch (kind) {
+        case DUCKHTS_CGR_LABEL_BIGINT:
+            payload->labels.i64 = (int64_t *)calloc(payload->cap, sizeof(int64_t));
+            if (!payload->labels.i64) goto oom;
+            for (i = 0; i < payload->count; i++) payload->labels.i64[i] = (int64_t)i;
+            break;
+        case DUCKHTS_CGR_LABEL_DOUBLE:
+            payload->labels.f64 = (double *)calloc(payload->cap, sizeof(double));
+            if (!payload->labels.f64) goto oom;
+            for (i = 0; i < payload->count; i++) payload->labels.f64[i] = (double)i;
+            break;
+        case DUCKHTS_CGR_LABEL_BOOLEAN:
+            payload->labels.b = (uint8_t *)calloc(payload->cap, sizeof(uint8_t));
+            if (!payload->labels.b) goto oom;
+            break;
+        case DUCKHTS_CGR_LABEL_VARCHAR:
+            payload->labels.str = (char **)calloc(payload->cap, sizeof(char *));
+            if (!payload->labels.str) goto oom;
+            break;
+        default:
+            break;
+    }
+    return 0;
+oom:
+    snprintf(err, errlen, "duckhts_cgranges_add: out of memory");
+    return -1;
+}
+
 static int append_interval_raw(duckhts_cgranges_entry_t *entry, const char *chrom, int64_t start, int64_t end,
                                bool label_valid, duckhts_cgr_label_kind_t label_kind,
                                int64_t label_i64, double label_f64, const char *label_str, bool label_bool,
@@ -844,6 +880,12 @@ static int append_interval_raw(duckhts_cgranges_entry_t *entry, const char *chro
     }
     if (label_valid) {
         if (entry->payload.kind == DUCKHTS_CGR_LABEL_ORDINAL) {
+            /* Earlier intervals carried NULL labels and own no label storage.
+             * Allocate it for the capacity already reserved, and give those
+             * intervals the ordinal that a NULL label stands for. */
+            if (allocate_label_storage(&entry->payload, label_kind, err, errlen) != 0) {
+                return -1;
+            }
             entry->payload.kind = label_kind;
         } else if (entry->payload.kind != label_kind) {
             snprintf(err, errlen, "duckhts_cgranges_add: label type mismatch within index '%s'", entry->name);
@@ -1561,6 +1603,7 @@ static bool register_scalar_bool_1(duckdb_connection connection, duckhts_cgrange
     duckdb_scalar_function_add_parameter(fn, varchar_type);
     duckdb_scalar_function_set_return_type(fn, bool_type);
     duckdb_scalar_function_set_volatile(fn);
+    duckdb_scalar_function_set_special_handling(fn);
     retain_registry(reg);
     duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
     duckdb_scalar_function_set_function(fn, func);
@@ -1605,6 +1648,7 @@ bool register_duckhts_cgranges_functions(duckdb_connection connection) {
             if (payload_types[i]) duckdb_scalar_function_add_parameter(fn, payload_types[i]);
             duckdb_scalar_function_set_return_type(fn, bool_type);
             duckdb_scalar_function_set_volatile(fn);
+            duckdb_scalar_function_set_special_handling(fn);
             retain_registry(reg);
             duckdb_scalar_function_set_extra_info(fn, reg, destroy_registry);
             duckdb_scalar_function_set_function(fn, cgranges_add_scalar);

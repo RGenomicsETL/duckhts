@@ -4,10 +4,85 @@
 
 require duckhts
 
+# Mutators must receive constant NULLs rather than be folded to SQL NULL.
+statement error
+SELECT duckhts_cgranges_create(NULL);
+----
+duckhts_cgranges_create: name must be non-null
+
+statement error
+SELECT duckhts_cgranges_index(NULL);
+----
+duckhts_cgranges_index: name must be non-null
+
+statement error
+SELECT duckhts_cgranges_destroy(NULL);
+----
+duckhts_cgranges_destroy: name must be non-null
+
 query I
 SELECT duckhts_cgranges_create('x');
 ----
 1
+
+statement error
+SELECT duckhts_cgranges_add(NULL, 'chr1', 10, 20);
+----
+duckhts_cgranges_add: name, chrom, start, and end must be non-null
+
+statement error
+SELECT duckhts_cgranges_add('x', NULL, 10, 20);
+----
+duckhts_cgranges_add: name, chrom, start, and end must be non-null
+
+statement error
+SELECT duckhts_cgranges_add('x', 'chr1', NULL, 20);
+----
+duckhts_cgranges_add: name, chrom, start, and end must be non-null
+
+statement error
+SELECT duckhts_cgranges_add('x', 'chr1', 10, NULL, 'label');
+----
+duckhts_cgranges_add: name, chrom, start, and end must be non-null
+
+# A non-NULL label establishes the registry payload type. Subsequent NULL
+# labels remain stored intervals for every label overload.
+foreach type VARCHAR BIGINT DOUBLE BOOLEAN
+
+query I
+SELECT duckhts_cgranges_create('null_labels');
+----
+1
+
+query I
+SELECT duckhts_cgranges_add('null_labels', 'chr1', 10, 20, '1'::${type});
+----
+1
+
+query I
+SELECT duckhts_cgranges_add('null_labels', 'chr1', 10, 20, NULL::${type});
+----
+1
+
+query I
+SELECT duckhts_cgranges_index('null_labels');
+----
+1
+
+query II
+SELECT interval_ordinal, label IS NULL
+FROM duckhts_cgranges_overlaps('null_labels', 'chr1', 10, 20)
+ORDER BY interval_ordinal;
+----
+0	false
+1	true
+
+query I
+SELECT duckhts_cgranges_destroy('null_labels');
+----
+1
+
+endloop
 
 query I
 SELECT duckhts_cgranges_add('x', 'chr1', 10, 20);
@@ -458,3 +533,49 @@ query I
 SELECT duckhts_cgranges_destroy('x');
 ----
 1
+
+# A NULL label first leaves the index without label storage; a later typed label
+# must allocate it, and the earlier intervals keep their NULL label.
+statement ok
+SELECT duckhts_cgranges_create('null_first_varchar');
+
+statement ok
+SELECT duckhts_cgranges_add('null_first_varchar', 'chr1', 0, 10, NULL::VARCHAR);
+
+statement ok
+SELECT duckhts_cgranges_add('null_first_varchar', 'chr1', 10, 20, 'a');
+
+statement ok
+SELECT duckhts_cgranges_add('null_first_varchar', 'chr1', 20, 30, NULL::VARCHAR);
+
+statement ok
+SELECT duckhts_cgranges_index('null_first_varchar');
+
+query IIT
+SELECT hit.interval_ordinal, hit.interval_start, hit.label
+FROM (SELECT unnest(duckhts_cgranges_overlaps_list('null_first_varchar', 'chr1', 0, 30)) AS hit)
+ORDER BY hit.interval_ordinal;
+----
+0	0	NULL
+1	10	a
+2	20	NULL
+
+statement ok
+SELECT duckhts_cgranges_create('null_first_bigint');
+
+statement ok
+SELECT duckhts_cgranges_add('null_first_bigint', 'chr1', 0, 10, NULL::BIGINT);
+
+statement ok
+SELECT duckhts_cgranges_add('null_first_bigint', 'chr1', 10, 20, 42::BIGINT);
+
+statement ok
+SELECT duckhts_cgranges_index('null_first_bigint');
+
+query IIT
+SELECT hit.interval_ordinal, hit.interval_start, hit.label
+FROM (SELECT unnest(duckhts_cgranges_overlaps_list('null_first_bigint', 'chr1', 0, 20)) AS hit)
+ORDER BY hit.interval_ordinal;
+----
+0	0	NULL
+1	10	42

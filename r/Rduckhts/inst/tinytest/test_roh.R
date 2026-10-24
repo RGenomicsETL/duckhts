@@ -163,7 +163,8 @@ test_roh_validation <- function() {
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", af_table = "x"), "exactly one of af_tag, af_table, or ancestry relations")
   expect_error(rduckhts_roh(con, vcf, reference_table = "x"), "must be supplied together")
   expect_error(rduckhts_roh(con, vcf, reference_table = "x", proportions_table = "y",
-                            af_clamp = 0.5), "af_clamp must be")
+                            af_clamp = 0.5),
+               "af_clamp must be one finite number")
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", hw_to_az = 2), "hw_to_az must be")
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", az_to_hw = -1), "az_to_hw must be")
   expect_error(rduckhts_roh(con, vcf, af_tag = "AF", gt_error = -1), "gt_error must be")

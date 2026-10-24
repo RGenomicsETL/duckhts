@@ -1,12 +1,45 @@
 # DuckHTS Extension News
 
-# duckhts 2.0.0.9000 (development)
+# duckhts 2.0.1
 
+- DuckDB 2.0 binds a prepared statement again at every `EXECUTE`, so a prepared
+  BCF/VCF scan reads an index that was changed after `PREPARE`; the retained-plan
+  behaviour described for DuckDB 1.5 no longer applies there. A replaced index is a new
+  bind and gives what a fresh query gives, including an error for an index that does not
+  match the data file (`Invalid BGZF header`), and a region query without its index
+  fails at bind. Reproduced with the DuckDB 2.0.0 Python wheel against the release
+  build; the same replacement sequence is exact on DuckDB 1.5.2.
+- `duckhts_somalier_sex` documents that `x_hom_ref` and `x_hom_alt` count A/B panel
+  genotypes. Reviewed against Somalier 0.3.5 and 0.3.6: the golden-section constant of
+  0.3.6 is already 0.618 here and its two-site witness is pinned by the native test;
+  imputing unknown genotypes as reference, seeded pair subsampling and unmatched-path
+  errors have no counterpart in these functions.
 - The distribution pipeline builds with the toolchain duckdb/community-extensions uses
   for DuckDB 2.0 (extension-ci-tools v2.0-cyanoptera at DuckDB commit d54cbbe3 until the
   v2.0.0 tag exists, Emscripten 6.0.9) and also runs on pushes to `develop`, so a wasm
   link or toolchain failure is caught here rather than on a community pull request. The
   `extension-ci-tools` submodule moves to that branch; its C API makefiles are unchanged.
+- `duckhts_cgranges_add()` no longer writes to unallocated label storage when an index
+  starts with NULL labels and a typed label is added later (a segmentation fault); the
+  earlier intervals keep their NULL label.
+- Low-pass compatibility benchmarks record matched 1×/2×/4× workloads on DuckDB
+  1.5 and 2.0, with memory ceilings and exact keyed result comparisons.
+- SQL and R conformance checks cover DuckDB 2.0 grouping, delimiter-CTE plans,
+  and invalid-SQL diagnostics while checking the same results and rejection cases.
+- BGZF compression and decompression run during query execution, not binding.
+  Prepared queries support DuckDB 2.0 rebinding without duplicate file writes or
+  premature input removal. Overwrite protection and failure cleanup remain in effect.
+- Low-pass count-mixture queries support DuckDB 2.0 window binding while retaining
+  block-size validation and the existing block assignment.
+- Cgranges mutators reject NULL names and coordinates and retain intervals with
+  NULL labels, including constant NULL arguments under DuckDB 2.0.
+- Rduckhts 2.0.1.0.1.0 enforces the open upper endpoint of
+  `af_clamp` with an explicit `< 0.5` comparison and checks the package under
+  a pinned R-devel runtime configured with `--disable-long-double`.
+- BCF conformance tests rewrite indexes between reader binding and scanning,
+  with before-bind controls, and keep matching data/index pairs across prepared
+  executions. The scanning contract documents DuckDB 2.0's C table-function
+  rebinding and the index snapshot lifetime.
 
 # duckhts 2.0.0
 
