@@ -511,7 +511,15 @@ test_bcftools_norm <- function() {
       length(match_positions)
     }
   }
-  expect_equal(fixed_count("LEFT_DELIM_JOIN", plan_split_text), 1)
+  # DuckDB 1.5 decorrelates the split with one LEFT_DELIM_JOIN. DuckDB 2.0 plans
+  # it without one; either way the split must not repeat the delimited join.
+  engine <- sub("^v", "", DBI::dbGetQuery(con, "SELECT version() AS v")$v[[1]])
+  delim_joins <- fixed_count("LEFT_DELIM_JOIN", plan_split_text)
+  if (numeric_version(sub("[^0-9.].*$", "", engine)) >= "2.0.0") {
+    expect_true(delim_joins <= 1L)
+  } else {
+    expect_equal(delim_joins, 1)
+  }
   expect_equal(fixed_count("bcftools_norm_row", plan_split_text), 1)
 
   phased_fields_path <- system.file(

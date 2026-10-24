@@ -2,6 +2,31 @@
 
 # duckhts 2.0.0.9000 (development)
 
+- DuckDB 2.0 binds a prepared statement again at every `EXECUTE`, so a prepared
+  BCF/VCF scan reads an index that was changed after `PREPARE`; the retained-plan
+  behaviour described for DuckDB 1.5 no longer applies there. A replaced index is a new
+  bind and gives what a fresh query gives, including an error for an index that does not
+  match the data file (`Invalid BGZF header`), and a region query without its index
+  fails at bind. Reproduced with the DuckDB 2.0.0 Python wheel against the release
+  build; the same replacement sequence is exact on DuckDB 1.5.2.
+- `bgzip()` and `bgunzip()` compress or decompress when the query runs, not when it is
+  bound. DuckDB 2.0 and R's prepare-then-execute bind a statement twice, so the first
+  bind wrote the output (or, with `keep := false`, removed the input) and the second bind
+  failed with "already exists" or "cannot open input". A missing input is now reported as
+  an execution error rather than a binder error.
+- `duckhts_count_mixture_lowpass()` validates `block_bases` once in its own step. DuckDB 2.0
+  rejects a volatile expression (the whole-number check calls `error()`) in a window
+  `ORDER BY`.
+- `duckhts_somalier_sex` documents that `x_hom_ref` and `x_hom_alt` count A/B panel
+  genotypes. Reviewed against Somalier 0.3.5 and 0.3.6: the golden-section constant of
+  0.3.6 is already 0.618 here and its two-site witness is pinned by the native test;
+  imputing unknown genotypes as reference, seeded pair subsampling and unmatched-path
+  errors have no counterpart in these functions.
+- `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
+  explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
+  and no-long-double R builds.
+- The R package matrix checks a pinned R-devel runtime configured with
+  `--disable-long-double`, alongside the Fedora GCC 16 profile.
 - The distribution pipeline builds with the toolchain duckdb/community-extensions uses
   for DuckDB 2.0 (extension-ci-tools v2.0-cyanoptera at DuckDB commit d54cbbe3 until the
   v2.0.0 tag exists, Emscripten 6.0.9) and also runs on pushes to `develop`, so a wasm

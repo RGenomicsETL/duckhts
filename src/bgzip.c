@@ -19,8 +19,18 @@ DUCKDB_EXTENSION_EXTERN
 
 #define BGZIP_IO_BUF_SIZE (64 * 1024)
 
+/* Bind validates and records the request only. The compression runs in init:
+ * DuckDB binds a statement again at EXECUTE (R's prepare-then-execute and
+ * DuckDB 2.0 prepared statements do), and a bind that already wrote the output
+ * or removed the input made the second bind fail. */
 typedef struct {
-    char *path;
+    char *input_path;
+    char *path; /* output */
+    int threads;
+    int level;
+    int keep;
+    int overwrite;
+    int decompress;
     int64_t bytes_in;
     int64_t bytes_out;
     int emitted;
@@ -70,6 +80,7 @@ static void destroy_bgzip_bind(void *data) {
     bgzip_bind_t *bind = (bgzip_bind_t *)data;
     if (!bind) return;
     if (bind->path) duckdb_free(bind->path);
+    if (bind->input_path) duckdb_free(bind->input_path);
     duckdb_free(bind);
 }
 
@@ -86,6 +97,147 @@ static void add_bgzip_result_columns(duckdb_bind_info info) {
     duckdb_destroy_logical_type(&bigint_type);
 }
 
+static int bgzip_execute(const bgzip_bind_t *bind, int64_t *bytes_in_out, int64_t *bytes_out_out,
+                         char *err, size_t err_size) {
+    const char *input_path = bind->input_path;
+    const char *output_path = bind->path;
+    const int decompress = bind->decompress;
+    const int overwrite = bind->overwrite;
+    const int threads = bind->threads;
+    const int level = bind->level;
+    int64_t bytes_in = 0;
+    int64_t bytes_out = 0;
+    FILE *plain_fp = NULL;
+    BGZF *bgzf_fp = NULL;
+    duckhts_output_owner_t owned = {0};
+    int fd;
+    char io_buf[BGZIP_IO_BUF_SIZE];
+
+    if (!overwrite) {
+        struct stat st;
+        if (stat(output_path, &st) == 0) {
+            snprintf(err, err_size, "%s: output '%s' already exists (use overwrite := TRUE to replace)",
+                     decompress ? "bgunzip" : "bgzip", output_path);
+            return -1;
+        }
+    }
+
+    if (decompress) {
+        bgzf_fp = bgzf_open(input_path, "r");
+        if (!bgzf_fp) {
+            snprintf(err, err_size, "bgunzip: cannot open input %s", input_path);
+            return -1;
+        }
+        if (threads > 1 && bgzf_mt(bgzf_fp, threads, 256) != 0) {
+            snprintf(err, err_size, "bgunzip: failed to enable multithreaded BGZF I/O");
+            bgzf_close(bgzf_fp);
+            return -1;
+        }
+        fd = duckhts_output_open(output_path, overwrite, &owned);
+        if (fd < 0) {
+            snprintf(err, err_size, "bgunzip: cannot open output %s: %s", output_path, strerror(errno));
+            bgzf_close(bgzf_fp);
+            return -1;
+        }
+        plain_fp = duckhts_output_fdopen(fd);
+        if (!plain_fp) {
+            duckhts_output_close_fd(fd);
+            snprintf(err, err_size, "bgunzip: cannot attach output stream");
+            goto output_error;
+        }
+        for (;;) {
+            ssize_t n_read = bgzf_read(bgzf_fp, io_buf, sizeof(io_buf));
+            if (n_read < 0) {
+                snprintf(err, err_size, "bgunzip: read error");
+                goto output_error;
+            }
+            if (n_read == 0) break;
+            if (fwrite(io_buf, 1, (size_t)n_read, plain_fp) != (size_t)n_read) {
+                snprintf(err, err_size, "bgunzip: write error");
+                goto output_error;
+            }
+            bytes_out += n_read;
+        }
+        if (fclose(plain_fp) != 0) {
+            plain_fp = NULL;
+            snprintf(err, err_size, "bgunzip: close error");
+            goto output_error;
+        }
+        plain_fp = NULL;
+        if (bgzf_close(bgzf_fp) != 0) {
+            bgzf_fp = NULL;
+            snprintf(err, err_size, "bgunzip: close error");
+            goto output_error;
+        }
+        bgzf_fp = NULL;
+        if (stat_file_size(input_path, &bytes_in) != 0) bytes_in = 0;
+    } else {
+        char mode[8];
+        plain_fp = fopen(input_path, "rb");
+        if (!plain_fp) {
+            snprintf(err, err_size, "bgzip: cannot open input %s: %s", input_path, strerror(errno));
+            return -1;
+        }
+        if (level >= 0 && level <= 9) snprintf(mode, sizeof(mode), "w%d", level);
+        else snprintf(mode, sizeof(mode), "w");
+        fd = duckhts_output_open(output_path, overwrite, &owned);
+        if (fd < 0) {
+            snprintf(err, err_size, "bgzip: cannot open output %s: %s", output_path, strerror(errno));
+            fclose(plain_fp);
+            return -1;
+        }
+        bgzf_fp = bgzf_dopen(fd, mode);
+        if (!bgzf_fp) {
+            duckhts_output_close_fd(fd);
+            snprintf(err, err_size, "bgzip: cannot attach BGZF output");
+            goto output_error;
+        }
+        if (threads > 1 && bgzf_mt(bgzf_fp, threads, 256) != 0) {
+            snprintf(err, err_size, "bgzip: failed to enable multithreaded BGZF I/O");
+            goto output_error;
+        }
+        for (;;) {
+            size_t n_read = fread(io_buf, 1, sizeof(io_buf), plain_fp);
+            if (n_read > 0) {
+                if (bgzf_write(bgzf_fp, io_buf, n_read) < 0) {
+                    snprintf(err, err_size, "bgzip: write error");
+                    goto output_error;
+                }
+                bytes_in += (int64_t)n_read;
+            }
+            if (n_read < sizeof(io_buf)) {
+                if (ferror(plain_fp)) {
+                    snprintf(err, err_size, "bgzip: read error");
+                    goto output_error;
+                }
+                break;
+            }
+        }
+        fclose(plain_fp);
+        plain_fp = NULL;
+        if (bgzf_close(bgzf_fp) != 0) {
+            bgzf_fp = NULL;
+            snprintf(err, err_size, "bgzip: close error");
+            goto output_error;
+        }
+        bgzf_fp = NULL;
+        if (stat_file_size(output_path, &bytes_out) != 0) bytes_out = 0;
+    }
+
+    if (!bind->keep) {
+        unlink(input_path);
+    }
+    *bytes_in_out = bytes_in;
+    *bytes_out_out = bytes_out;
+    return 0;
+
+output_error:
+    if (plain_fp) fclose(plain_fp);
+    if (bgzf_fp) bgzf_close(bgzf_fp);
+    duckhts_output_cleanup(output_path, owned);
+    return -1;
+}
+
 static void bgzip_bind_common(duckdb_bind_info info, int decompress) {
     duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
     char *input_path = duckdb_get_varchar(path_val);
@@ -95,13 +247,7 @@ static void bgzip_bind_common(duckdb_bind_info info, int decompress) {
     int level = -1;
     int keep = 1;
     int overwrite = 0;
-    int64_t bytes_in = 0;
-    int64_t bytes_out = 0;
-    FILE *plain_fp = NULL;
-    BGZF *bgzf_fp = NULL;
-    duckhts_output_owner_t owned = {0};
-    int fd;
-    char io_buf[BGZIP_IO_BUF_SIZE];
+    bgzip_bind_t *bind;
 
     duckdb_destroy_value(&path_val);
     if (!input_path || input_path[0] == '\0') {
@@ -141,6 +287,7 @@ static void bgzip_bind_common(duckdb_bind_info info, int decompress) {
         }
     }
 
+    /* An existing output is refused here, before any work, and again in init. */
     if (!overwrite) {
         struct stat st;
         if (stat(output_path, &st) == 0) {
@@ -154,146 +301,17 @@ static void bgzip_bind_common(duckdb_bind_info info, int decompress) {
         }
     }
 
-    if (decompress) {
-        bgzf_fp = bgzf_open(input_path, "r");
-        if (!bgzf_fp) {
-            char err[512];
-            snprintf(err, sizeof(err), "bgunzip: cannot open input %s", input_path);
-            duckdb_bind_set_error(info, err);
-            duckdb_free(input_path);
-            duckdb_free(output_path);
-            return;
-        }
-        if (threads > 1 && bgzf_mt(bgzf_fp, threads, 256) != 0) {
-            duckdb_bind_set_error(info, "bgunzip: failed to enable multithreaded BGZF I/O");
-            bgzf_close(bgzf_fp);
-            duckdb_free(input_path);
-            duckdb_free(output_path);
-            return;
-        }
-        fd = duckhts_output_open(output_path, overwrite, &owned);
-        if (fd < 0) {
-            char err[512];
-            snprintf(err, sizeof(err), "bgunzip: cannot open output %s: %s", output_path, strerror(errno));
-            duckdb_bind_set_error(info, err);
-            bgzf_close(bgzf_fp);
-            duckdb_free(input_path);
-            duckdb_free(output_path);
-            return;
-        }
-        plain_fp = duckhts_output_fdopen(fd);
-        if (!plain_fp) {
-            duckhts_output_close_fd(fd);
-            duckdb_bind_set_error(info, "bgunzip: cannot attach output stream");
-            goto output_error;
-        }
-        for (;;) {
-            ssize_t n_read = bgzf_read(bgzf_fp, io_buf, sizeof(io_buf));
-            if (n_read < 0) {
-                duckdb_bind_set_error(info, "bgunzip: read error");
-                goto output_error;
-            }
-            if (n_read == 0) break;
-            if (fwrite(io_buf, 1, (size_t)n_read, plain_fp) != (size_t)n_read) {
-                duckdb_bind_set_error(info, "bgunzip: write error");
-                goto output_error;
-            }
-            bytes_out += n_read;
-        }
-        if (fclose(plain_fp) != 0) {
-            plain_fp = NULL;
-            duckdb_bind_set_error(info, "bgunzip: close error");
-            goto output_error;
-        }
-        plain_fp = NULL;
-        if (bgzf_close(bgzf_fp) != 0) {
-            bgzf_fp = NULL;
-            duckdb_bind_set_error(info, "bgunzip: close error");
-            goto output_error;
-        }
-        bgzf_fp = NULL;
-        if (stat_file_size(input_path, &bytes_in) != 0) bytes_in = 0;
-    } else {
-        char mode[8];
-        plain_fp = fopen(input_path, "rb");
-        if (!plain_fp) {
-            char err[512];
-            snprintf(err, sizeof(err), "bgzip: cannot open input %s: %s", input_path, strerror(errno));
-            duckdb_bind_set_error(info, err);
-            duckdb_free(input_path);
-            duckdb_free(output_path);
-            return;
-        }
-        if (level >= 0 && level <= 9) snprintf(mode, sizeof(mode), "w%d", level);
-        else snprintf(mode, sizeof(mode), "w");
-        fd = duckhts_output_open(output_path, overwrite, &owned);
-        if (fd < 0) {
-            char err[512];
-            snprintf(err, sizeof(err), "bgzip: cannot open output %s: %s", output_path, strerror(errno));
-            duckdb_bind_set_error(info, err);
-            fclose(plain_fp);
-            duckdb_free(input_path);
-            duckdb_free(output_path);
-            return;
-        }
-        bgzf_fp = bgzf_dopen(fd, mode);
-        if (!bgzf_fp) {
-            duckhts_output_close_fd(fd);
-            duckdb_bind_set_error(info, "bgzip: cannot attach BGZF output");
-            goto output_error;
-        }
-        if (threads > 1 && bgzf_mt(bgzf_fp, threads, 256) != 0) {
-            duckdb_bind_set_error(info, "bgzip: failed to enable multithreaded BGZF I/O");
-            goto output_error;
-        }
-        for (;;) {
-            size_t n_read = fread(io_buf, 1, sizeof(io_buf), plain_fp);
-            if (n_read > 0) {
-                if (bgzf_write(bgzf_fp, io_buf, n_read) < 0) {
-                    duckdb_bind_set_error(info, "bgzip: write error");
-                    goto output_error;
-                }
-                bytes_in += (int64_t)n_read;
-            }
-            if (n_read < sizeof(io_buf)) {
-                if (ferror(plain_fp)) {
-                    duckdb_bind_set_error(info, "bgzip: read error");
-                    goto output_error;
-                }
-                break;
-            }
-        }
-        fclose(plain_fp);
-        plain_fp = NULL;
-        if (bgzf_close(bgzf_fp) != 0) {
-            bgzf_fp = NULL;
-            duckdb_bind_set_error(info, "bgzip: close error");
-            goto output_error;
-        }
-        bgzf_fp = NULL;
-        if (stat_file_size(output_path, &bytes_out) != 0) bytes_out = 0;
-    }
-
-    if (!keep) {
-        unlink(input_path);
-    }
-
     add_bgzip_result_columns(info);
-    bgzip_bind_t *bind = (bgzip_bind_t *)duckdb_malloc(sizeof(bgzip_bind_t));
+    bind = (bgzip_bind_t *)duckdb_malloc(sizeof(bgzip_bind_t));
+    memset(bind, 0, sizeof(*bind));
+    bind->input_path = input_path;
     bind->path = output_path;
-    bind->bytes_in = bytes_in;
-    bind->bytes_out = bytes_out;
-    bind->emitted = 0;
+    bind->threads = threads;
+    bind->level = level;
+    bind->keep = keep;
+    bind->overwrite = overwrite;
+    bind->decompress = decompress;
     duckdb_bind_set_bind_data(info, bind, destroy_bgzip_bind);
-    duckdb_free(input_path);
-    return;
-
-output_error:
-    if (plain_fp) fclose(plain_fp);
-    if (bgzf_fp) bgzf_close(bgzf_fp);
-    duckhts_output_cleanup(output_path, owned);
-    duckdb_free(input_path);
-    duckdb_free(output_path);
 }
 
 static void bgzip_bind(duckdb_bind_info info) {
@@ -306,7 +324,13 @@ static void bgunzip_bind(duckdb_bind_info info) {
 
 static void bgzip_init(duckdb_init_info info) {
     bgzip_bind_t *bind = (bgzip_bind_t *)duckdb_init_get_bind_data(info);
+    char err[512];
     bind->emitted = 0;
+    bind->bytes_in = 0;
+    bind->bytes_out = 0;
+    if (bgzip_execute(bind, &bind->bytes_in, &bind->bytes_out, err, sizeof(err)) != 0) {
+        duckdb_init_set_error(info, err);
+    }
 }
 
 static void bgzip_scan(duckdb_function_info info, duckdb_data_chunk output) {

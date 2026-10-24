@@ -82,3 +82,22 @@ already exists
 statement ok
 SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_no_clobber',
   '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, overwrite := TRUE);
+
+# bgzip writes at execution, not at bind. DuckDB 2.0, and R's prepare-then-execute,
+# bind a statement twice; a bind that wrote the output made the second bind fail.
+statement ok
+PREPARE bgzip_once AS SELECT success FROM bgzip('__WORKING_DIRECTORY__/test/data/targets.bed',
+  output_path := '__WORKING_DIRECTORY__/writer_bgzip_prepared.bed.gz', keep := true);
+
+query I
+EXECUTE bgzip_once;
+----
+true
+
+statement error
+EXECUTE bgzip_once;
+----
+already exists
+
+statement ok
+DEALLOCATE bgzip_once;

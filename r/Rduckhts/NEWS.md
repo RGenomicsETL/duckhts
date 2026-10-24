@@ -1,3 +1,20 @@
+# Rduckhts 2.0.0.9000.0.1.9
+
+- `rduckhts_bgzip()`, `rduckhts_bgunzip()` and the indexing wrappers that call them work with
+  DuckDB 2.0, whose R client binds a statement twice: the compression now happens when the
+  query runs. `rduckhts_count_mixture_lowpass()` no longer fails to bind on DuckDB 2.0.
+- Tests no longer depend on engine wording or plan shape: the malformed-SQL check in
+  `rduckhts_geno_sites()` asserts only that the call fails, and the split-normalization plan
+  check accepts DuckDB 2.0's plan.
+- The prepared index-replacement test in `test_bcf.R` follows the engine: DuckDB 2.0
+  rebinds a prepared statement at each `EXECUTE`, so the changed index must give the
+  same rows or error as a fresh query, while DuckDB 1.5 keeps the original rows. This
+  fixes the "Invalid BGZF header" test failure seen with DuckDB 2.0.0 on CRAN's Fedora
+  checks and in the DuckDB reverse-dependency check.
+- `rduckhts_roh()` enforces the open upper endpoint of `af_clamp` with an
+  explicit `< 0.5` comparison, so `0.5` is rejected consistently on standard
+  and no-long-double R builds.
+
 # Rduckhts 2.0.0.0.1.9
 
 - New `rduckhts_depth_state_solutions()` and `rduckhts_depth_state_segments()`

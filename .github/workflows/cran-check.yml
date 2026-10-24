@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [r_package, develop, main]
+    branches: [r_package, develop, main, 'release/**']
   workflow_dispatch:
 
 name: R-CMD-check.yaml
@@ -59,6 +59,32 @@ jobs:
           DUCKHTS_FEDORA_CONTAINER: 1
           DUCKHTS_FEDORA_PROFILE: clang
         run: bash scripts/check_cran_fedora_clang.sh
+
+  nold:
+    runs-on: ubuntu-latest
+    name: R-devel without long double
+    timeout-minutes: 90
+    container:
+      # CRAN noLD combines its Fedora/GCC profile with R configured using
+      # --disable-long-double. The Fedora job above covers the compiler axis;
+      # this pinned R-hub image supplies the exact R-devel noLD runtime axis.
+      image: ghcr.io/r-hub/containers/nold@sha256:089518d59395f2f36c357e0fd2325d35c9066438fbaf0854d2204e8603415476
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache noLD R dependencies
+        uses: actions/cache@v4
+        with:
+          path: /root/R-libs
+          key: rduckhts-nold-${{ hashFiles('.github/workflows/cran-check.yml', 'scripts/check_cran_nold.sh', 'r/Rduckhts/DESCRIPTION') }}
+          restore-keys: |
+            rduckhts-nold-
+
+      - name: Build and check without long-double support
+        env:
+          DUCKHTS_NOLD_CONTAINER: 1
+        run: bash scripts/check_cran_nold.sh
 
   R-CMD-check:
     runs-on: ${{ matrix.config.os }}

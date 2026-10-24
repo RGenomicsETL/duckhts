@@ -383,6 +383,12 @@ test_bcf_index_snapshot <- function() {
   fixture <- function(suffix) system.file("extdata", paste0("bcf_scan_contigs.", suffix),
                                          package = "Rduckhts", mustWork = TRUE)
   quote <- function(value) as.character(dbQuoteString(con, value))
+  engine <- sub("^v", "", dbGetQuery(con, "SELECT version() AS v")$v[[1]])
+  prepared_rebinds <- numeric_version(sub("[^0-9.].*$", "", engine)) >= "2.0.0"
+  outcome <- function(statement) {
+    tryCatch(list(rows = dbGetQuery(con, statement)),
+             error = function(e) list(error = TRUE))
+  }
   # Both formats have two occupied contigs. Exercise auto discovery and explicit
   # paths, full/region/sequential scans, complete wide/tidy rows and index counts.
   for (kind in c("bcf", "tbi", "csi")) for (explicit in c(FALSE, TRUE)) {
@@ -418,10 +424,20 @@ test_bcf_index_snapshot <- function() {
           replacement <- paste0(damage, ".", if (kind == "bcf") "bcf.csi" else paste0("vcf.gz.index.", kind))
           expect_true(file.copy(fixture(replacement), index, overwrite = TRUE))
         }
-        # After bind, all mutations retain the original exact rows, including
-        # valid unrelated indexes and matching counts with different offsets.
-        expect_equal(dbGetQuery(con, "EXECUTE index_scan"), expected)
-        expect_equal(dbGetQuery(con, "EXECUTE index_count")$n[[1]], nrow(expected))
+        if (prepared_rebinds) {
+          # DuckDB 2.0 binds a prepared statement again at every EXECUTE, so a
+          # changed index is a new bind: it must give exactly what a fresh
+          # query gives, rows or error, never a stale plan.
+          expect_equal(outcome("EXECUTE index_scan"), outcome(sql))
+          expect_equal(outcome("EXECUTE index_count"),
+                       outcome(paste("SELECT count(*) AS n FROM", source)))
+        } else {
+          # DuckDB 1.5 retains the bound plan: all mutations keep the original
+          # exact rows, including valid unrelated indexes and matching counts
+          # with different offsets.
+          expect_equal(dbGetQuery(con, "EXECUTE index_scan"), expected)
+          expect_equal(dbGetQuery(con, "EXECUTE index_count")$n[[1]], nrow(expected))
+        }
         expect_equal(dbGetQuery(con, "SELECT 4242 AS n")$n, 4242L)
         if (damage %in% c("missing", "corrupt")) {
           if (mode == "region") expect_error(dbGetQuery(con, sql), pattern = "region query requires an index")
