@@ -1,5 +1,10 @@
 # Rduckhts 2.0.1.0.1.0
 
+- `rduckhts_bed()` has a runnable example that indexes intervals with
+  `duckhts_cgranges_from_table()` and counts overlaps with
+  `duckhts_cgranges_count_overlaps()`. It states that the intervals are 0-based and
+  half-open like BED and that `end` is a reserved SQL word, so the column is written
+  `"end"` (see https://github.com/RGenomicsETL/duckhts/issues/356).
 - `rduckhts_bgzip()`, `rduckhts_bgunzip()` and the indexing wrappers that call them work with
   DuckDB 2.0, whose R client binds a statement twice: the compression now happens when the
   query runs. `rduckhts_count_mixture_lowpass()` no longer fails to bind on DuckDB 2.0.
