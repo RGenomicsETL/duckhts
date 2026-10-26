@@ -1,50 +1,31 @@
-This is a corrective release. It updates Rduckhts from 2.0.0.0.1.9 to
-2.0.1.0.1.1 and the bundled DuckHTS extension from 2.0.0 to 2.0.1. It fixes
-the failures CRAN reports for 2.0.0.0.1.9 with DuckDB 2.0.0: the tests on both
-Fedora flavours (`test_bcf.R`, "Invalid BGZF header at offset 447") and the
-no-long-double validation of `af_clamp = 0.5`.
+This is a corrective release. It updates Rduckhts from 2.0.1.0.1.0 to
+2.0.2.0.1.0 and the bundled DuckHTS extension from 2.0.1 to 2.0.2. It fixes the
+test failure CRAN reports for 2.0.1.0.1.0 on r-devel-linux-x86_64-debian-gcc and
+r-oldrel-windows-x86_64: an out-of-memory error at `test_somalier_extraction.R`.
 
-The test failure was in the package's own test, not the reader. DuckDB 2.0
-binds a prepared statement again at every `EXECUTE`, so a test that replaced an
-index file after `PREPARE` and expected the original plan to survive read the
-replaced index. The test now expects a fresh bind on DuckDB 2.0 and keeps the old
-expectation on DuckDB 1.5. The same rebinding exposed three real problems that
-this release also fixes: `bgzip()`/`bgunzip()` did their work at bind time, so a
-second bind failed ("already exists", or the input was already removed with
-`keep := FALSE`); the low-pass macro put a volatile expression in a window
-`ORDER BY`; and an index whose first intervals had NULL labels wrote to
-unallocated storage when a typed label followed. A Parquet wrapper also checked
-a local output path with a DuckDB `glob()` query that failed on one Windows
-R-devel build; it now uses the file system for local paths. Public SQL and R
+That test sets a 128MB memory limit to show that a query's memory does not grow
+with the number of records. It did not fix the thread count. DuckDB gives each
+worker thread its own buffers, and with duckdb 2.0 this query needs about 8 MiB
+plus 2.3 MiB per thread, so the limit failed on hosts with more than about 50
+threads. The test now sets two threads before the limit (about 14 MiB).
+
+The release also fixes functions that wrote files when a query was bound.
+DuckDB 2.0 binds a prepared statement again at every `EXECUTE`, and DBI prepares
+and then executes, so `rduckhts_mosdepth()` and
+`rduckhts_samtools_idxstats(output = ...)` failed with "already exists" on a fresh
+path unless `overwrite = TRUE`. These functions, and the BAM, tabix and FASTA
+index builders, now write once per execution. Three long tests run only with
+`NOT_CRAN=true`, which keeps the check under 10 minutes (the incoming check of
+2.0.1.0.1.0 reported 11 minutes on r-devel-windows-x86_64). Public SQL and R
 signatures are unchanged. Full details are in NEWS.md.
-
-This replaces 2.0.1.0.1.0, which the incoming check answered with one NOTE,
-"Overall checktime 11 min > 10 min" on r-devel-windows-x86_64. Three long tests
-(`test_count_error_fit.R`, `test_depth_state_model.R`, `test_ancestry.R`) now exit
-early unless `NOT_CRAN=true`; that is the only change. Win-builder's R-devel check
-now takes 260 seconds (it was 694) with 190 seconds of installation.
 
 ## Test environments
 
-The published 2.0.0.0.1.9 source reproduces CRAN's failure on this host, in
-three Fedora 44 images with R-devel r90760: Clang 23.1.4 with libc++, GCC 16, and
-GCC 16 with `--disable-long-double`. The exact tarball submitted here
-(`Rduckhts_2.0.1.0.1.1.tar.gz`, SHA-256 `ac618b648eafac081b0541c205137de49be942ab4ebbdcd09c634152c1f27431`)
-passes `R CMD check --as-cran` in those three images and in the R-hub
-no-long-double image: 0 errors, 0 warnings, and only NOTEs (update frequency,
-and CRAN's own `-Wp,-D_FORTIFY_SOURCE=3` flag on Clang). Dependencies were
-refreshed to the newest CRAN versions, including DuckDB 2.0.0. Deviations from
-CRAN's configuration: gfortran instead of flang, no recommended packages, no LTO.
+The package tests pass on this host with `NOT_CRAN=true` (8,312 results, 0
+failures) on duckdb 1.5.5 and on duckdb with engine 2.0.0. The memory threshold was
+measured at 1 to 128 threads with the DuckDB 2.0.0 and 1.5.2 Python wheels.
 
-Win-builder checked the same tarball: R-devel (r90760), R-release (4.6.1) and
-R-oldrelease (4.5.3) each report Status: 1 NOTE, "Days since last update: 4; Number
-of updates in past 6 months: 7", which follows from correcting the previous
-release quickly. Tests pass on all three, in 87 to 176 seconds.
-
-The same package sources passed GitHub Actions on Windows (release, devel and
-4.5.3, including a debugger replay of the full test suite), macOS and Linux, and
-the extension's sanitizer and DuckDB 2.0 gates. The R macOS builder could not be
-used: it reported `DBI` and `duckdb` as not available in its R 4.6 library before
-checking the package.
+`R CMD check --as-cran` of the submitted tarball, in the local CRAN-flavour images
+and on Win-builder, is still to be run and recorded here before submission.
 
 There are no reverse dependencies on CRAN.

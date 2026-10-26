@@ -360,6 +360,12 @@ test_somalier_vcf_count_contract_edges <- function() {
   dbExecute(con, paste0(
     "SET temp_directory=", dbQuoteString(con, spill_directory)
   ))
+  # The budget bounds memory in the number of records, not in threads: DuckDB
+  # gives each worker thread its own buffers. On DuckDB 2.0 this query needs
+  # about 8 MiB plus 2.3 MiB per thread (1.5 needs 10 to 23 MiB from 1 to 64
+  # threads), so 128MB failed on 64-thread CRAN hosts before the duplicate was
+  # seen. Two threads need about 14 MiB.
+  dbExecute(con, "SET threads = 2")
   dbExecute(con, "SET memory_limit='128MB'")
   expect_error(
     rduckhts_somalier_vcf_counts(
@@ -368,6 +374,7 @@ test_somalier_vcf_count_contract_edges <- function() {
     pattern = "multiple source records occur at a panel site"
   )
   dbExecute(con, "SET memory_limit='1GB'")
+  dbExecute(con, "RESET threads")
 }
 
 test_somalier_bam_count_extraction <- function() {

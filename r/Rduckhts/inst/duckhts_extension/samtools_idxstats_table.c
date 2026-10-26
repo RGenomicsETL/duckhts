@@ -38,9 +38,15 @@ typedef struct {
     char *index_path;
     int threads;
     int overwrite;
+} samtools_idxstats_bind_t;
+
+/* Bind records the request; init writes the output. DuckDB 2.0 binds a
+ * prepared statement again at every EXECUTE, so a write at bind would run at
+ * PREPARE and EXPLAIN and make the next bind find its own output. */
+typedef struct {
     int used_index_fast_path;
     int emitted;
-} samtools_idxstats_bind_t;
+} samtools_idxstats_state_t;
 
 static char *append_suffix_idxstats(const char *path, const char *suffix) {
     size_t path_len;
@@ -187,7 +193,8 @@ static int fast_idxstats_to_file(samFile *fp, sam_hdr_t *header, const char *pat
     return 0;
 }
 
-static int run_samtools_idxstats(samtools_idxstats_bind_t *bind, char *err, size_t errlen) {
+static int run_samtools_idxstats(const samtools_idxstats_bind_t *bind, int *used_index_fast_path,
+                                 char *err, size_t errlen) {
     samFile *fp = NULL;
     sam_hdr_t *header = NULL;
     FILE *out = NULL;
@@ -234,7 +241,7 @@ static int run_samtools_idxstats(samtools_idxstats_bind_t *bind, char *err, size
 
     if (hts_get_format(fp)->format == bam) {
         int fast_rc = fast_idxstats_to_file(fp, header, bind->path, bind->index_path, out,
-                                            &bind->used_index_fast_path, err, errlen);
+                                            used_index_fast_path, err, errlen);
         if (fast_rc == 0) {
             rc = 0;
             goto cleanup;
@@ -257,7 +264,7 @@ static int run_samtools_idxstats(samtools_idxstats_bind_t *bind, char *err, size
         }
     }
 
-    bind->used_index_fast_path = 0;
+    *used_index_fast_path = 0;
     if (slow_idxstats_to_file(fp, header, out, bind->threads, err, errlen) != 0) {
         goto cleanup;
     }
@@ -293,9 +300,7 @@ static void samtools_idxstats_bind(duckdb_bind_info info) {
     char *index_path = NULL;
     samtools_idxstats_bind_t *bind = NULL;
     duckdb_value val;
-    char err[512];
 
-    memset(err, 0, sizeof(err));
     duckdb_destroy_value(&path_val);
 
     if (!path || path[0] == '\0') {
@@ -353,12 +358,6 @@ static void samtools_idxstats_bind(duckdb_bind_info info) {
         return;
     }
 
-    if (run_samtools_idxstats(bind, err, sizeof(err)) != 0) {
-        destroy_samtools_idxstats_bind(bind);
-        duckdb_bind_set_error(info, err);
-        return;
-    }
-
     {
         duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
         duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -375,12 +374,29 @@ static void samtools_idxstats_bind(duckdb_bind_info info) {
 }
 
 static void samtools_idxstats_init(duckdb_init_info info) {
-    samtools_idxstats_bind_t *bind = (samtools_idxstats_bind_t *)duckdb_init_get_bind_data(info);
-    bind->emitted = 0;
+    const samtools_idxstats_bind_t *bind =
+        (const samtools_idxstats_bind_t *)duckdb_init_get_bind_data(info);
+    samtools_idxstats_state_t *state =
+        (samtools_idxstats_state_t *)duckdb_malloc(sizeof(samtools_idxstats_state_t));
+    char err[512];
+
+    if (!state) {
+        duckdb_init_set_error(info, "duckhts_samtools_idxstats: out of memory");
+        return;
+    }
+    memset(state, 0, sizeof(*state));
+    duckdb_init_set_init_data(info, state, duckdb_free);
+    duckdb_init_set_max_threads(info, 1);
+    memset(err, 0, sizeof(err));
+    if (run_samtools_idxstats(bind, &state->used_index_fast_path, err, sizeof(err)) != 0) {
+        duckdb_init_set_error(info, err);
+    }
 }
 
 static void samtools_idxstats_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    samtools_idxstats_bind_t *bind = (samtools_idxstats_bind_t *)duckdb_function_get_bind_data(info);
+    const samtools_idxstats_bind_t *bind =
+        (const samtools_idxstats_bind_t *)duckdb_function_get_bind_data(info);
+    samtools_idxstats_state_t *state = (samtools_idxstats_state_t *)duckdb_function_get_init_data(info);
     duckdb_vector success_vec;
     duckdb_vector path_vec;
     duckdb_vector output_path_vec;
@@ -389,7 +405,7 @@ static void samtools_idxstats_scan(duckdb_function_info info, duckdb_data_chunk 
     bool *success_data;
     bool *used_fast_data;
 
-    if (bind->emitted) {
+    if (state->emitted) {
         duckdb_data_chunk_set_size(output, 0);
         return;
     }
@@ -404,12 +420,12 @@ static void samtools_idxstats_scan(duckdb_function_info info, duckdb_data_chunk 
     used_fast_data = (bool *)duckdb_vector_get_data(used_fast_vec);
 
     success_data[0] = true;
-    used_fast_data[0] = bind->used_index_fast_path ? true : false;
+    used_fast_data[0] = state->used_index_fast_path ? true : false;
     duckdb_vector_assign_string_element(path_vec, 0, bind->path ? bind->path : "");
     duckdb_vector_assign_string_element(output_path_vec, 0, bind->output_path ? bind->output_path : "");
     duckdb_vector_assign_string_element(error_vec, 0, "");
 
-    bind->emitted = 1;
+    state->emitted = 1;
     duckdb_data_chunk_set_size(output, 1);
 }
 

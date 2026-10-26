@@ -800,6 +800,13 @@ COPY (
 ) TO '__WORKING_DIRECTORY__/test_somalier_duplicate_stress.vcf'
   (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
 
+# The budget bounds memory in the number of records, not in threads: DuckDB
+# gives each worker thread its own buffers, and on DuckDB 2.0 the query needs
+# about 8 MiB plus 2.3 MiB per thread, so the thread count is fixed before the
+# limit.
+statement ok
+SET threads = 2;
+
 statement ok
 SET memory_limit='128MB';
 
@@ -813,3 +820,6 @@ multiple source records occur at a panel site
 
 statement ok
 SET memory_limit='1GB';
+
+statement ok
+RESET threads;

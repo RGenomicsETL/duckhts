@@ -249,6 +249,18 @@ static char *default_fasta_index_path(const char *path) {
     return out;
 }
 
+static char *copy_index_path(const char *path) {
+    size_t len;
+    char *out;
+
+    if (!path) return NULL;
+    len = strlen(path) + 1;
+    out = (char *)duckdb_malloc(len);
+    if (!out) return NULL;
+    memcpy(out, path, len);
+    return out;
+}
+
 static int seq_parse_scan_mode(const char *mode, int *scan_sequential) {
     if (!scan_sequential) return 0;
     *scan_sequential = 0;
@@ -1456,14 +1468,22 @@ void register_read_fasta_function(duckdb_connection connection) {
     duckdb_destroy_table_function(&tf);
 }
 
+/* Bind records the request; init builds the index (see hts_index_builder.c). */
 typedef struct {
+    char *path;
+    char *requested_index_path;
     char *index_path;
-    int emitted;
 } fasta_index_bind_t;
+
+typedef struct {
+    int emitted;
+} fasta_index_state_t;
 
 static void destroy_fasta_index_bind(void *data) {
     fasta_index_bind_t *b = (fasta_index_bind_t *)data;
     if (!b) return;
+    if (b->path) duckdb_free(b->path);
+    if (b->requested_index_path) duckdb_free(b->requested_index_path);
     if (b->index_path) duckdb_free(b->index_path);
     duckdb_free(b);
 }
@@ -1478,29 +1498,28 @@ static void fasta_index_bind(duckdb_bind_info info) {
         return;
     }
 
-    char *index_path = NULL;
+    char *requested_index_path = NULL;
     duckdb_value idx_val = duckdb_bind_get_named_parameter(info, "index_path");
     if (idx_val && !duckdb_is_null_value(idx_val)) {
-        index_path = duckdb_get_varchar(idx_val);
+        requested_index_path = duckdb_get_varchar(idx_val);
     }
     if (idx_val) duckdb_destroy_value(&idx_val);
 
-    if (fai_build3(file_path, index_path, NULL) != 0) {
-        char err[512];
-        snprintf(err, sizeof(err), "fasta_index: failed to build index for %s", file_path);
-        duckdb_bind_set_error(info, err);
+    fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_malloc(sizeof(fasta_index_bind_t));
+    if (!bind) {
+        duckdb_bind_set_error(info, "fasta_index: out of memory");
         duckdb_free(file_path);
-        if (index_path) duckdb_free(index_path);
+        if (requested_index_path) duckdb_free(requested_index_path);
         return;
     }
-
-    if (!index_path) {
-        index_path = default_fasta_index_path(file_path);
-        if (!index_path) {
-            duckdb_bind_set_error(info, "fasta_index: out of memory");
-            duckdb_free(file_path);
-            return;
-        }
+    bind->path = file_path;
+    bind->requested_index_path = requested_index_path;
+    bind->index_path = requested_index_path ? copy_index_path(requested_index_path)
+                                            : default_fasta_index_path(file_path);
+    if (!bind->index_path) {
+        destroy_fasta_index_bind(bind);
+        duckdb_bind_set_error(info, "fasta_index: out of memory");
+        return;
     }
 
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
@@ -1510,21 +1529,30 @@ static void fasta_index_bind(duckdb_bind_info info) {
     duckdb_destroy_logical_type(&bool_type);
     duckdb_destroy_logical_type(&varchar_type);
 
-    fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_malloc(sizeof(fasta_index_bind_t));
-    bind->index_path = index_path;
-    bind->emitted = 0;
     duckdb_bind_set_bind_data(info, bind, destroy_fasta_index_bind);
-    duckdb_free(file_path);
 }
 
 static void fasta_index_init(duckdb_init_info info) {
-    fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_init_get_bind_data(info);
-    bind->emitted = 0;
+    const fasta_index_bind_t *bind = (const fasta_index_bind_t *)duckdb_init_get_bind_data(info);
+    fasta_index_state_t *state = (fasta_index_state_t *)duckdb_malloc(sizeof(fasta_index_state_t));
+    if (!state) {
+        duckdb_init_set_error(info, "Out of memory");
+        return;
+    }
+    state->emitted = 0;
+    duckdb_init_set_init_data(info, state, duckdb_free);
+    duckdb_init_set_max_threads(info, 1);
+    if (fai_build3(bind->path, bind->requested_index_path, NULL) != 0) {
+        char err[512];
+        snprintf(err, sizeof(err), "fasta_index: failed to build index for %s", bind->path);
+        duckdb_init_set_error(info, err);
+    }
 }
 
 static void fasta_index_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    fasta_index_bind_t *bind = (fasta_index_bind_t *)duckdb_function_get_bind_data(info);
-    if (bind->emitted) {
+    const fasta_index_bind_t *bind = (const fasta_index_bind_t *)duckdb_function_get_bind_data(info);
+    fasta_index_state_t *state = (fasta_index_state_t *)duckdb_function_get_init_data(info);
+    if (state->emitted) {
         duckdb_data_chunk_set_size(output, 0);
         return;
     }
@@ -1532,8 +1560,8 @@ static void fasta_index_scan(duckdb_function_info info, duckdb_data_chunk output
     duckdb_vector index_vec = duckdb_data_chunk_get_vector(output, 1);
     bool *success_data = (bool *)duckdb_vector_get_data(success_vec);
     success_data[0] = true;
-    duckdb_vector_assign_string_element(index_vec, 0, bind->index_path ? bind->index_path : "");
-    bind->emitted = 1;
+    duckdb_vector_assign_string_element(index_vec, 0, bind->index_path);
+    state->emitted = 1;
     duckdb_data_chunk_set_size(output, 1);
 }
 

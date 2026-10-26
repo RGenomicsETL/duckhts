@@ -14,12 +14,14 @@ test_samtools_idxstats <- function() {
   range_bam <- system.file("extdata", "range.bam", package = "Rduckhts")
   range_bai <- system.file("extdata", "range.bam.bai", package = "Rduckhts")
 
+  # A fresh output path needs no overwrite, also on DuckDB 2.0, where the
+  # DBI prepare-then-execute binds twice
+  # (https://github.com/RGenomicsETL/duckhts/issues/358).
   bam_out <- tempfile("idxstats_mixed_", fileext = ".txt")
   bam_res <- rduckhts_samtools_idxstats(
     con,
     mixed_bam,
-    output = bam_out,
-    overwrite = TRUE
+    output = bam_out
   )
   expect_true(isTRUE(bam_res$success[[1]]))
   expect_true(isTRUE(bam_res$used_index_fast_path[[1]]))
