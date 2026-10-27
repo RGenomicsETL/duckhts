@@ -1,8 +1,8 @@
 # Rduckhts 2.0.2.0.1.0
 
 - `rduckhts_mosdepth()`, `rduckhts_samtools_idxstats()`, `rduckhts_bam_index()`,
-  `rduckhts_tabix_index()` and `rduckhts_fasta_index()` write their files once per
-  execution; `rduckhts_bcf_index()` still builds its index when the query is prepared. With duckdb 2.0,
+  `rduckhts_bcf_index()`, `rduckhts_tabix_index()` and `rduckhts_fasta_index()` write
+  their files once per execution. With duckdb 2.0,
   `rduckhts_mosdepth()` and `rduckhts_samtools_idxstats(output = ...)` failed with
   "already exists" on a fresh path unless `overwrite = TRUE`, because DBI prepares and
   then executes each query (https://github.com/RGenomicsETL/duckhts/issues/358).

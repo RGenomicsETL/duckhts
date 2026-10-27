@@ -2714,7 +2714,7 @@ table
 
 ### Execution
 
-Unlike the other index builders, bcf_index builds the index during binding, so PREPARE and EXPLAIN build it, and DuckDB 2.0 builds it again at each EXECUTE. A missing or unreadable input is a binder error. Rebuilding gives the same index. Moving the build to execution is tracked in https://github.com/RGenomicsETL/duckhts/issues/358.
+The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
 
 ### Examples
 

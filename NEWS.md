@@ -2,19 +2,19 @@
 
 # duckhts 2.0.2
 
-- `duckhts_mosdepth`, `duckhts_samtools_idxstats`, `bam_index`, `tabix_index` and
-  `fasta_index` do their work during query execution, not binding
+- `duckhts_mosdepth`, `duckhts_samtools_idxstats`, `bam_index`, `bcf_index`,
+  `tabix_index` and `fasta_index` do their work during query execution, not binding
   (https://github.com/RGenomicsETL/duckhts/issues/358). DuckDB 2.0 binds a prepared
   statement again at every `EXECUTE`, so these functions wrote their files at `PREPARE`
   and `EXPLAIN`, and `duckhts_mosdepth` and `duckhts_samtools_idxstats` then failed with
   "already exists" on a fresh output path. Binding, `PREPARE` and `EXPLAIN` without
   `ANALYZE` now write no file, and each execution writes once. A missing or unreadable
-  input to these index builders is now an execution error, not a binder error.
-  `bcf_index` still builds at binding: the BCF index-snapshot tests use it to replace an
-  index between a reader's bind and its scan, and no other window in one statement is
-  deterministic (a materialized CTE is not ordered before the reader's scan). Its
-  rebuild gives the same index. `test/sql/writer_no_clobber.test` and the DuckDB 2.0 load
-  check cover the five functions.
+  input to the index builders is now an execution error, not a binder error.
+  `test/sql/writer_no_clobber.test` and the DuckDB 2.0 load check cover the six
+  functions. The `read_bcf` index-snapshot tests used `bcf_index`'s bind-time write to
+  replace an index after the reader bound; they now place `bcf_index` on the build side
+  of a cross product, which DuckDB finishes before the reader scans, and a `read_blob`
+  control checks that order.
 - The Somalier duplicate-record stress test fixes `threads = 2` before its 128MB memory
   limit. DuckDB gives each worker thread its own buffers, so a fixed limit without a fixed
   thread count was wrong in the test. The stress input puts 1M records at one panel site,

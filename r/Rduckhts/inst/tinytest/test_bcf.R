@@ -410,31 +410,40 @@ test_bcf_index_snapshot <- function() {
       expected <- dbGetQuery(con, paste0(projection, if (tidy) "expected_tidy" else "expected_sites",
         if (mode == "region") " WHERE CHROM='chr3'" else "", " ORDER BY ALL"))
       expect_equal(dbGetQuery(con, sql), expected)
-      # Rewrites in bind callbacks occur after read_bcf binds and before it scans.
+      # A build-side bcf_index rewrites the index after read_bcf binds and
+      # before it scans; the reader must keep the index it bound.
       for (replacement in c("empty", "shifted", "identical")) {
         replacement_path <- if (replacement == "identical") path else
           fixture(paste0(replacement, ".", if (kind == "bcf") "bcf" else "vcf.gz"))
         for (count in c(FALSE, TRUE)) {
-          bound_sql <- .bcf_snapshot_query(con, source, path, index,
-                                           replacement_path, min_shift, count)
-          observed <- dbGetQuery(con, bound_sql)
+          statements <- .bcf_snapshot_statements(con, source, path, index,
+                                                 replacement_path, min_shift, count)
+          dbGetQuery(con, statements$restore)
+          observed <- dbGetQuery(con, statements$after_bind)
           if (count) expect_equal(observed$n[[1]], nrow(expected))
           else expect_equal(observed, expected)
         }
       }
+      shifted_path <- fixture(paste0("shifted.", if (kind == "bcf") "bcf" else "vcf.gz"))
+      statements <- .bcf_snapshot_statements(con, source, path, index, shifted_path, min_shift)
+      # The window exists: a scan on the probe side reads the replaced index.
+      dbGetQuery(con, statements$replace)
+      shifted_digest <- unname(tools::md5sum(index))
+      dbGetQuery(con, statements$restore)
+      expect_false(identical(unname(tools::md5sum(index)), shifted_digest))
+      expect_equal(dbGetQuery(con, statements$window)$digest, shifted_digest)
       # Before reader binding, the shifted BCF offset hits an invalid BGZF header;
       # shifted Tabix offsets are beyond this local VCF's EOF (bcftools agrees).
       # Sequential mode ignores either index and must return the complete file.
-      shifted_path <- fixture(paste0("shifted.", if (kind == "bcf") "bcf" else "vcf.gz"))
-      control_sql <- .bcf_snapshot_query(con, source, path, index, shifted_path,
-                                         min_shift, replace_before_bind = TRUE)
+      dbGetQuery(con, statements$restore)
+      dbGetQuery(con, statements$replace)
       if (mode == "sequential") {
-        expect_equal(dbGetQuery(con, control_sql), expected)
+        expect_equal(dbGetQuery(con, sql), expected)
       } else if (kind == "bcf") {
-        expect_error(dbGetQuery(con, control_sql),
+        expect_error(dbGetQuery(con, sql),
                      pattern = "read_bcf: failed to read or parse BCF/VCF record")
       } else {
-        expect_equal(dbGetQuery(con, control_sql), expected[FALSE, ])
+        expect_equal(dbGetQuery(con, sql), expected[FALSE, ])
       }
       # Completed results also remain valid after later file changes. This does
       # not test scan overlap: dbSendQuery can finish the scan before returning.

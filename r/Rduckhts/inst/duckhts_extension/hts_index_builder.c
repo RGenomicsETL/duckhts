@@ -22,13 +22,8 @@ typedef enum {
 } index_build_kind_t;
 
 /* Bind records the request; init builds the index. DuckDB 2.0 binds a prepared
- * statement again at every EXECUTE, so work done at bind runs at PREPARE, EXPLAIN
- * and once more per execution.
- *
- * bcf_index is the exception: it still builds at bind. The BCF index-snapshot
- * tests replace an index between a reader's bind and its scan by placing
- * bcf_index calls around read_bcf in one FROM clause, and no other window is
- * deterministic within one statement. Moving it waits for a replacement window
+ * statement again at every EXECUTE, so work done at bind would run at PREPARE,
+ * EXPLAIN and once more per execution
  * (https://github.com/RGenomicsETL/duckhts/issues/358). */
 typedef struct {
     index_build_kind_t kind;
@@ -199,7 +194,6 @@ static void init_index_build(duckdb_init_info info) {
     state->emitted = 0;
     duckdb_init_set_init_data(info, state, duckdb_free);
     duckdb_init_set_max_threads(info, 1);
-    if (bind->kind == INDEX_BUILD_BCF) return; /* built at bind */
     if (run_index_build(bind, err, sizeof(err)) != 0) {
         duckdb_init_set_error(info, err);
     }
@@ -275,7 +269,6 @@ static void bind_bcf_index(duckdb_bind_info info) {
     duckdb_value val;
     int min_shift = 0;
     int threads = 4;
-    char err[512];
 
     duckdb_destroy_value(&path_val);
     if (!path || path[0] == '\0') {
@@ -301,11 +294,6 @@ static void bind_bcf_index(duckdb_bind_info info) {
     bind = new_index_build_bind(INDEX_BUILD_BCF, path, index_path, min_shift, threads);
     if (!bind) {
         duckdb_bind_set_error(info, "bcf_index: out of memory");
-        return;
-    }
-    if (run_index_build(bind, err, sizeof(err)) != 0) {
-        destroy_index_build_bind(bind);
-        duckdb_bind_set_error(info, err);
         return;
     }
     add_result_columns(info);

@@ -85,6 +85,8 @@ try:
     writers = {
         "bam_index": (f"bam_index('{bam}', index_path := '{work}/range.bai', threads := 1)",
                       work / "range.bai"),
+        "bcf_index": (f"bcf_index('{root}/test/data/bcf_scan_contigs.bcf', index_path := '{work}/contigs.csi', threads := 1)",
+                      work / "contigs.csi"),
         "tabix_index": (f"tabix_index('{root}/test/data/bcf_scalar_counts.vcf.gz', index_path := '{work}/scalar.tbi', threads := 1)",
                         work / "scalar.tbi"),
         "fasta_index": (f"fasta_index('{root}/test/data/ce.fa', index_path := '{work}/ce.fai')",
