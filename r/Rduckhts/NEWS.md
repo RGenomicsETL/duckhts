@@ -1,4 +1,4 @@
-# Rduckhts 2.0.2.0.1.0
+# Rduckhts 2.0.2.0.1.1
 
 - `rduckhts_mosdepth()`, `rduckhts_samtools_idxstats()`, `rduckhts_bam_index()`,
   `rduckhts_bcf_index()`, `rduckhts_tabix_index()` and `rduckhts_fasta_index()` write

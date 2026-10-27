@@ -1,5 +1,5 @@
 This is a corrective release. It updates Rduckhts from 2.0.1.0.1.0 to
-2.0.2.0.1.0 and the bundled DuckHTS extension from 2.0.1 to 2.0.2. It fixes the
+2.0.2.0.1.1 and the bundled DuckHTS extension from 2.0.1 to 2.0.2. It fixes the
 test failure CRAN reports for 2.0.1.0.1.0 on r-devel-linux-x86_64-debian-gcc and
 r-oldrel-windows-x86_64: an out-of-memory error at `test_somalier_extraction.R`.
 
