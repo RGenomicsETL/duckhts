@@ -1,9 +1,25 @@
-# Rduckhts 2.0.1.0.1.1
+# Rduckhts 2.0.2.0.1.1
 
+- `rduckhts_mosdepth()`, `rduckhts_samtools_idxstats()`, `rduckhts_bam_index()`,
+  `rduckhts_bcf_index()`, `rduckhts_tabix_index()` and `rduckhts_fasta_index()` write
+  their files once per execution. With duckdb 2.0,
+  `rduckhts_mosdepth()` and `rduckhts_samtools_idxstats(output = ...)` failed with
+  "already exists" on a fresh path unless `overwrite = TRUE`, because DBI prepares and
+  then executes each query (https://github.com/RGenomicsETL/duckhts/issues/358).
+  Preparing a query no longer writes files. The tests write a fresh output once without
+  `overwrite`.
+- The Somalier duplicate-record stress test sets two threads before its 128MB memory
+  limit. It failed with an out-of-memory error on r-devel-linux-x86_64-debian-gcc and
+  r-oldrel-windows-x86_64 for 2.0.1.0.1.0. DuckDB gives each worker thread its own
+  buffers, and on duckdb 2.0 this query needs about 8 MiB plus 2.3 MiB per thread, so a
+  fixed limit without a fixed thread count held only on hosts with fewer than about 50
+  threads.
 - Three long tests (`test_count_error_fit.R`, `test_depth_state_model.R`, `test_ancestry.R`) run only
   when `NOT_CRAN=true` or `TT_AT_HOME=TRUE`, which keeps the whole check under CRAN's 10 minute
   limit on Windows R-devel (the incoming check of 2.0.1.0.1.0 reported 11 minutes). CI sets
   `NOT_CRAN=true` and still runs them.
+
+# Rduckhts 2.0.1.0.1.0
 
 - `rduckhts_bed()` has a runnable example that indexes intervals with
   `duckhts_cgranges_from_table()` and counts overlaps with

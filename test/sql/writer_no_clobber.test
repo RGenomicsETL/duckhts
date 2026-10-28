@@ -197,3 +197,114 @@ already exists
 statement ok
 SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_no_clobber',
   '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, overwrite := TRUE);
+
+# Index builders, idxstats and mosdepth also work in init, not at bind
+# (https://github.com/RGenomicsETL/duckhts/issues/358). DuckDB 2.0 binds a
+# prepared statement again at every EXECUTE, so a write at bind ran at PREPARE
+# and EXPLAIN, and the next bind found its own output.
+statement ok
+EXPLAIN SELECT * FROM bam_index('__WORKING_DIRECTORY__/test/data/range.bam',
+  index_path := '__WORKING_DIRECTORY__/writer_prepared_range.bai', threads := 1);
+
+statement ok
+PREPARE prepared_bam_index AS SELECT success FROM bam_index('__WORKING_DIRECTORY__/test/data/range.bam',
+  index_path := '__WORKING_DIRECTORY__/writer_prepared_range.bai', threads := 1);
+
+statement ok
+EXPLAIN SELECT * FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/writer_prepared_contigs.csi', threads := 1);
+
+statement ok
+PREPARE prepared_bcf_index AS SELECT success FROM bcf_index('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.bcf',
+  index_path := '__WORKING_DIRECTORY__/writer_prepared_contigs.csi', threads := 1);
+
+statement ok
+PREPARE prepared_tabix_index AS SELECT success FROM tabix_index('__WORKING_DIRECTORY__/test/data/bcf_scalar_counts.vcf.gz',
+  preset := 'vcf', index_path := '__WORKING_DIRECTORY__/writer_prepared_scalar.tbi', threads := 1);
+
+statement ok
+PREPARE prepared_fasta_index AS SELECT success FROM fasta_index('__WORKING_DIRECTORY__/test/data/ce.fa',
+  index_path := '__WORKING_DIRECTORY__/writer_prepared_ce.fai');
+
+statement ok
+EXPLAIN SELECT * FROM duckhts_samtools_idxstats('__WORKING_DIRECTORY__/test/data/range.bam',
+  output := '__WORKING_DIRECTORY__/writer_prepared_idxstats.txt', overwrite := FALSE);
+
+statement ok
+PREPARE prepared_idxstats AS SELECT success FROM duckhts_samtools_idxstats('__WORKING_DIRECTORY__/test/data/range.bam',
+  output := '__WORKING_DIRECTORY__/writer_prepared_idxstats.txt', overwrite := FALSE);
+
+statement ok
+EXPLAIN SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_prepared_mosdepth',
+  '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, no_per_base := TRUE, overwrite := FALSE);
+
+statement ok
+PREPARE prepared_mosdepth AS SELECT success FROM duckhts_mosdepth('__WORKING_DIRECTORY__/writer_prepared_mosdepth',
+  '__WORKING_DIRECTORY__/test/data/range.bam', fast_mode := TRUE, no_per_base := TRUE, overwrite := FALSE);
+
+query IIIIII
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_range.bai')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_contigs.csi')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_scalar.tbi')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_ce.fai')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_idxstats.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_mosdepth.mosdepth.summary.txt'));
+----
+0	0	0	0	0	0
+
+query I
+EXECUTE prepared_bam_index;
+----
+true
+
+query I
+EXECUTE prepared_bcf_index;
+----
+true
+
+query I
+EXECUTE prepared_tabix_index;
+----
+true
+
+query I
+EXECUTE prepared_fasta_index;
+----
+true
+
+query I
+EXECUTE prepared_idxstats;
+----
+true
+
+query I
+EXECUTE prepared_mosdepth;
+----
+true
+
+query IIIIII
+SELECT (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_range.bai')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_contigs.csi')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_scalar.tbi')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_ce.fai')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_idxstats.txt')),
+       (SELECT count(*) FROM glob('__WORKING_DIRECTORY__/writer_prepared_mosdepth.mosdepth.summary.txt'));
+----
+1	1	1	1	1	1
+
+# A repeated execution of a non-overwriting writer fails and keeps the first
+# output; an index builder rebuilds its index.
+statement error
+EXECUTE prepared_idxstats;
+----
+already exists
+
+statement error
+EXECUTE prepared_mosdepth;
+----
+already exists
+
+query I
+EXECUTE prepared_bam_index;
+----
+true

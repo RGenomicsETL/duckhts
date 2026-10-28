@@ -3,6 +3,8 @@
 
 from pathlib import Path
 import re
+import shutil
+import tempfile
 
 import duckdb
 
@@ -70,4 +72,37 @@ def check_error(sql, message):
 
 check_error("SELECT duckhts_somalier_spacing([100, 110]::UBIGINT[], 0)", "duckhts_somalier_spacing")
 check_error("SELECT duckhts_cgranges_index('no_such_index')", "unknown index name")
-print(f"DuckDB {duckdb.__version__}: LOAD, read_bcf, Somalier and scalar errors passed")
+
+
+# DuckDB 2.0 binds a prepared statement again at every EXECUTE. A writer that
+# worked at bind wrote at PREPARE, and the first EXECUTE then found its own
+# output (https://github.com/RGenomicsETL/duckhts/issues/358). R prepares and
+# then executes every query, so this is the path DBI users take.
+work = Path(tempfile.mkdtemp(prefix="duckhts_v2_writers_"))
+try:
+    bam = work / "range.bam"
+    shutil.copy(root / "test/data/range.bam", bam)
+    writers = {
+        "bam_index": (f"bam_index('{bam}', index_path := '{work}/range.bai', threads := 1)",
+                      work / "range.bai"),
+        "bcf_index": (f"bcf_index('{root}/test/data/bcf_scan_contigs.bcf', index_path := '{work}/contigs.csi', threads := 1)",
+                      work / "contigs.csi"),
+        "tabix_index": (f"tabix_index('{root}/test/data/bcf_scalar_counts.vcf.gz', index_path := '{work}/scalar.tbi', threads := 1)",
+                        work / "scalar.tbi"),
+        "fasta_index": (f"fasta_index('{root}/test/data/ce.fa', index_path := '{work}/ce.fai')",
+                        work / "ce.fai"),
+        "duckhts_samtools_idxstats": (f"duckhts_samtools_idxstats('{bam}', output := '{work}/idxstats.txt')",
+                                      work / "idxstats.txt"),
+        "duckhts_mosdepth": (f"duckhts_mosdepth('{work}/md', '{bam}', fast_mode := TRUE, no_per_base := TRUE)",
+                             work / "md.mosdepth.summary.txt"),
+    }
+    for number, (name, (call, output)) in enumerate(writers.items()):
+        con.execute(f"PREPARE writer_{number} AS SELECT success FROM {call}")
+        if output.exists():
+            raise AssertionError(f"{name}: PREPARE wrote {output}")
+        check(f"EXECUTE writer_{number}", [(True,)])
+        if not output.exists():
+            raise AssertionError(f"{name}: EXECUTE did not write {output}")
+finally:
+    shutil.rmtree(work, ignore_errors=True)
+print(f"DuckDB {duckdb.__version__}: LOAD, read_bcf, Somalier, scalar errors and prepared writers passed")

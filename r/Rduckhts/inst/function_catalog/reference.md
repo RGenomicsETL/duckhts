@@ -2608,6 +2608,10 @@ Returns:
 table
 ```
 
+### Execution
+
+The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
+
 ### Examples
 
 ```sql
@@ -2682,6 +2686,10 @@ Returns:
 table
 ```
 
+### Execution
+
+The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
+
 ### Examples
 
 ```sql
@@ -2704,6 +2712,10 @@ Returns:
 table
 ```
 
+### Execution
+
+The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
+
 ### Examples
 
 ```sql
@@ -2725,6 +2737,10 @@ Returns:
 ```
 table
 ```
+
+### Execution
+
+The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
 
 ### Examples
 
@@ -3336,6 +3352,10 @@ Returns:
 table
 ```
 
+### Execution
+
+Coverage is computed and the files are written during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file. Binding and each execution enforce overwrite, so a repeated execution without overwrite fails and keeps the earlier files.
+
 ### Output
 
 Produce summary, global distribution, per-base BED.gz/CSI, optional window/BED-region results, quantized BED.gz/CSI and threshold counts for by. precision_digits sets text decimal places.
@@ -3369,6 +3389,10 @@ Returns:
 ```
 table
 ```
+
+### Execution
+
+The output is written during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file. Each execution enforces overwrite, so a repeated execution without overwrite fails and keeps the earlier output.
 
 ### Examples
 

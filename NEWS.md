@@ -1,5 +1,29 @@
 # DuckHTS Extension News
 
+# duckhts 2.0.2
+
+- `duckhts_mosdepth`, `duckhts_samtools_idxstats`, `bam_index`, `bcf_index`,
+  `tabix_index` and `fasta_index` do their work during query execution, not binding
+  (https://github.com/RGenomicsETL/duckhts/issues/358). DuckDB 2.0 binds a prepared
+  statement again at every `EXECUTE`, so these functions wrote their files at `PREPARE`
+  and `EXPLAIN`, and `duckhts_mosdepth` and `duckhts_samtools_idxstats` then failed with
+  "already exists" on a fresh output path. Binding, `PREPARE` and `EXPLAIN` without
+  `ANALYZE` now write no file, and each execution writes once. A missing or unreadable
+  input to the index builders is now an execution error, not a binder error.
+  `test/sql/writer_no_clobber.test` and the DuckDB 2.0 load check cover the six
+  functions. The `read_bcf` index-snapshot tests used `bcf_index`'s bind-time write to
+  replace an index after the reader bound; they now place `bcf_index` on the build side
+  of a cross product, which DuckDB finishes before the reader scans, and a `read_blob`
+  control checks that order.
+- The Somalier duplicate-record stress test fixes `threads = 2` before its 128MB memory
+  limit. DuckDB gives each worker thread its own buffers, so a fixed limit without a fixed
+  thread count was wrong in the test. The stress input puts 1M records at one panel site,
+  and `duckhts_somalier_vcf_counts` materializes and unnests all of them before it reports
+  the duplicate. On DuckDB 2.0.0 that query needs about 8 MiB plus 2.3 MiB per thread
+  (153 MiB at 64 threads); on 1.5.2 it needs 10 to 23 MiB from 1 to 64 threads. The same
+  growth appears in plain SQL without DuckHTS on both engines. Measured with the DuckDB
+  2.0.0 and 1.5.2 Python wheels.
+
 # duckhts 2.0.1
 
 - DuckDB 2.0 binds a prepared statement again at every `EXECUTE`, so a prepared

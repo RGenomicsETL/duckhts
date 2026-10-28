@@ -68,7 +68,7 @@ test_bcf_index_snapshot_http <- function(extension) {
       oracle <- if (mode == "region") expected[expected$CHROM == "chr3", ] else expected
       rownames(oracle) <- NULL
       # Populate the remote-index cache so both the served index and every
-      # downloaded copy participate in the deterministic bind-time rewrite.
+      # downloaded copy participate in the after-bind rewrite.
       stopifnot(identical(DBI::dbGetQuery(con, paste0(projection, reader, " ORDER BY ALL")), oracle))
       index_paths <- c(local_index, list.files(cache, full.names = TRUE))
       min_shift <- if (kind == "tbi") 0L else 14L
@@ -76,19 +76,29 @@ test_bcf_index_snapshot_http <- function(extension) {
         replacement_path <- if (replacement == "identical") local_path else
           fixture(paste0(replacement, ".", if (kind == "bcf") "bcf" else "vcf.gz"))
         for (count in c(FALSE, TRUE)) {
-          sql <- .bcf_snapshot_query(con, reader, local_path, index_paths,
-                                     replacement_path, min_shift, count)
-          observed <- DBI::dbGetQuery(con, sql)
+          statements <- .bcf_snapshot_statements(con, reader, local_path, index_paths,
+                                                 replacement_path, min_shift, count)
+          DBI::dbGetQuery(con, statements$restore)
+          observed <- DBI::dbGetQuery(con, statements$after_bind)
           if (count) stopifnot(observed$n[[1]] == nrow(oracle))
           else stopifnot(identical(observed, oracle))
         }
         bind_checks <- bind_checks + 1L
       }
-      # Indexed reads must fail when the shifted offsets are bound before the
-      # reader: invalid BCF block headers or unsatisfiable VCF HTTP ranges.
       shifted_path <- fixture(paste0("shifted.", if (kind == "bcf") "bcf" else "vcf.gz"))
-      sql <- .bcf_snapshot_query(con, reader, local_path, index_paths, shifted_path,
-                                 min_shift, replace_before_bind = TRUE)
+      statements <- .bcf_snapshot_statements(con, reader, local_path, index_paths,
+                                             shifted_path, min_shift)
+      # The window exists: a scan on the probe side reads the replaced index.
+      DBI::dbGetQuery(con, statements$replace)
+      shifted_digest <- unname(tools::md5sum(local_index))
+      DBI::dbGetQuery(con, statements$restore)
+      stopifnot(!identical(unname(tools::md5sum(local_index)), shifted_digest))
+      stopifnot(identical(DBI::dbGetQuery(con, statements$window)$digest, shifted_digest))
+      # Indexed reads must fail when the shifted offsets are in place before the
+      # reader binds: invalid BCF block headers or unsatisfiable VCF HTTP ranges.
+      DBI::dbGetQuery(con, statements$restore)
+      DBI::dbGetQuery(con, statements$replace)
+      sql <- paste0(projection, reader, " ORDER BY ALL")
       if (mode == "sequential") {
         stopifnot(identical(DBI::dbGetQuery(con, sql), oracle))
       } else {

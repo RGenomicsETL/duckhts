@@ -23,14 +23,16 @@ test_mosdepth <- function() {
   dir.create(tmp_dir)
   on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
 
+  # A fresh prefix needs no overwrite. DBI prepares, then executes, so on
+  # DuckDB 2.0 the query binds twice; outputs are written once, in init
+  # (https://github.com/RGenomicsETL/duckhts/issues/358).
   prefix_fast <- file.path(tmp_dir, "range_fast")
   out_fast <- rduckhts_mosdepth(
     con,
     prefix_fast,
     bam_path,
     index_path = bam_index_path,
-    fast_mode = TRUE,
-    overwrite = TRUE
+    fast_mode = TRUE
   )
   expect_true(isTRUE(out_fast$success[1]))
   expect_true(file.exists(file.path(

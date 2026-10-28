@@ -1306,6 +1306,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_fasta_index",
       "description": "Build a FASTA index (.fai) and return a single row with columns success (BOOLEAN) and index_path (VARCHAR).",
+      "details": {
+        "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
+      },
       "examples": [
         "SELECT * FROM fasta_index('ce.fa');"
       ]
@@ -1348,6 +1351,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_bam_index",
       "description": "Build a BAM or CRAM index and report the written index path and format.",
+      "details": {
+        "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
+      },
       "examples": [
         "SELECT * FROM bam_index('range.bam');"
       ]
@@ -1360,6 +1366,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_bcf_index",
       "description": "Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.",
+      "details": {
+        "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
+      },
       "examples": [
         "SELECT * FROM bcf_index('formatcols.vcf.gz');"
       ]
@@ -1372,6 +1381,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_tabix_index",
       "description": "Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns.",
+      "details": {
+        "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
+      },
       "examples": [
         "SELECT * FROM tabix_index('gff_file.gff.gz', preset := 'gff');"
       ]
@@ -1649,6 +1661,7 @@
       "r_wrapper": "rduckhts_mosdepth",
       "description": "Write mosdepth-compatible coverage files from indexed BAM/CRAM.",
       "details": {
+        "Execution": "Coverage is computed and the files are written during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file. Binding and each execution enforce overwrite, so a repeated execution without overwrite fails and keeps the earlier files.",
         "Output": "Produce summary, global distribution, per-base BED.gz/CSI, optional window/BED-region results, quantized BED.gz/CSI and threshold counts for by. precision_digits sets text decimal places.",
         "Modes": "Default fast_mode=FALSE uses CIGAR-aware coverage and mate-overlap correction. fragment_mode counts full insert spans of proper pairs; use_median switches by output from mean to median. read_groups filters comma-separated RG IDs; min_frag_len/max_frag_len filter absolute template length. Supply fasta when CRAM requires reference.",
         "Threads": "processing_threads=0 is sequential; positive values select parallel contig-worker count."
@@ -1665,6 +1678,9 @@
       "returns": "table",
       "r_wrapper": "rduckhts_samtools_idxstats",
       "description": "Write samtools idxstats-compatible TAB-delimited output for BAM, CRAM, or SAM input. Indexed BAM uses `hts_idx_get_stat(...)` for the fast path; CRAM, SAM, and unindexed BAM fall back to a full scan while preserving samtools-style contig rows plus the final `*` row.",
+      "details": {
+        "Execution": "The output is written during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file. Each execution enforces overwrite, so a repeated execution without overwrite fails and keeps the earlier output."
+      },
       "examples": [
         "SELECT * FROM duckhts_samtools_idxstats('range.bam', output := 'range.idxstats.txt', overwrite := TRUE);"
       ]

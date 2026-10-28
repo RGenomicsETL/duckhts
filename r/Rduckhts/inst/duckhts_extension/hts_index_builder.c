@@ -15,11 +15,30 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/hts_io_tuning.h"
 
+typedef enum {
+    INDEX_BUILD_BAM,
+    INDEX_BUILD_BCF,
+    INDEX_BUILD_TABIX
+} index_build_kind_t;
+
+/* Bind records the request; init builds the index. DuckDB 2.0 binds a prepared
+ * statement again at every EXECUTE, so work done at bind would run at PREPARE,
+ * EXPLAIN and once more per execution
+ * (https://github.com/RGenomicsETL/duckhts/issues/358). */
 typedef struct {
+    index_build_kind_t kind;
+    char *path;
+    char *requested_index_path;
     char *index_path;
     char *index_format;
-    int emitted;
+    int min_shift;
+    int threads;
+    tbx_conf_t tbx_conf;
 } index_build_bind_t;
+
+typedef struct {
+    int emitted;
+} index_build_state_t;
 
 static char *dup_string(const char *s) {
     if (!s) return NULL;
@@ -62,9 +81,20 @@ static char *default_tabix_index_path(const char *path, int min_shift) {
     return append_suffix(path, min_shift > 0 ? ".csi" : ".tbi");
 }
 
+static const char *index_build_name(index_build_kind_t kind) {
+    switch (kind) {
+    case INDEX_BUILD_BAM: return "bam_index";
+    case INDEX_BUILD_BCF: return "bcf_index";
+    case INDEX_BUILD_TABIX: return "tabix_index";
+    }
+    return "index";
+}
+
 static void destroy_index_build_bind(void *data) {
     index_build_bind_t *bind = (index_build_bind_t *)data;
     if (!bind) return;
+    if (bind->path) duckdb_free(bind->path);
+    if (bind->requested_index_path) duckdb_free(bind->requested_index_path);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->index_format) duckdb_free(bind->index_format);
     duckdb_free(bind);
@@ -80,19 +110,104 @@ static void add_result_columns(duckdb_bind_info info) {
     duckdb_destroy_logical_type(&varchar_type);
 }
 
+/* Takes ownership of path and requested_index_path; returns NULL on allocation failure. */
+static index_build_bind_t *new_index_build_bind(index_build_kind_t kind, char *path,
+                                                char *requested_index_path, int min_shift,
+                                                int threads) {
+    index_build_bind_t *bind = (index_build_bind_t *)duckdb_malloc(sizeof(index_build_bind_t));
+    const char *format;
+    if (!bind) {
+        duckdb_free(path);
+        if (requested_index_path) duckdb_free(requested_index_path);
+        return NULL;
+    }
+    memset(bind, 0, sizeof(*bind));
+    bind->kind = kind;
+    bind->path = path;
+    bind->requested_index_path = requested_index_path;
+    bind->min_shift = min_shift;
+    bind->threads = threads;
+    bind->tbx_conf = tbx_conf_vcf;
+
+    if (requested_index_path) {
+        bind->index_path = dup_string(requested_index_path);
+    } else if (kind == INDEX_BUILD_BAM) {
+        bind->index_path = default_bam_index_path(path, min_shift);
+    } else if (kind == INDEX_BUILD_BCF) {
+        bind->index_path = default_bcf_index_path(path, min_shift);
+    } else {
+        bind->index_path = default_tabix_index_path(path, min_shift);
+    }
+    if (kind == INDEX_BUILD_BAM && ends_with(path, ".cram")) {
+        format = "CRAI";
+    } else if (kind == INDEX_BUILD_BAM) {
+        format = min_shift > 0 ? "CSI" : "BAI";
+    } else {
+        format = min_shift > 0 ? "CSI" : "TBI";
+    }
+    bind->index_format = dup_string(format);
+    if (!bind->index_path || !bind->index_format) {
+        destroy_index_build_bind(bind);
+        return NULL;
+    }
+    return bind;
+}
+
+static int run_index_build(const index_build_bind_t *bind, char *err, size_t errlen) {
+    const char *name = index_build_name(bind->kind);
+    int ret;
+
+    if (bind->kind == INDEX_BUILD_BAM) {
+        htsFile *fp = hts_open(bind->path, "r");
+        if (!fp) {
+            snprintf(err, errlen, "%s: failed to open %s", name, bind->path);
+            return -1;
+        }
+        duckhts_apply_remote_hts_tuning(fp, bind->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
+        ret = sam_index_build4(fp, bind->path, bind->requested_index_path, bind->min_shift,
+                               bind->threads);
+        hts_close(fp);
+    } else if (bind->kind == INDEX_BUILD_BCF) {
+        ret = bcf_index_build3(bind->path, bind->requested_index_path, bind->min_shift,
+                               bind->threads);
+    } else {
+        tbx_conf_t conf = bind->tbx_conf;
+        ret = tbx_index_build3(bind->path, bind->requested_index_path, bind->min_shift,
+                               bind->threads, &conf);
+    }
+    if (ret != 0) {
+        snprintf(err, errlen, "%s: failed to build index for %s (error %d)", name, bind->path, ret);
+        return -1;
+    }
+    return 0;
+}
+
 static void init_index_build(duckdb_init_info info) {
-    index_build_bind_t *bind = (index_build_bind_t *)duckdb_init_get_bind_data(info);
-    bind->emitted = 0;
+    const index_build_bind_t *bind = (const index_build_bind_t *)duckdb_init_get_bind_data(info);
+    index_build_state_t *state = (index_build_state_t *)duckdb_malloc(sizeof(index_build_state_t));
+    char err[512];
+
+    if (!state) {
+        duckdb_init_set_error(info, "Out of memory");
+        return;
+    }
+    state->emitted = 0;
+    duckdb_init_set_init_data(info, state, duckdb_free);
+    duckdb_init_set_max_threads(info, 1);
+    if (run_index_build(bind, err, sizeof(err)) != 0) {
+        duckdb_init_set_error(info, err);
+    }
 }
 
 static void scan_index_build(duckdb_function_info info, duckdb_data_chunk output) {
-    index_build_bind_t *bind = (index_build_bind_t *)duckdb_function_get_bind_data(info);
+    const index_build_bind_t *bind = (const index_build_bind_t *)duckdb_function_get_bind_data(info);
+    index_build_state_t *state = (index_build_state_t *)duckdb_function_get_init_data(info);
     duckdb_vector success_vec;
     duckdb_vector path_vec;
     duckdb_vector fmt_vec;
     bool *success_data;
 
-    if (bind->emitted) {
+    if (state->emitted) {
         duckdb_data_chunk_set_size(output, 0);
         return;
     }
@@ -103,9 +218,9 @@ static void scan_index_build(duckdb_function_info info, duckdb_data_chunk output
 
     success_data = (bool *)duckdb_vector_get_data(success_vec);
     success_data[0] = true;
-    duckdb_vector_assign_string_element(path_vec, 0, bind->index_path ? bind->index_path : "");
-    duckdb_vector_assign_string_element(fmt_vec, 0, bind->index_format ? bind->index_format : "");
-    bind->emitted = 1;
+    duckdb_vector_assign_string_element(path_vec, 0, bind->index_path);
+    duckdb_vector_assign_string_element(fmt_vec, 0, bind->index_format);
+    state->emitted = 1;
     duckdb_data_chunk_set_size(output, 1);
 }
 
@@ -113,13 +228,10 @@ static void bind_bam_index(duckdb_bind_info info) {
     duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
     char *path = duckdb_get_varchar(path_val);
     char *index_path = NULL;
-    const char *index_format;
+    index_build_bind_t *bind;
     duckdb_value val;
     int min_shift = 0;
     int threads = 4;
-    int ret;
-    char err[512];
-    htsFile *fp = NULL;
 
     duckdb_destroy_value(&path_val);
     if (!path || path[0] == '\0') {
@@ -140,47 +252,23 @@ static void bind_bam_index(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) threads = (int)duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
-    fp = hts_open(path, "r");
-    if (!fp) {
-        snprintf(err, sizeof(err), "bam_index: failed to open %s", path);
-        duckdb_bind_set_error(info, err);
-        duckdb_free(path);
-        if (index_path) duckdb_free(index_path);
+    bind = new_index_build_bind(INDEX_BUILD_BAM, path, index_path, min_shift, threads);
+    if (!bind) {
+        duckdb_bind_set_error(info, "bam_index: out of memory");
         return;
     }
-    duckhts_apply_remote_hts_tuning(fp, path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
-    ret = sam_index_build4(fp, path, index_path, min_shift, threads);
-    hts_close(fp);
-    if (ret != 0) {
-        snprintf(err, sizeof(err), "bam_index: failed to build index for %s (error %d)", path, ret);
-        duckdb_bind_set_error(info, err);
-        duckdb_free(path);
-        if (index_path) duckdb_free(index_path);
-        return;
-    }
-
-    if (!index_path) index_path = default_bam_index_path(path, min_shift);
-    index_format = ends_with(path, ".cram") ? "CRAI" : (min_shift > 0 ? "CSI" : "BAI");
-
     add_result_columns(info);
-    index_build_bind_t *bind = (index_build_bind_t *)duckdb_malloc(sizeof(index_build_bind_t));
-    bind->index_path = index_path ? index_path : dup_string("");
-    bind->index_format = dup_string(index_format);
-    bind->emitted = 0;
     duckdb_bind_set_bind_data(info, bind, destroy_index_build_bind);
-    duckdb_free(path);
 }
 
 static void bind_bcf_index(duckdb_bind_info info) {
     duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
     char *path = duckdb_get_varchar(path_val);
     char *index_path = NULL;
-    const char *index_format;
+    index_build_bind_t *bind;
     duckdb_value val;
     int min_shift = 0;
     int threads = 4;
-    int ret;
-    char err[512];
 
     duckdb_destroy_value(&path_val);
     if (!path || path[0] == '\0') {
@@ -203,25 +291,13 @@ static void bind_bcf_index(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) threads = (int)duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
-    ret = bcf_index_build3(path, index_path, min_shift, threads);
-    if (ret != 0) {
-        snprintf(err, sizeof(err), "bcf_index: failed to build index for %s (error %d)", path, ret);
-        duckdb_bind_set_error(info, err);
-        duckdb_free(path);
-        if (index_path) duckdb_free(index_path);
+    bind = new_index_build_bind(INDEX_BUILD_BCF, path, index_path, min_shift, threads);
+    if (!bind) {
+        duckdb_bind_set_error(info, "bcf_index: out of memory");
         return;
     }
-
-    if (!index_path) index_path = default_bcf_index_path(path, min_shift);
-    index_format = min_shift > 0 ? "CSI" : "TBI";
-
     add_result_columns(info);
-    index_build_bind_t *bind = (index_build_bind_t *)duckdb_malloc(sizeof(index_build_bind_t));
-    bind->index_path = index_path ? index_path : dup_string("");
-    bind->index_format = dup_string(index_format);
-    bind->emitted = 0;
     duckdb_bind_set_bind_data(info, bind, destroy_index_build_bind);
-    duckdb_free(path);
 }
 
 static int parse_tbx_preset(const char *preset, tbx_conf_t *conf) {
@@ -249,13 +325,11 @@ static void bind_tabix_index(duckdb_bind_info info) {
     char *path = duckdb_get_varchar(path_val);
     char *index_path = NULL;
     char *preset = NULL;
-    const char *index_format;
+    index_build_bind_t *bind;
     duckdb_value val;
     tbx_conf_t conf = tbx_conf_vcf;
     int min_shift = 0;
     int threads = 4;
-    int ret;
-    char err[512];
 
     duckdb_destroy_value(&path_val);
     if (!path || path[0] == '\0') {
@@ -312,28 +386,15 @@ static void bind_tabix_index(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) threads = (int)duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
-    ret = tbx_index_build3(path, index_path, min_shift, threads, &conf);
-    if (ret != 0) {
-        snprintf(err, sizeof(err), "tabix_index: failed to build index for %s (error %d)", path, ret);
-        duckdb_bind_set_error(info, err);
-        duckdb_free(path);
-        if (index_path) duckdb_free(index_path);
-        if (preset) duckdb_free(preset);
+    bind = new_index_build_bind(INDEX_BUILD_TABIX, path, index_path, min_shift, threads);
+    if (preset) duckdb_free(preset);
+    if (!bind) {
+        duckdb_bind_set_error(info, "tabix_index: out of memory");
         return;
     }
-
-    if (!index_path) index_path = default_tabix_index_path(path, min_shift);
-    index_format = min_shift > 0 ? "CSI" : "TBI";
-
+    bind->tbx_conf = conf;
     add_result_columns(info);
-    index_build_bind_t *bind = (index_build_bind_t *)duckdb_malloc(sizeof(index_build_bind_t));
-    bind->index_path = index_path ? index_path : dup_string("");
-    bind->index_format = dup_string(index_format);
-    bind->emitted = 0;
     duckdb_bind_set_bind_data(info, bind, destroy_index_build_bind);
-
-    duckdb_free(path);
-    if (preset) duckdb_free(preset);
 }
 
 void register_bam_index_function(duckdb_connection connection) {

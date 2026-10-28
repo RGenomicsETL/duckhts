@@ -137,7 +137,6 @@ typedef struct {
     int fragment_mode;
     int use_median;
     int overwrite;
-    int emitted;
 } mosdepth_bind_t;
 
 static char *append_suffix(const char *prefix, const char *suffix) {
@@ -2604,26 +2603,44 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
         return;
     }
 
-    if (run_duckhts_mosdepth(bind, err, sizeof(err)) != 0) {
-        destroy_mosdepth_bind(bind);
-        duckdb_bind_set_error(info, err);
-        return;
-    }
-
     add_result_columns(info);
-    bind->emitted = 0;
     duckdb_bind_set_bind_data(info, bind, destroy_mosdepth_bind);
 }
 
+/* Bind validates and resolves the outputs; init computes depth and writes them.
+ * DuckDB 2.0 binds a prepared statement again at every EXECUTE, so a run at
+ * bind would happen at PREPARE and EXPLAIN and make the next bind find its own
+ * outputs. The output checks repeat here because a DuckDB 1.5 EXECUTE does not
+ * bind again. */
 static void duckhts_mosdepth_init(duckdb_init_info info) {
     mosdepth_bind_t *bind = (mosdepth_bind_t *)duckdb_init_get_bind_data(info);
-    bind->emitted = 0;
+    int *emitted = (int *)duckdb_malloc(sizeof(int));
+    char err[512];
+
+    if (!emitted) {
+        duckdb_init_set_error(info, "duckhts_mosdepth: out of memory");
+        return;
+    }
+    *emitted = 0;
+    duckdb_init_set_init_data(info, emitted, duckdb_free);
     duckdb_init_set_max_threads(info, 1);
+    memset(err, 0, sizeof(err));
+    if (ensure_output_available(bind->summary_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->global_dist_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->per_base_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->regions_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->region_dist_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->quantized_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        ensure_output_available(bind->thresholds_path, bind->overwrite, err, sizeof(err)) != 0 ||
+        run_duckhts_mosdepth(bind, err, sizeof(err)) != 0) {
+        duckdb_init_set_error(info, err);
+    }
 }
 
 static void duckhts_mosdepth_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    mosdepth_bind_t *bind = (mosdepth_bind_t *)duckdb_function_get_bind_data(info);
-    if (!bind || bind->emitted) {
+    const mosdepth_bind_t *bind = (const mosdepth_bind_t *)duckdb_function_get_bind_data(info);
+    int *emitted = (int *)duckdb_function_get_init_data(info);
+    if (!bind || *emitted) {
         duckdb_data_chunk_set_size(output, 0);
         return;
     }
@@ -2654,7 +2671,7 @@ static void duckhts_mosdepth_scan(duckdb_function_info info, duckdb_data_chunk o
     if (bind->thresholds_path) duckdb_vector_assign_string_element(thresholds_vec, 0, bind->thresholds_path);
     else set_null(thresholds_vec, 0);
 
-    bind->emitted = 1;
+    *emitted = 1;
     duckdb_data_chunk_set_size(output, 1);
 }
 
