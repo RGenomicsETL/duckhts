@@ -1,13 +1,39 @@
 # Changelog
 
-## Rduckhts 2.0.1.0.1.1
+## Rduckhts 2.0.2.0.1.1
 
+- [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_mosdepth.md),
+  [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_samtools_idxstats.md),
+  [`rduckhts_bam_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_index.md),
+  [`rduckhts_bcf_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcf_index.md),
+  [`rduckhts_tabix_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_tabix_index.md)
+  and
+  [`rduckhts_fasta_index()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_fasta_index.md)
+  write their files once per execution. With duckdb 2.0,
+  [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_mosdepth.md)
+  and `rduckhts_samtools_idxstats(output = ...)` failed with “already
+  exists” on a fresh path unless `overwrite = TRUE`, because DBI
+  prepares and then executes each query
+  (<https://github.com/RGenomicsETL/duckhts/issues/358>). Preparing a
+  query no longer writes files. The tests write a fresh output once
+  without `overwrite`.
+- The Somalier duplicate-record stress test sets two threads before its
+  128MB memory limit. It failed with an out-of-memory error on
+  r-devel-linux-x86_64-debian-gcc and r-oldrel-windows-x86_64 for
+  2.0.1.0.1.0. DuckDB gives each worker thread its own buffers, and on
+  duckdb 2.0 this query needs about 8 MiB plus 2.3 MiB per thread, so a
+  fixed limit without a fixed thread count held only on hosts with fewer
+  than about 50 threads.
 - Three long tests (`test_count_error_fit.R`,
   `test_depth_state_model.R`, `test_ancestry.R`) run only when
   `NOT_CRAN=true` or `TT_AT_HOME=TRUE`, which keeps the whole check
   under CRAN’s 10 minute limit on Windows R-devel (the incoming check of
   2.0.1.0.1.0 reported 11 minutes). CI sets `NOT_CRAN=true` and still
   runs them.
+
+## Rduckhts 2.0.1.0.1.0
+
+CRAN release: 2026-10-24
 
 - [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bed.md)
   has a runnable example that indexes intervals with
@@ -16,7 +42,6 @@
   0-based and half-open like BED and that `end` is a reserved SQL word,
   so the column is written `"end"` (see
   <https://github.com/RGenomicsETL/duckhts/issues/356>).
-
 - The Parquet converters check a local output path with the file system
   instead of a DuckDB `glob()` query. The query failed on a Windows
   R-devel check, which made
@@ -25,33 +50,27 @@
   of “Output already exists”. URLs, object stores and paths starting
   with `~` (resolved against DuckDB’s home directory) still use
   `glob()`.
-
 - Package tests check single lateral expansion and invalid-SQL rejection
   on DuckDB 1.5 and 2.0, including delimiter-CTE plans and
   parser/catalog diagnostics.
-
 - [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bgzip.md)
   and
   [`rduckhts_bgunzip()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bgunzip.md)
   support DuckDB 2.0 rebinding. The bundled functions write once per
   execution and retain overwrite protection and failure cleanup; query
   preparation does not create output or remove input files.
-
 - [`rduckhts_count_mixture_lowpass()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_count_mixture_lowpass.md)
   supports DuckDB 2.0 window binding while retaining block-size
   validation and block assignment.
-
 - Bundled cgranges mutators reject NULL names and coordinates and retain
   intervals with NULL labels, including constant NULL arguments under
   DuckDB 2.0. An index whose first intervals have NULL labels can now
   gain a typed label later without writing to unallocated label storage;
   the earlier intervals keep their NULL.
-
 - [`rduckhts_roh()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_roh.md)
   enforces the open upper endpoint of `af_clamp` with an explicit
   `< 0.5` comparison, so `0.5` is rejected consistently on standard and
   no-long-double R builds.
-
 - BCF tests support DuckDB 2.0 prepared-statement rebinding. Index
   rewrites between reader binding and scanning have deterministic
   before-bind controls. Row/count and result-lifetime checks remain; the
