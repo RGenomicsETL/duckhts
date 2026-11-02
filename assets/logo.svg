@@ -4,62 +4,126 @@
     <clipPath id="hex">
       <polygon points="260,6 514,153 514,447 260,594 6,447 6,153"/>
     </clipPath>
-    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff100" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#fff100" stop-opacity="0"/>
-    </linearGradient>
+    <!-- duck silhouette: body, head and beak; the reads inside it draw the duck -->
+    <clipPath id="duck">
+      <path d="M96,232 C118,262 150,272 190,268 C206,214 268,196 322,214 C352,224 372,250 368,284 C362,330 316,352 252,352 L178,352 C120,352 92,306 96,232 Z"/>
+      <circle cx="320" cy="158" r="64"/>
+      <path d="M266,186 L372,186 L372,240 L270,240 Z"/>
+      <path d="M378,128 L452,150 L378,176 Z"/>
+    </clipPath>
   </defs>
   <polygon points="260,6 514,153 514,447 260,594 6,447 6,153" fill="#1b1f2a"/>
   <g clip-path="url(#hex)">
-    <!-- coverage track: the water the duck floats on -->
-    <path d="M0,300 L40,300 C52,300 56,284 66,284 C76,284 80,296 92,296
-             C104,296 108,272 120,272 C132,272 136,292 150,292
-             L170,292 C184,292 188,262 204,262 L316,262 C330,262 334,280 346,280
-             C358,280 362,252 376,252 C390,252 394,288 408,288
-             C420,288 424,276 434,276 C444,276 448,296 460,296 L520,296 L520,336 L0,336 Z"
-          fill="url(#water)"/>
-    <path d="M0,300 L40,300 C52,300 56,284 66,284 C76,284 80,296 92,296
-             C104,296 108,272 120,272 C132,272 136,292 150,292
-             L170,292 C184,292 188,262 204,262 L316,262 C330,262 334,280 346,280
-             C358,280 362,252 376,252 C390,252 394,288 408,288
-             C420,288 424,276 434,276 C444,276 448,296 460,296 L520,296"
-          fill="none" stroke="#fff100" stroke-width="5" stroke-linejoin="round"/>
-    <!-- the duck -->
-    <path d="M150,196 C162,214 176,222 196,222 C214,190 262,176 304,186
-             C318,190 330,198 338,210 C350,234 336,266 296,268
-             L206,268 C170,268 150,244 150,196 Z"
-          fill="#fff100"/>
-    <circle cx="322" cy="150" r="44" fill="#fff100"/>
-    <path d="M360,140 C384,140 404,148 408,158 C402,168 384,172 360,170 Z" fill="#ff8a1f"/>
-    <circle cx="334" cy="138" r="7" fill="#1b1f2a"/>
-    <!-- wing: three aligned reads, one with a mismatch -->
-    <g fill="#1b1f2a">
-      <rect x="208" y="210" width="86" height="11" rx="5.5"/>
-      <rect x="196" y="228" width="92" height="11" rx="5.5"/>
-      <rect x="216" y="246" width="70" height="11" rx="5.5"/>
+  <g transform="translate(-14,34)">
+    <g clip-path="url(#duck)" fill="#fff100">
+      <rect x="20" y="92" width="65" height="9" rx="4.5"/>
+      <rect x="94" y="92" width="129" height="9" rx="4.5"/>
+      <rect x="229" y="92" width="55" height="9" rx="4.5"/>
+      <rect x="296" y="92" width="114" height="9" rx="4.5"/>
+      <rect x="416" y="92" width="92" height="9" rx="4.5"/>
+      <rect x="37" y="105" width="110" height="9" rx="4.5"/>
+      <rect x="154" y="105" width="50" height="9" rx="4.5"/>
+      <rect x="210" y="105" width="101" height="9" rx="4.5"/>
+      <rect x="320" y="105" width="54" height="9" rx="4.5"/>
+      <rect x="381" y="105" width="57" height="9" rx="4.5"/>
+      <rect x="448" y="105" width="100" height="9" rx="4.5"/>
+      <rect x="-12" y="118" width="118" height="9" rx="4.5"/>
+      <rect x="112" y="118" width="74" height="9" rx="4.5"/>
+      <rect x="197" y="118" width="126" height="9" rx="4.5"/>
+      <rect x="333" y="118" width="53" height="9" rx="4.5"/>
+      <rect x="396" y="118" width="120" height="9" rx="4.5"/>
+      <rect x="37" y="131" width="74" height="9" rx="4.5"/>
+      <rect x="117" y="131" width="117" height="9" rx="4.5"/>
+      <rect x="246" y="131" width="63" height="9" rx="4.5"/>
+      <rect x="317" y="131" width="99" height="9" rx="4.5"/>
+      <rect x="423" y="131" width="115" height="9" rx="4.5"/>
+      <rect x="4" y="144" width="85" height="9" rx="4.5"/>
+      <rect x="99" y="144" width="150" height="9" rx="4.5"/>
+      <rect x="260" y="144" width="69" height="9" rx="4.5"/>
+      <rect x="335" y="144" width="120" height="9" rx="4.5"/>
+      <rect x="465" y="144" width="127" height="9" rx="4.5"/>
+      <rect x="17" y="157" width="58" height="9" rx="4.5"/>
+      <rect x="85" y="157" width="137" height="9" rx="4.5"/>
+      <rect x="228" y="157" width="118" height="9" rx="4.5"/>
+      <rect x="352" y="157" width="125" height="9" rx="4.5"/>
+      <rect x="9" y="170" width="133" height="9" rx="4.5"/>
+      <rect x="152" y="170" width="100" height="9" rx="4.5"/>
+      <rect x="264" y="170" width="86" height="9" rx="4.5"/>
+      <rect x="359" y="170" width="120" height="9" rx="4.5"/>
+      <rect x="17" y="183" width="84" height="9" rx="4.5"/>
+      <rect x="108" y="183" width="147" height="9" rx="4.5"/>
+      <rect x="262" y="183" width="135" height="9" rx="4.5"/>
+      <rect x="409" y="183" width="77" height="9" rx="4.5"/>
+      <rect x="4" y="196" width="84" height="9" rx="4.5"/>
+      <rect x="98" y="196" width="109" height="9" rx="4.5"/>
+      <rect x="215" y="196" width="139" height="9" rx="4.5"/>
+      <rect x="363" y="196" width="82" height="9" rx="4.5"/>
+      <rect x="455" y="196" width="55" height="9" rx="4.5"/>
+      <rect x="8" y="209" width="99" height="9" rx="4.5"/>
+      <rect x="114" y="209" width="142" height="9" rx="4.5"/>
+      <rect x="264" y="209" width="65" height="9" rx="4.5"/>
+      <rect x="338" y="209" width="99" height="9" rx="4.5"/>
+      <rect x="443" y="209" width="131" height="9" rx="4.5"/>
+      <rect x="-8" y="222" width="117" height="9" rx="4.5"/>
+      <rect x="119" y="222" width="147" height="9" rx="4.5"/>
+      <rect x="278" y="222" width="86" height="9" rx="4.5"/>
+      <rect x="372" y="222" width="134" height="9" rx="4.5"/>
+      <rect x="2" y="235" width="109" height="9" rx="4.5"/>
+      <rect x="121" y="235" width="148" height="9" rx="4.5"/>
+      <rect x="278" y="235" width="54" height="9" rx="4.5"/>
+      <rect x="344" y="235" width="57" height="9" rx="4.5"/>
+      <rect x="409" y="235" width="106" height="9" rx="4.5"/>
+      <rect x="-2" y="248" width="54" height="9" rx="4.5"/>
+      <rect x="58" y="248" width="139" height="9" rx="4.5"/>
+      <rect x="208" y="248" width="85" height="9" rx="4.5"/>
+      <rect x="304" y="248" width="119" height="9" rx="4.5"/>
+      <rect x="434" y="248" width="103" height="9" rx="4.5"/>
+      <rect x="-5" y="261" width="95" height="9" rx="4.5"/>
+      <rect x="101" y="261" width="90" height="9" rx="4.5"/>
+      <rect x="197" y="261" width="105" height="9" rx="4.5"/>
+      <rect x="310" y="261" width="67" height="9" rx="4.5"/>
+      <rect x="387" y="261" width="60" height="9" rx="4.5"/>
+      <rect x="456" y="261" width="53" height="9" rx="4.5"/>
+      <rect x="-9" y="274" width="82" height="9" rx="4.5"/>
+      <rect x="80" y="274" width="140" height="9" rx="4.5"/>
+      <rect x="227" y="274" width="96" height="9" rx="4.5"/>
+      <rect x="332" y="274" width="109" height="9" rx="4.5"/>
+      <rect x="447" y="274" width="67" height="9" rx="4.5"/>
+      <rect x="15" y="287" width="116" height="9" rx="4.5"/>
+      <rect x="139" y="287" width="63" height="9" rx="4.5"/>
+      <rect x="214" y="287" width="101" height="9" rx="4.5"/>
+      <rect x="327" y="287" width="116" height="9" rx="4.5"/>
+      <rect x="451" y="287" width="136" height="9" rx="4.5"/>
+      <rect x="18" y="300" width="133" height="9" rx="4.5"/>
+      <rect x="160" y="300" width="75" height="9" rx="4.5"/>
+      <rect x="242" y="300" width="56" height="9" rx="4.5"/>
+      <rect x="305" y="300" width="65" height="9" rx="4.5"/>
+      <rect x="377" y="300" width="130" height="9" rx="4.5"/>
+      <rect x="40" y="313" width="108" height="9" rx="4.5"/>
+      <rect x="160" y="313" width="121" height="9" rx="4.5"/>
+      <rect x="288" y="313" width="79" height="9" rx="4.5"/>
+      <rect x="375" y="313" width="46" height="9" rx="4.5"/>
+      <rect x="428" y="313" width="99" height="9" rx="4.5"/>
+      <rect x="17" y="326" width="124" height="9" rx="4.5"/>
+      <rect x="151" y="326" width="86" height="9" rx="4.5"/>
+      <rect x="244" y="326" width="134" height="9" rx="4.5"/>
+      <rect x="390" y="326" width="111" height="9" rx="4.5"/>
+      <rect x="-1" y="339" width="132" height="9" rx="4.5"/>
+      <rect x="142" y="339" width="52" height="9" rx="4.5"/>
+      <rect x="203" y="339" width="145" height="9" rx="4.5"/>
+      <rect x="360" y="339" width="133" height="9" rx="4.5"/>
+      <rect x="5" y="352" width="96" height="9" rx="4.5"/>
+      <rect x="110" y="352" width="97" height="9" rx="4.5"/>
+      <rect x="216" y="352" width="59" height="9" rx="4.5"/>
+      <rect x="284" y="352" width="127" height="9" rx="4.5"/>
+      <rect x="420" y="352" width="53" height="9" rx="4.5"/>
     </g>
-    <rect x="252" y="228" width="8" height="11" fill="#ff5a36"/>
-    <!-- pileup below the waterline -->
-    <g fill="#e8e8e8" opacity="0.9">
-      <rect x="40" y="346" width="150" height="14" rx="7"/>
-      <rect x="206" y="346" width="132" height="14" rx="7"/>
-      <rect x="354" y="346" width="130" height="14" rx="7"/>
-      <rect x="84" y="368" width="176" height="14" rx="7"/>
-      <rect x="276" y="368" width="150" height="14" rx="7"/>
-      <rect x="62" y="390" width="120" height="14" rx="7"/>
-      <rect x="198" y="390" width="214" height="14" rx="7"/>
-      <rect x="140" y="412" width="236" height="14" rx="7"/>
-    </g>
-    <g fill="#ff5a36">
-      <rect x="252" y="346" width="10" height="14"/>
-      <rect x="252" y="368" width="10" height="14"/>
-      <rect x="252" y="390" width="10" height="14"/>
-      <rect x="252" y="412" width="10" height="14"/>
-    </g>
+    <!-- one variant column through the pileup -->
+    <rect x="304" y="92" width="10" height="270" fill="#ff5a36" clip-path="url(#duck)"/>
+    <circle cx="336" cy="142" r="9" fill="#1b1f2a"/>
   </g>
-  <text x="260" y="486" text-anchor="middle" fill="#fff100"
-        font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', monospace" font-size="48" font-weight="700">duckhts</text>
-  <text x="260" y="520" text-anchor="middle" fill="#e8e8e8"
-        font-family="'DejaVu Sans', 'Helvetica', 'Arial', sans-serif" font-size="20">htslib in DuckDB</text>
+  </g>
+  <text x="260" y="474" text-anchor="middle" fill="#fff100"
+        font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', monospace" font-size="52" font-weight="700">duckhts</text>
   <polygon points="260,6 514,153 514,447 260,594 6,447 6,153" fill="none" stroke="#fff100" stroke-width="12" stroke-linejoin="round"/>
 </svg>
