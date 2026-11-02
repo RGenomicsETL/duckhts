@@ -1,6 +1,23 @@
 # Changelog
 
+## Rduckhts (development version)
+
+- [`rduckhts_functions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_functions.md)
+  and the bundled function reference: `regionkey`,
+  `duckhts_ancestry_proportions`, `bcftools_norm_row` and
+  `bcftools_munge_row` no longer show `name := default` arguments, which
+  DuckDB ignores on scalar functions. The `bcftools_munge_row` example
+  now binds. `duckhts_alt_to_list` is listed.
+- The catalog test checks that every function the bundled extension
+  registers is in the catalog, apart from internal helpers.
+- README: “Avoid three common SQL mistakes” shows the errors for an
+  unquoted `end`, a column name passed as a string, and the 0-based
+  half-open interval convention
+  (<https://github.com/RGenomicsETL/duckhts/issues/356>).
+
 ## Rduckhts 2.0.2.0.1.1
+
+CRAN release: 2026-10-28
 
 - [`rduckhts_mosdepth()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_mosdepth.md),
   [`rduckhts_samtools_idxstats()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_samtools_idxstats.md),

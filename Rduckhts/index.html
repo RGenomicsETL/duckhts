@@ -210,6 +210,45 @@
 <strong>SQL functions:</strong> the extension’s functions (<code>read_bcf()</code>, <code>read_bam()</code> and the rest) are available directly on the connection.</li>
 </ul>
 </div>
+<div class="section level3">
+<h3 id="avoid-three-common-sql-mistakes">Avoid three common SQL mistakes<a class="anchor" aria-label="anchor" href="#avoid-three-common-sql-mistakes"></a>
+</h3>
+<p>DuckDB reports these mistakes with its own error messages, which do not say what to change. <code>first_line()</code> below keeps the first line of each error.</p>
+<p><strong>Quote <code>end</code>.</strong> <code>end</code> is an SQL keyword, and interval tables have an <code>end</code> column. Write it as <code>"end"</code>:</p>
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">first_line</span> <span class="op">&lt;-</span> <span class="kw">function</span><span class="op">(</span><span class="va">expr</span><span class="op">)</span> <span class="op">{</span></span>
+<span>  <span class="kw"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch</a></span><span class="op">(</span><span class="va">expr</span>, error <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">e</span><span class="op">)</span> <span class="fu"><a href="https://rdrr.io/r/base/strsplit.html" class="external-link">strsplit</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/conditions.html" class="external-link">conditionMessage</a></span><span class="op">(</span><span class="va">e</span><span class="op">)</span>, <span class="st">"\n"</span><span class="op">)</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span><span class="op">)</span></span>
+<span><span class="op">}</span></span>
+<span><span class="va">targets</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/system.file.html" class="external-link">system.file</a></span><span class="op">(</span><span class="st">"extdata"</span>, <span class="st">"targets.bed"</span>, package <span class="op">=</span> <span class="st">"Rduckhts"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/rduckhts_bed.html">rduckhts_bed</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"targets"</span>, <span class="va">targets</span><span class="op">)</span></span>
+<span><span class="fu">first_line</span><span class="op">(</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT chrom, start, end FROM targets"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "Parser Error: syntax error at or near \"end\""</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">'SELECT chrom, start, "end" FROM targets'</span><span class="op">)</span></span>
+<span><span class="co">#&gt;            chrom start end</span></span>
+<span><span class="co">#&gt; 1   CHROMOSOME_I     0  10</span></span>
+<span><span class="co">#&gt; 2   CHROMOSOME_I    10  20</span></span>
+<span><span class="co">#&gt; 3  CHROMOSOME_II     0   8</span></span>
+<span><span class="co">#&gt; 4 CHROMOSOME_III     0   6</span></span></code></pre></div>
+<p><strong>Pass a column, not a string.</strong> A function that builds from a table takes the table and column names as strings. A scalar function takes column values, so <code>'end'</code> there is the text “end”, not the column:</p>
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT * FROM duckhts_cgranges_from_table(</span></span>
+<span><span class="st">  'targets_idx', 'targets', 'chrom', 'start', 'end')"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   indexed</span></span>
+<span><span class="co">#&gt; 1    TRUE</span></span>
+<span><span class="fu">first_line</span><span class="op">(</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT duckhts_cgranges_count_overlaps(</span></span>
+<span><span class="st">  'targets_idx', chrom, start, 'end') FROM targets"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "Invalid Error: Conversion Error: Could not convert string 'end' to INT64"</span></span>
+<span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">'SELECT chrom, start, "end",</span></span>
+<span><span class="st">  duckhts_cgranges_count_overlaps(\'targets_idx\', chrom, start, "end") AS overlaps</span></span>
+<span><span class="st">  FROM targets'</span><span class="op">)</span></span>
+<span><span class="co">#&gt;            chrom start end overlaps</span></span>
+<span><span class="co">#&gt; 1   CHROMOSOME_I     0  10        1</span></span>
+<span><span class="co">#&gt; 2   CHROMOSOME_I    10  20        1</span></span>
+<span><span class="co">#&gt; 3  CHROMOSOME_II     0   8        1</span></span>
+<span><span class="co">#&gt; 4 CHROMOSOME_III     0   6        1</span></span></code></pre></div>
+<p><strong>Mind the coordinates.</strong> BED tables and the interval functions use 0-based, half-open coordinates: <code>CHROMOSOME_I 0 10</code> covers bases 1 to 10. That is why each target above overlaps only itself, and <code>0-10</code> does not overlap <code>10-20</code>. VCF <code>POS</code> and region strings such as <code>"CHROMOSOME_I:1-1000"</code> are 1-based and inclusive. To test a VCF position against a BED interval, use <code>start &lt; POS AND POS &lt;= "end"</code>, or pass <code>POS - 1, POS</code> to an interval function.</p>
+<p>Friendlier messages for these mistakes are discussed in <a href="https://github.com/RGenomicsETL/duckhts/issues/357" class="external-link">#357</a>.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="learn-more">Learn more<a class="anchor" aria-label="anchor" href="#learn-more"></a>

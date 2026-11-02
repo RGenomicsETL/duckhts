@@ -199,6 +199,64 @@ even read-only ones, and never changes the file’s catalog.
 - **SQL functions:** the extension’s functions (`read_bcf()`,
   `read_bam()` and the rest) are available directly on the connection.
 
+### Avoid three common SQL mistakes
+
+DuckDB reports these mistakes with its own error messages, which do not
+say what to change. `first_line()` below keeps the first line of each
+error.
+
+**Quote `end`.** `end` is an SQL keyword, and interval tables have an
+`end` column. Write it as `"end"`:
+
+``` r
+first_line <- function(expr) {
+  tryCatch(expr, error = function(e) strsplit(conditionMessage(e), "\n")[[1]][1])
+}
+targets <- system.file("extdata", "targets.bed", package = "Rduckhts")
+rduckhts_bed(con, "targets", targets)
+first_line(dbGetQuery(con, "SELECT chrom, start, end FROM targets"))
+#> [1] "Parser Error: syntax error at or near \"end\""
+dbGetQuery(con, 'SELECT chrom, start, "end" FROM targets')
+#>            chrom start end
+#> 1   CHROMOSOME_I     0  10
+#> 2   CHROMOSOME_I    10  20
+#> 3  CHROMOSOME_II     0   8
+#> 4 CHROMOSOME_III     0   6
+```
+
+**Pass a column, not a string.** A function that builds from a table
+takes the table and column names as strings. A scalar function takes
+column values, so `'end'` there is the text “end”, not the column:
+
+``` r
+dbGetQuery(con, "SELECT * FROM duckhts_cgranges_from_table(
+  'targets_idx', 'targets', 'chrom', 'start', 'end')")
+#>   indexed
+#> 1    TRUE
+first_line(dbGetQuery(con, "SELECT duckhts_cgranges_count_overlaps(
+  'targets_idx', chrom, start, 'end') FROM targets"))
+#> [1] "Invalid Error: Conversion Error: Could not convert string 'end' to INT64"
+dbGetQuery(con, 'SELECT chrom, start, "end",
+  duckhts_cgranges_count_overlaps(\'targets_idx\', chrom, start, "end") AS overlaps
+  FROM targets')
+#>            chrom start end overlaps
+#> 1   CHROMOSOME_I     0  10        1
+#> 2   CHROMOSOME_I    10  20        1
+#> 3  CHROMOSOME_II     0   8        1
+#> 4 CHROMOSOME_III     0   6        1
+```
+
+**Mind the coordinates.** BED tables and the interval functions use
+0-based, half-open coordinates: `CHROMOSOME_I 0 10` covers bases 1 to
+10. That is why each target above overlaps only itself, and `0-10` does
+not overlap `10-20`. VCF `POS` and region strings such as
+`"CHROMOSOME_I:1-1000"` are 1-based and inclusive. To test a VCF
+position against a BED interval, use `start < POS AND POS <= "end"`, or
+pass `POS - 1, POS` to an interval function.
+
+Friendlier messages for these mistakes are discussed in
+[\#357](https://github.com/RGenomicsETL/duckhts/issues/357).
+
 ## Learn more
 
 - **Function reference:**
