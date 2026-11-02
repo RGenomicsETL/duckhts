@@ -68,7 +68,7 @@ The chr20 BAMs come from the `insert-size` workload's staging functions.
     rows would not fit the memory limit without spilling).
   - **tags map** and **tags named**: a fingerprint of two non-standard tags read
     from the map, then as named columns (candidate only).
-  - **bin counts**: `bam_bin_counts(path, bin_width := 100000)`.
+  - **bin counts**: `bam_bin_counts(path, 100000)`, 100 kb bins.
 - Correctness before timing: for each input and engine, a four-thread scan's
   record fingerprint (count, distinct and summed `FILE_OFFSET`, summed hash of
   name, flag, reference, position and CIGAR) must equal the candidate's
@@ -115,7 +115,7 @@ workload_sql <- function(workload, path, tags) {
       "SELECT count(*), sum(hash(\"%s\", \"%s\")) FROM read_bam(%s, auxiliary_tags := [%s, %s]);",
       t[[1L]], t[[2L]], p, sql_string(t[[1L]]), sql_string(t[[2L]])),
     bin_counts = sprintf(
-      "SELECT count(*), sum(count_total) FROM bam_bin_counts(%s, bin_width := 100000);", p),
+      "SELECT count(*), sum(count_total) FROM bam_bin_counts(%s, 100000);", p),
     fingerprint = sprintf(paste(
       "SELECT count(*), count(DISTINCT FILE_OFFSET), sum(FILE_OFFSET),",
       "sum(hash(QNAME, FLAG, RNAME, POS, CIGAR)) FROM read_bam(%s);"), p),
