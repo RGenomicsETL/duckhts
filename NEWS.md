@@ -21,7 +21,9 @@
   start from. Its render stops if a listed function is missing from the catalog.
 - A hex sticker (`r/Rduckhts/man/figures/logo.svg`) heads the README, the project site
   and the Rduckhts pkgdown site. The site build keeps the sticker when it drops the
-  README title and copies relative README images next to the landing page.
+  README title, copies relative README images next to the landing page, and links the
+  landing page to the Rduckhts favicons. `r/Rduckhts/man/figures/logo.R` generates the
+  sticker.
 
 # duckhts 2.0.2
 

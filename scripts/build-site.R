@@ -120,6 +120,16 @@ for (link in links) {
     paste0("https://github.com/RGenomicsETL/duckhts/blob/", revision, "/", href)
   )
 }
+# The landing page shares the sticker favicons that pkgdown builds for Rduckhts.
+head <- xml2::xml_find_first(landing, "//head")
+if (file.exists(file.path(destination, "favicon.svg"))) {
+  xml2::xml_add_child(head, "link", rel = "icon", type = "image/svg+xml",
+                      href = paste0(package_name, "/favicon.svg"))
+  xml2::xml_add_child(head, "link", rel = "icon", type = "image/png", sizes = "96x96",
+                      href = paste0(package_name, "/favicon-96x96.png"))
+  xml2::xml_add_child(head, "link", rel = "apple-touch-icon",
+                      href = paste0(package_name, "/apple-touch-icon.png"))
+}
 # Relative README images are copied next to the landing page.
 images <- xml2::xml_find_all(landing, "//img[@src]")
 for (image in images) {

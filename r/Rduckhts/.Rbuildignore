@@ -53,3 +53,4 @@
 ^pkgdown$
 ^\.github$
 ^vignettes/articles$
+^man/figures/logo\.R$
