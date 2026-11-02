@@ -9,6 +9,7 @@
 - README: "Avoid three common SQL mistakes" shows the errors for an unquoted `end`, a
   column name passed as a string, and the 0-based half-open interval convention
   (https://github.com/RGenomicsETL/duckhts/issues/356).
+- A hex sticker in `man/figures/logo.svg` heads the README and the pkgdown site.
 
 # Rduckhts 2.0.2.0.1.1
 

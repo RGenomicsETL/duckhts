@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd using [duckknit](https://github.com/rundel/duckknit). Please edit that file. -->
 
-# DuckHTS
+# DuckHTS <img src="r/Rduckhts/man/figures/logo.svg" align="right" height="139" alt="DuckHTS hex sticker" />
 
 [![CRAN
 Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)

@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# Rduckhts
+# Rduckhts <img src="man/figures/logo.svg" align="right" height="139" alt="Rduckhts hex sticker" />
 
 [![CRAN
 Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)

@@ -82,9 +82,12 @@ metadata <- function(title, header) {
 }
 
 readme <- readLines("README.md", warn = FALSE, encoding = "UTF-8")
-title_heading <- which(readme == "# DuckHTS")
+# The page title comes from the metadata, so drop the README's title heading
+# but keep an image that follows it on the same line (the hex sticker).
+title_heading <- grep("^# DuckHTS( |$)", readme)
 if (length(title_heading) > 0L) {
-  readme <- readme[-title_heading[[1L]]]
+  first <- title_heading[[1L]]
+  readme[[first]] <- trimws(sub("^# DuckHTS", "", readme[[first]]))
 }
 landing_path <- file.path(site_root, "index.html")
 litedown::mark(
@@ -116,6 +119,21 @@ for (link in links) {
     link, "href",
     paste0("https://github.com/RGenomicsETL/duckhts/blob/", revision, "/", href)
   )
+}
+# Relative README images are copied next to the landing page.
+images <- xml2::xml_find_all(landing, "//img[@src]")
+for (image in images) {
+  src <- xml2::xml_attr(image, "src")
+  if (grepl("^(/|[a-z]+:)", src)) {
+    next
+  }
+  if (!file.exists(src)) {
+    stop("README image has no source file: ", src, call. = FALSE)
+  }
+  asset <- file.path("assets", basename(src))
+  dir.create(file.path(site_root, "assets"), showWarnings = FALSE)
+  file.copy(src, file.path(site_root, asset), overwrite = TRUE)
+  xml2::xml_set_attr(image, "src", asset)
 }
 xml2::write_html(landing, landing_path)
 

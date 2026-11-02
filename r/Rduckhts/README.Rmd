@@ -27,7 +27,7 @@ knitr::knit_hooks$set(output = function(x, options) {
 })
 ```
 
-# Rduckhts
+# Rduckhts <img src="man/figures/logo.svg" align="right" height="139" alt="Rduckhts hex sticker" />
 
 [![CRAN Status](https://www.r-pkg.org/badges/version/Rduckhts)](https://cran.r-project.org/package=Rduckhts)
 [![R-universe version](https://RGenomicsETL.r-universe.dev/Rduckhts/badges/version)](https://RGenomicsETL.r-universe.dev/Rduckhts)
