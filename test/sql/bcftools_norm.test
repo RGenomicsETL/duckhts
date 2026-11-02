@@ -475,3 +475,18 @@ FROM duckhts_bcftools_norm(
 );
 ----
 99	1	900	1	901	1	0	1	[USER_ALT]	GT	USER_STATUS	Normalized
+
+# duckhts_alt_to_list: a VARCHAR ALT is split on every comma without trimming, the
+# missing ALT `.` gives an empty list, NULL stays NULL, and a VARCHAR[] passes
+# through with its NULL elements.
+query TIIITTTI
+SELECT duckhts_alt_to_list('A,<DEL>,T') = ['A', '<DEL>', 'T'],
+       len(duckhts_alt_to_list('.')),
+       len(duckhts_alt_to_list('')),
+       len(duckhts_alt_to_list('A,,G')),
+       duckhts_alt_to_list('A, T')[2] = ' T',
+       duckhts_alt_to_list(NULL::VARCHAR) IS NULL,
+       duckhts_alt_to_list(['A', NULL, 'G'])[2] IS NULL,
+       len(duckhts_alt_to_list(['A', NULL, 'G']));
+----
+true	0	1	3	true	true	true	3

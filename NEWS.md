@@ -1,5 +1,25 @@
 # DuckHTS Extension News
 
+# duckhts (development version)
+
+- Function catalog: four scalar signatures documented `name := default` arguments that
+  do not exist. DuckDB ignores a `name :=` label on a scalar argument and binds the value
+  by position, so the documented defaults and argument order were wrong. `regionkey` and
+  `duckhts_ancestry_proportions` now show their optional last argument as `[, strand]`
+  and `[, sum_to_one]` and state its value when omitted (0 and true).
+  `bcftools_norm_row` and `bcftools_munge_row` now show all 9 and 29 arguments as
+  positional and required. The `bcftools_munge_row` example passed 24 arguments and
+  failed to bind; it now passes 29.
+- `duckhts_alt_to_list(alt)` is in the catalog. It was registered but undocumented. It
+  returns a VCF ALT as `VARCHAR[]`: a VARCHAR is split on commas, `.` gives an empty
+  list, and a `VARCHAR[]` passes through.
+- The R catalog test now also checks the reverse direction. Every function that loading
+  DuckHTS adds to a plain DuckDB connection must be in `functions.yaml`, apart from the
+  `__duckhts_` and `duckhts__` internal helpers. A scalar or aggregate signature may not
+  use `:=`.
+- README: a "What you can do" table near the top maps 13 tasks to the functions to
+  start from. Its render stops if a listed function is missing from the catalog.
+
 # duckhts 2.0.2
 
 - `duckhts_mosdepth`, `duckhts_samtools_idxstats`, `bam_index`, `bcf_index`,

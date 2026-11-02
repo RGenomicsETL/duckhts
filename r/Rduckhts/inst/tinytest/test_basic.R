@@ -640,6 +640,10 @@ local({
     if (!nrow(found)) next
     documented <- signature_args(entry$signature)
     if (entry$kind %in% c("scalar", "aggregate")) {
+      # DuckDB drops a `name :=` label on a scalar or aggregate argument and binds
+      # the value by position, so `:=` in such a signature documents a default and
+      # an argument order that do not exist.
+      expect_false(any(documented$named), info = paste(entry$name, "documents := arguments"))
       # `[, name]` marks an optional trailing argument: every arity from the
       # required count up to the full count needs its own overload (or varargs).
       optional <- lengths(regmatches(entry$signature,
@@ -664,6 +668,18 @@ local({
     }, logical(1))
     expect_true(any(matches), info = entry$name)
   }
+
+  # The reverse direction: every function that loading DuckHTS adds to a plain
+  # DuckDB connection is in the catalog, unless its name carries one of the two
+  # internal-helper prefixes.
+  plain <- DBI::dbConnect(duckdb::duckdb())
+  on.exit(DBI::dbDisconnect(plain, shutdown = TRUE), add = TRUE)
+  builtin <- DBI::dbGetQuery(plain, "SELECT DISTINCT function_name FROM duckdb_functions()")
+  added <- setdiff(unique(registered$function_name), builtin$function_name)
+  internal <- startsWith(added, "__duckhts_") | startsWith(added, "duckhts__")
+  expect_true(length(added[!internal]) > 0L)
+  expect_identical(sort(setdiff(added[!internal], catalog$name)), character(),
+                   info = "registered by DuckHTS but missing from functions.yaml")
 })
 
 # Test parameter validation - these should fail gracefully without a connection

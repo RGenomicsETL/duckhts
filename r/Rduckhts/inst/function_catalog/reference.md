@@ -1273,7 +1273,7 @@ Solve a nearest-positive-definite constrained ancestry projection from aggregate
 Signature:
 
 ```sql
-duckhts_ancestry_proportions(x_pc_major, y_pc, group_count, sum_to_one := true)
+duckhts_ancestry_proportions(x_pc_major, y_pc, group_count[, sum_to_one])
 ```
 
 Returns:
@@ -1284,7 +1284,7 @@ DOUBLE[]
 
 ### Input
 
-x_pc_major is a flat DOUBLE[] in PC-major, group-minor order for X = P^T F_ref; y_pc is a DOUBLE[] with one value per PC for (P^T f) times the shrinkage correction. Groups are ordered identically within each PC. 1 to 30 groups and 1 to 64 PCs are supported. All values must be finite. sum_to_one=true enforces nonnegative q summing to one; false allows a sum at most one. The scalar returns full-precision group proportions in input order; the R wrapper rounds displayed proportions to seven decimals after correlation gating.
+x_pc_major is a flat DOUBLE[] in PC-major, group-minor order for X = P^T F_ref; y_pc is a DOUBLE[] with one value per PC for (P^T f) times the shrinkage correction. Groups are ordered identically within each PC. 1 to 30 groups and 1 to 64 PCs are supported. All values must be finite. sum_to_one=true, the value when it is omitted, enforces nonnegative q summing to one; false allows a sum at most one. The scalar returns full-precision group proportions in input order; the R wrapper rounds displayed proportions to seven decimals after correlation gating.
 
 ### Repair
 
@@ -3718,12 +3718,12 @@ SELECT variantkey_hex((variantkey_range('1', 100, 100)).min), variantkey_hex((va
 
 ## regionkey
 
-Encode a genomic interval as an official RegionKey-compatible 64-bit unsigned integer. Start and end use 0-based half-open interval semantics, matching BED-style coordinates; strand accepts -1, 0, or 1.
+Encode a genomic interval as an official RegionKey-compatible 64-bit unsigned integer. Start and end use 0-based half-open interval semantics, matching BED-style coordinates; strand accepts -1, 0, or 1, and is 0 when omitted.
 
 Signature:
 
 ```sql
-regionkey(chrom, start, end, strand := 0)
+regionkey(chrom, start, end[, strand])
 ```
 
 Returns:
@@ -4117,7 +4117,7 @@ Normalize one variant against FASTA with bcftools/vt-style left alignment.
 Signature:
 
 ```sql
-bcftools_norm_row(chrom, pos, ref, alt, fasta_ref, end_pos := NULL, svlen := NULL, fasta_index_path := NULL, gzi_path := NULL)
+bcftools_norm_row(chrom, pos, ref, alt, fasta_ref, end_pos, svlen, fasta_index_path, gzi_path)
 ```
 
 Returns:
@@ -4125,6 +4125,10 @@ Returns:
 ```
 STRUCT
 ```
+
+### Arguments
+
+All nine arguments are positional and required. DuckDB ignores a `name :=` label on a scalar argument and binds the value by position, so pass NULL for an unused end_pos, svlen, fasta_index_path or gzi_path. A NULL index path lets htslib find the index next to fasta_ref.
 
 ### Input
 
@@ -4142,6 +4146,40 @@ The reference sequence of a record is looked up in the FASTA index under, in ord
 
 ```sql
 SELECT nr.pos_normed, nr.ref_normed, nr.alt_normed FROM (SELECT bcftools_norm_row('chr1', 100, 'AC', 'A', 'ref.fa', NULL::BIGINT, NULL::BIGINT, NULL, NULL) AS nr);
+```
+
+## duckhts_alt_to_list
+
+Return a VCF ALT field as a list of alleles, splitting a comma-delimited VARCHAR or passing a VARCHAR[] through.
+
+Signature:
+
+```sql
+duckhts_alt_to_list(alt)
+```
+
+Returns:
+
+```
+VARCHAR[]
+```
+
+### Input
+
+alt is VARCHAR or VARCHAR[]. A VARCHAR is split on every comma with no trimming, so an empty item stays an empty string. The missing ALT `.` returns an empty list. A NULL alt returns NULL; a NULL list element stays NULL.
+
+### Use
+
+duckhts_bcftools_norm uses it to give VARCHAR and VARCHAR[] ALT columns one list shape before UNNEST.
+
+### Examples
+
+```sql
+SELECT duckhts_alt_to_list('A,<DEL>,T');
+```
+
+```sql
+SELECT duckhts_alt_to_list(ALT) AS alts FROM read_bcf('cohort.vcf.gz') LIMIT 5;
 ```
 
 ## duckhts_bcftools_norm
@@ -4231,7 +4269,7 @@ Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/a
 Signature:
 
 ```sql
-bcftools_munge_row(chrom, pos, a1, a2, id, p, z, or, beta, n, n_cas, n_con, info, frq, se, lp, ac, neff, neffdiv2, het_i2, het_p, het_lp, dire, fasta_ref, iffy_tag := 'IFFY', mismatch_tag := 'REF_MISMATCH', ns := NULL, nc := NULL, ne := NULL)
+bcftools_munge_row(chrom, pos, a1, a2, id, p, z, or, beta, n, n_cas, n_con, info, frq, se, lp, ac, neff, neffdiv2, het_i2, het_p, het_lp, dire, fasta_ref, iffy_tag, mismatch_tag, ns, nc, ne)
 ```
 
 Returns:
@@ -4240,6 +4278,10 @@ Returns:
 STRUCT
 ```
 
+### Arguments
+
+All 29 arguments are positional and required. DuckDB ignores a `name :=` label on a scalar argument and binds the value by position, so pass NULL for an unused argument. NULL iffy_tag and mismatch_tag select IFFY and REF_MISMATCH. NULL ns, nc and ne keep the values derived from the row; a non-NULL value replaces them. duckhts_munge maps source columns to these positions.
+
 ### Contig names
 
 The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error.
@@ -4247,7 +4289,7 @@ The reference sequence of a record is looked up in the FASTA index under, in ord
 ### Examples
 
 ```sql
-SELECT (bcftools_munge_row('chr1', 12345, 'A', 'G', 'rs1', 0.01, NULL, NULL, 0.12, 1000, NULL, NULL, NULL, 0.3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'ref.fa')).ref;
+SELECT (bcftools_munge_row('chr1', 12345, 'A', 'G', 'rs1', 0.01, NULL, NULL, 0.12, 1000, NULL, NULL, NULL, 0.3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'ref.fa', NULL, NULL, NULL, NULL, NULL)).ref;
 ```
 
 ## duckhts_munge
