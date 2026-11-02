@@ -229,27 +229,37 @@ knitr::kable(checks[, c("input", "engine", "equal")], format = "pipe")
 ## Results
 
 Median of three fresh processes, with the range; seconds are the measured
-statement only.
+statement only, and peak RSS is the largest of the three. A cell with any failed,
+timed-out or over-ceiling process is marked failed and has no median or speedup.
 
-```{r results}
+```{r results, results='asis'}
 raw <- utils::read.csv("benchmarks/data/bam_split_scan.csv")
 meta <- utils::read.csv("benchmarks/data/bam_split_scan_metadata.csv")
-cell <- aggregate(cbind(seconds, rss_bytes) ~ input + workload + engine + threads,
-                  data = raw[raw$ok, ], FUN = median)
-lo <- aggregate(seconds ~ input + workload + engine + threads, data = raw[raw$ok, ], FUN = min)
-hi <- aggregate(seconds ~ input + workload + engine + threads, data = raw[raw$ok, ], FUN = max)
-cell$range <- sprintf("%.2f-%.2f", lo$seconds, hi$seconds)
-cell$peak_rss_mib <- round(cell$rss_bytes / 2^20)
-cell$seconds <- round(cell$seconds, 2)
-wide <- reshape(cell[, c("input", "workload", "threads", "engine", "seconds", "range", "peak_rss_mib")],
-                idvar = c("input", "workload", "threads"), timevar = "engine", direction = "wide")
-wide$speedup <- round(wide$seconds.baseline / wide$seconds.candidate, 2)
+keys <- c("input", "workload", "engine", "threads")
+# A cell passes only when every declared repetition ran and passed; one failed,
+# timed-out or over-ceiling process fails the whole cell and suppresses its
+# median and its comparison. Raw failures stay listed below.
+cells <- split(raw, raw[keys], drop = TRUE)
+cell <- do.call(rbind, lapply(cells, function(rows) {
+  passed <- nrow(rows) == params$reps && all(rows$ok)
+  data.frame(
+    rows[1L, keys],
+    status = if (passed) "PASS" else sprintf("FAIL (%d/%d ok)", sum(rows$ok), params$reps),
+    seconds = if (passed) round(stats::median(rows$seconds), 2) else NA_real_,
+    range = if (passed) sprintf("%.2f-%.2f", min(rows$seconds), max(rows$seconds)) else NA_character_,
+    peak_rss_mib = if (passed) round(max(rows$rss_bytes) / 2^20) else NA_real_,
+    row.names = NULL)
+}))
+wide <- reshape(cell, idvar = c("input", "workload", "threads"), timevar = "engine",
+                direction = "wide")
+both_pass <- !is.na(wide$seconds.baseline) & !is.na(wide$seconds.candidate)
+wide$speedup <- ifelse(both_pass, round(wide$seconds.baseline / wide$seconds.candidate, 2), NA_real_)
 order_inputs <- c("exome", "exome unmapped", "chr20 1x", "chr20 2x", "chr20 4x", "ONT")
 wide <- wide[order(match(wide$input, order_inputs), wide$workload, wide$threads), ]
-knitr::kable(wide, format = "pipe", row.names = FALSE)
+print(knitr::kable(wide, format = "pipe", row.names = FALSE))
 failed <- raw[!raw$ok, ]
-if (nrow(failed)) knitr::kable(failed, format = "pipe", caption = "Failed processes")
-knitr::kable(meta, format = "pipe")
+if (nrow(failed)) print(knitr::kable(failed, format = "pipe", caption = "Failed processes"))
+print(knitr::kable(meta, format = "pipe"))
 ```
 
 The chr20 rows are the 1x/2x/4x scaling ladder on one populated reference.

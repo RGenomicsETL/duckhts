@@ -61,16 +61,37 @@ static int index_byte_span(hts_idx_t *idx, int tid, hts_pos_t beg, hts_pos_t end
     return found;
 }
 
+/* The first indexed byte at or after `pos`: the smallest chunk start over a window
+ * that begins at pos. In a coordinate-sorted file a record overlapping a later
+ * position either starts after the window, at a larger offset, or also overlaps
+ * the window, so a narrow window answers; it widens only across a stretch without
+ * data. Returns 0 when no data lies at or after pos. */
+static int index_first_byte_at(hts_idx_t *idx, int tid, int64_t pos, int64_t length,
+                               uint64_t *at) {
+    uint64_t unused = 0;
+
+    for (int64_t width = 1 << 14;; width *= 8) {
+        int64_t end = width >= length - pos ? length : pos + width;
+        if (index_byte_span(idx, tid, pos, end, at, &unused)) return 1;
+        if (end >= length) return 0;
+    }
+}
+
 /*
- * A boundary is a sampled position (two samples per piece, evenly spaced over
- * the reference length) where the indexed data starts at or past the next
- * equal share of the reference's bytes. Deep regions can put several shares in
- * one sample interval; the reference then gets fewer, larger pieces.
+ * Boundary j is the smallest position, to within BOUNDARY_GRANULE bases (or the
+ * alignment), whose first indexed byte reaches the j-th equal share of the
+ * reference's bytes, found by bisection. Bisection follows the data wherever it
+ * lies, so a reference whose records occupy a short prefix is still split. A share
+ * that falls inside one granule of a deep pileup adds no boundary; the reference
+ * then gets fewer, larger pieces.
  */
+#define BOUNDARY_GRANULE ((int64_t)1 << 14)
+
 int duckhts_bam_partitions_build(hts_idx_t *idx, const sam_hdr_t *hdr,
                                  int64_t piece_bytes, int max_pieces, int64_t align,
                                  duckhts_bam_partitions *out) {
     int n_refs = sam_hdr_nref(hdr);
+    int64_t granule = align > BOUNDARY_GRANULE ? align : BOUNDARY_GRANULE;
 
     duckhts_bam_partitions_free(out);
     if (max_pieces < 1) max_pieces = 1;
@@ -79,25 +100,30 @@ int duckhts_bam_partitions_build(hts_idx_t *idx, const sam_hdr_t *hdr,
         uint64_t first = 0, last = 0;
         int64_t previous = 0;
         int pieces = 1;
-        int made = 1;
 
         if (piece_bytes > 0 && length > 1 &&
             index_byte_span(idx, tid, 0, length, &first, &last) && last > first) {
             uint64_t wanted = (last - first) / (uint64_t)piece_bytes + 1;
             pieces = wanted > (uint64_t)max_pieces ? max_pieces : (int)wanted;
         }
-        for (int k = 1; pieces > 1 && k < 2 * pieces && made < pieces; k++) {
-            int64_t pos = (int64_t)length * k / (2 * pieces);
-            uint64_t at = 0, unused = 0;
-            uint64_t share = first + (last - first) * (uint64_t)made / (uint64_t)pieces;
+        for (int j = 1; j < pieces; j++) {
+            uint64_t share = first + (last - first) * (uint64_t)j / (uint64_t)pieces;
+            int64_t lo = previous + 1;
+            int64_t hi = length;
+            int64_t pos;
 
+            while (hi - lo > granule) {
+                int64_t mid = lo + (hi - lo) / 2;
+                uint64_t at = 0;
+                if (index_first_byte_at(idx, tid, mid, length, &at) && at < share) lo = mid + 1;
+                else hi = mid;
+            }
+            pos = hi;
             if (align > 1) pos -= pos % align;
+            if (pos >= length) break; /* no data reaches this share */
             if (pos <= previous) continue;
-            if (!index_byte_span(idx, tid, pos, length, &at, &unused)) break;
-            if (at < share) continue;
             if (!partitions_push(out, tid, previous, pos)) goto oom;
             previous = pos;
-            made++;
         }
         if (!partitions_push(out, tid, previous, HTS_POS_MAX)) goto oom;
     }

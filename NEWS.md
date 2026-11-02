@@ -13,14 +13,18 @@
   record. `test/sql/bam_named_tags.test` checks every SAM AUX type against the map and the
   SAM text, a CRAM, and each rejection.
 - An indexed full-file scan of a BGZF BAM now cuts a reference with more than 16 MiB of
-  indexed data into up to 256 byte-balanced pieces taken from the BAI/CSI offsets, so a
+  indexed data into up to 256 byte-balanced pieces, placing each boundary by bisection
+  on the BAI/CSI offsets, so a
   file whose data sits on one reference, such as a single-chromosome or coordinate-prefix
   BAM, scans on several DuckDB threads. A record belongs to the piece that holds its start
   position and is returned once. CRAM and the reads without coordinates keep their
   previous paths. The shared native helper `src/bam_partition.c` is tested by
   `test/scripts/bam_partition_test.c` on generated BAMs with BAI and CSI, spliced reads
-  across piece boundaries, placed-unmapped and unplaced reads; dropping the ownership
-  rule or leaving a gap between pieces fails it. On the 4,000,000-read PBMC BAM the split
+  across piece boundaries, placed-unmapped and unplaced reads, and reads confined to the
+  first 0.4% of a 500 Mb reference, where no piece may hold a quarter of the reads;
+  dropping the ownership rule, leaving a gap between pieces, or sampling boundaries over
+  the declared reference length fails it. Planning reads only the index: 0.029 s at bind
+  for the 86-reference exome BAM. On the 4,000,000-read PBMC BAM the split
   scan returns exactly the records of a sequential scan, `FILE_OFFSET` included. DuckDB
   runs the pieces in parallel when the plan allows it: an aggregate, or `CREATE TABLE AS`
   with `preserve_insertion_order = false`. `design/better_scans.md` replaces the planned

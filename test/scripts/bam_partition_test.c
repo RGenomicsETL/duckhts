@@ -76,13 +76,17 @@ static int write_record(samFile *out, sam_hdr_t *hdr, bam1_t *rec, uint32_t *sta
     return sam_write1(out, hdr, rec) < 0 ? -1 : 0;
 }
 
-static int write_bam(const char *path) {
-    static const char header_text[] =
-        "@HD\tVN:1.6\tSO:coordinate\n"
-        "@SQ\tSN:chrA\tLN:2000000\n"
-        "@SQ\tSN:chrEmpty\tLN:1000\n";
+/* chrA holds the reads at positions 0 to 1.8 Mb; ref_a_length sets the length the
+ * header declares, so a long one leaves the reads in a short prefix. */
+static int write_bam(const char *path, long ref_a_length) {
+    char header_text[160];
+    int header_length = snprintf(header_text, sizeof(header_text),
+                                 "@HD\tVN:1.6\tSO:coordinate\n"
+                                 "@SQ\tSN:chrA\tLN:%ld\n"
+                                 "@SQ\tSN:chrEmpty\tLN:1000\n", ref_a_length);
     samFile *out = sam_open(path, "wb");
-    sam_hdr_t *hdr = sam_hdr_parse(sizeof(header_text) - 1, header_text);
+    sam_hdr_t *hdr = header_length > 0 && (size_t)header_length < sizeof(header_text)
+        ? sam_hdr_parse((size_t)header_length, header_text) : NULL;
     bam1_t *rec = bam_init1();
     uint32_t state = 12345u;
     int rc = -1;
@@ -112,11 +116,15 @@ static int check_pieces_keep_each_record_once(const char *path, hts_idx_t *idx,
     bam1_t *rec = bam_init1();
     unsigned char *seen = calloc(N_PLACED, 1);
     long kept = 0;
+    long largest_piece = 0;
+    int pieces_a = 0;
 
     CHECK(in && hdr && rec && seen);
     for (int p = 0; p < parts->n; p++) {
         hts_itr_t *itr = sam_itr_queryi(idx, parts->tid[p], parts->beg[p], parts->end[p]);
+        long kept_before = kept;
         int ret;
+        if (parts->tid[p] == 0) pieces_a++;
         if (!itr) continue; /* the empty reference has no chunk */
         while ((ret = sam_itr_next(in, itr, rec)) >= 0) {
             long index;
@@ -130,8 +138,13 @@ static int check_pieces_keep_each_record_once(const char *path, hts_idx_t *idx,
         }
         CHECK(ret == -1);
         hts_itr_destroy(itr);
+        if (kept - kept_before > largest_piece) largest_piece = kept - kept_before;
     }
     CHECK(kept == N_PLACED);
+    /* Balance: once chrA is split into many pieces, none holds a quarter of its
+     * reads, wherever on the reference the reads lie. A boundary shifts right by at
+     * most the span of the reads overlapping it (200 kb for the spliced reads). */
+    if (pieces_a >= 8) CHECK(largest_piece * 4 <= N_PLACED);
     free(seen);
     bam_destroy1(rec);
     sam_hdr_destroy(hdr);
@@ -218,10 +231,14 @@ int main(void) {
     close(fd);
     snprintf(bam_path, sizeof(bam_path), "%s.bam", path);
 
-    if (check_ownership_rule() == 0 && write_bam(bam_path) == 0 &&
+    if (check_ownership_rule() == 0 && write_bam(bam_path, REF_A_LENGTH) == 0 &&
         check_index(bam_path, 0, 0) == 0 &&    /* BAI */
         check_index(bam_path, 14, 0) == 0 &&   /* CSI, default min_shift */
-        check_index(bam_path, 0, 10000) == 0) { /* BAI, bin-aligned boundaries */
+        check_index(bam_path, 0, 10000) == 0 && /* BAI, bin-aligned boundaries */
+        /* The same reads in the first 0.4% of a 500 Mb reference: boundaries must
+         * follow the data, not the declared length. */
+        write_bam(bam_path, 500000000L) == 0 &&
+        check_index(bam_path, 0, 0) == 0) {
         rc = 0;
     }
 

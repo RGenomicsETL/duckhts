@@ -131,8 +131,10 @@ The contract for an indexed full-file BGZF BAM scan is:
 
 - A reference with more indexed compressed data than 16 MiB is cut into at most
   256 pieces with about equal compressed bytes; every other reference is one piece.
-  Boundaries come from the BAI/CSI chunk offsets of sampled positions, computed once
-  at bind; no record is read to plan the scan.
+  Each boundary is found by bisection on position for the first place whose indexed
+  data reaches the next equal share of bytes, using narrow BAI/CSI queries, once at
+  bind; no record is read to plan the scan. Bisection follows the data, so a
+  reference whose records occupy a short prefix of its length is still split.
 - A piece is a half-open position range of one reference, read through its own
   iterator. A record belongs to the piece that holds its start position, so a record
   that crosses a boundary is returned exactly once. Records without a reference
@@ -140,7 +142,8 @@ The contract for an indexed full-file BGZF BAM scan is:
 - `src/bam_partition.c` is the single owner of this mechanism: the partition
   builder and the ownership rule are host-neutral and tested natively
   (`test/scripts/bam_partition_test.c`, BAI and CSI, spliced reads across
-  boundaries, placed-unmapped and unplaced reads). A scanner that accumulates
+  boundaries, placed-unmapped and unplaced reads, and the same reads in a short
+  prefix of a long reference, where no piece may hold a quarter of the reads). A scanner that accumulates
   fixed-width bins aligns the boundaries to the bin width so no bin is shared.
 - CRAM keeps one owner per reference: its index offsets are container addresses,
   not BGZF virtual offsets. BCF keeps one owner per contig until the same evidence
