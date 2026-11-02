@@ -57,7 +57,8 @@ The chr20 BAMs come from the `insert-size` workload's staging functions.
 - Every timed query runs in a fresh DuckDB CLI process (`DUCKDB`, default `duckdb`)
   with `SET threads`, `SET preserve_insertion_order = false` and a 16 GiB
   memory limit. The time is the CLI `.timer` wall time of the measured statement
-  only; peak RSS is GNU `time` for the whole process.
+  only; peak RSS and CPU seconds (user plus system, all threads, including htslib
+  decompression threads) are GNU `time` for the whole process.
 - Three fresh processes per engine, input, workload and thread count; the table
   shows the median and range.
 - Declared before measuring: a 900 s wall limit per process and a 20 GiB peak-RSS
@@ -126,7 +127,7 @@ workload_sql <- function(workload, path, tags) {
 }
 
 # One fresh CLI process. Returns the measured statement's wall seconds, the
-# whole-process peak RSS and the last result row.
+# whole-process peak RSS and CPU seconds, and the last result row.
 run_process <- function(extension, threads, sql) {
   script <- tempfile(fileext = ".sql")
   timing <- tempfile(fileext = ".time")
@@ -140,7 +141,7 @@ run_process <- function(extension, threads, sql) {
     ".timer on",
     sql), script)
   out <- suppressWarnings(system2(
-    "timeout", c(wall_limit_s, "/usr/bin/time", "-f", "%M", "-o", timing,
+    "timeout", c(wall_limit_s, "/usr/bin/time", "-f", shQuote("%M %U %S"), "-o", timing,
                  duckdb_bin, "-unsigned", "-csv", "-noheader", "-bail"),
     stdin = script, stdout = TRUE, stderr = TRUE))
   status <- attr(out, "status")
@@ -148,13 +149,14 @@ run_process <- function(extension, threads, sql) {
                           grep("^Run Time", out, value = TRUE)))
   results <- grep("^Run Time|^$", out, value = TRUE, invert = TRUE)
   timing_lines <- if (file.exists(timing)) readLines(timing, warn = FALSE) else character()
-  rss_kib <- suppressWarnings(as.numeric(utils::tail(timing_lines, 1L)))
+  usage <- suppressWarnings(as.numeric(strsplit(utils::tail(c("", timing_lines), 1L), " ")[[1L]]))
   # A process killed before it prints a result, or without a GNU time record,
   # still yields one failed row with NA measurements rather than empty values.
   list(
     ok = (is.null(status) || status == 0L) && length(times) > 0L,
     seconds = if (length(times)) times[[1L]] else NA_real_, # the measured statement
-    rss_bytes = if (length(rss_kib) == 1L && is.finite(rss_kib)) rss_kib * 1024 else NA_real_,
+    rss_bytes = if (length(usage) == 3L && all(is.finite(usage))) usage[[1L]] * 1024 else NA_real_,
+    cpu_seconds = if (length(usage) == 3L && all(is.finite(usage))) usage[[2L]] + usage[[3L]] else NA_real_,
     result = if (length(results)) utils::tail(results, 1L) else NA_character_,
     output = paste(out, collapse = "\n"))
 }
@@ -200,7 +202,8 @@ for (i in seq_len(nrow(inputs))) {
         input = inputs$input[[i]], workload = workload, engine = engine,
         threads = threads, rep = rep, ok = got$ok && is.finite(got$rss_bytes) &&
           got$rss_bytes <= rss_ceiling_bytes,
-        seconds = got$seconds, rss_bytes = got$rss_bytes, result = got$result)
+        seconds = got$seconds, rss_bytes = got$rss_bytes, cpu_seconds = got$cpu_seconds,
+        result = got$result)
     }
   }
 }
@@ -251,6 +254,7 @@ cell <- do.call(rbind, lapply(cells, function(rows) {
     seconds = if (passed) round(stats::median(rows$seconds), 2) else NA_real_,
     range = if (passed) sprintf("%.2f-%.2f", min(rows$seconds), max(rows$seconds)) else NA_character_,
     peak_rss_mib = if (passed) round(max(rows$rss_bytes) / 2^20) else NA_real_,
+    cpu_seconds = if (passed) round(stats::median(rows$cpu_seconds), 1) else NA_real_,
     row.names = NULL)
 }))
 wide <- reshape(cell, idvar = c("input", "workload", "threads"), timevar = "engine",
@@ -268,3 +272,12 @@ print(knitr::kable(meta, format = "pipe"))
 The chr20 rows are the 1x/2x/4x scaling ladder on one populated reference.
 `tags_named` has no baseline cell because the baseline cannot name tags; compare
 it with the candidate's `tags_map` row.
+
+The `bam_bin_counts` rows compare different thread policies, not the same work at
+the same concurrency. The baseline ran its scan at bind with up to 16 threads of its
+own whatever `SET threads` said, so its CPU seconds far exceed its wall time even
+in the one-thread cells. The candidate runs on DuckDB worker threads and follows the
+setting. On the exome, with 86 references, the baseline's one- and four-thread cells
+are therefore faster in wall time than the candidate's; on chr20, with one populated
+reference, both run one reader and match. The wall-time comparison at equal
+concurrency is a thread count of 16 or more, which these cells do not include.
