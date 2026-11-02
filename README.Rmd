@@ -101,6 +101,58 @@ dbGetQuery(con, sprintf(
 dbDisconnect(con, shutdown = TRUE)
 ```
 
+## What you can do
+
+Each task names the SQL functions to start from. The links go to the generated
+function reference. Most functions have an R helper in Rduckhts, shown in the
+reference, and the [worked examples](https://rgenomicsetl.github.io/duckhts/Rduckhts/articles/workflows.html)
+run them on bundled files.
+
+```{r task-map, echo=FALSE, results='asis'}
+tasks <- list(
+  "Read VCF/BCF, BAM/CRAM, FASTQ, FASTA, GFF/GTF, BigWig or tabix files as tables" =
+    c("read_bcf", "read_bam", "read_fastq", "read_fasta", "read_gff", "read_bigwig", "read_tabix"),
+  "Convert HTS files to Parquet" =
+    c("duckhts_bcf_convert_parquet_sql", "duckhts_bam_convert_parquet_sql"),
+  "Normalize, lift over and key variants" =
+    c("duckhts_bcftools_norm", "duckhts_liftover", "variantkey"),
+  "Harmonize GWAS summary statistics and compute polygenic scores" =
+    c("duckhts_munge", "bcftools_score"),
+  "Coverage, depth and fixed-bin read counts" =
+    c("duckhts_mosdepth", "duckhts_bam_bed_coverage", "bam_bin_counts", "read_pileup"),
+  "Count and overlap intervals" =
+    c("duckhts_cgranges_from_table", "duckhts_cgranges_count_overlaps"),
+  "FASTQ quality control" =
+    c("duckhts_fastq_qc"),
+  "Sample identity: relatedness, sex checks and contamination between samples" =
+    c("duckhts_somalier_bam_counts", "duckhts_somalier_relatedness",
+      "duckhts_somalier_sex", "duckhts_somalier_matched_contamination"),
+  "Ancestry proportions from genotypes or allele frequencies" =
+    c("duckhts_ancestry_proportions"),
+  "Runs of homozygosity from genotypes or from read counts" =
+    c("duckhts_roh", "duckhts_roh_counts"),
+  "Sequencing error and contamination from allele read counts" =
+    c("duckhts_bam_mismatch_counts", "duckhts_count_error_fit", "duckhts_count_mixture_lowpass"),
+  "Copy-number gains and losses from low-pass depth" =
+    c("duckhts_depth_bins", "duckhts_depth_region_fraction", "duckhts_depth_state_segments"),
+  "Compress and index" =
+    c("bgzip", "bam_index", "bcf_index", "tabix_index")
+)
+catalog <- read.delim("r/Rduckhts/inst/function_catalog/functions.tsv",
+                      quote = "", colClasses = "character")
+missing <- setdiff(unlist(tasks, use.names = FALSE), catalog$name)
+if (length(missing)) {
+  stop("task map names functions missing from the catalog: ",
+       paste(missing, collapse = ", "), call. = FALSE)
+}
+link <- function(name) {
+  sprintf("[`%s`](r/Rduckhts/inst/function_catalog/reference.md#%s)", name, name)
+}
+rows <- vapply(tasks, function(names) paste(link(names), collapse = ", "), character(1))
+cat("| Task | Start with |", "|:--|:--|",
+    sprintf("| %s | %s |", names(tasks), rows), sep = "\n")
+```
+
 ## Runtime compatibility
 
 DuckHTS requires DuckDB **1.5.0 or newer** for its SQL functions and macros.
