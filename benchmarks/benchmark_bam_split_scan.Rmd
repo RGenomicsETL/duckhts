@@ -147,12 +147,15 @@ run_process <- function(extension, threads, sql) {
   times <- as.numeric(sub("^Run Time \\(s\\): real ([0-9.]+).*$", "\\1",
                           grep("^Run Time", out, value = TRUE)))
   results <- grep("^Run Time|^$", out, value = TRUE, invert = TRUE)
-  rss_kib <- suppressWarnings(as.numeric(utils::tail(readLines(timing, warn = FALSE), 1L)))
+  timing_lines <- if (file.exists(timing)) readLines(timing, warn = FALSE) else character()
+  rss_kib <- suppressWarnings(as.numeric(utils::tail(timing_lines, 1L)))
+  # A process killed before it prints a result, or without a GNU time record,
+  # still yields one failed row with NA measurements rather than empty values.
   list(
-    ok = is.null(status) || status == 0L,
+    ok = (is.null(status) || status == 0L) && length(times) > 0L,
     seconds = if (length(times)) times[[1L]] else NA_real_, # the measured statement
-    rss_bytes = rss_kib * 1024,
-    result = utils::tail(results, 1L),
+    rss_bytes = if (length(rss_kib) == 1L && is.finite(rss_kib)) rss_kib * 1024 else NA_real_,
+    result = if (length(results)) utils::tail(results, 1L) else NA_character_,
     output = paste(out, collapse = "\n"))
 }
 ```
