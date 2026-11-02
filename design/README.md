@@ -12,7 +12,7 @@ replaced them.
 | [`depth_fraction_lane.md`](depth_fraction_lane.md) | Copy-number fractions from read depth: current phase 1 contract, open phase 2 state model. |
 | [`ancestry_reference.md`](ancestry_reference.md) | Ancestry reference-product identity and panel contract; public data staging remains open. |
 | [`simd_dispatch_matrix.md`](simd_dispatch_matrix.md) | Current SIMD dispatch contract. |
-| [`better_scans.md`](better_scans.md) | Open scan-planning work. |
+| [`better_scans.md`](better_scans.md) | Current BAM scan pieces; open BCF/CRAM scheduling and pipeline work. |
 | [`coverage_memory_footprint.md`](coverage_memory_footprint.md) | Current coverage-reader memory backlog. |
 | [`duckhts_mosdepth.md`](duckhts_mosdepth.md) | Mosdepth compatibility contract and remaining backlog. |
 | [`multireading.md`](multireading.md) | Current generated-SQL multi-file guidance and native-reader research. |

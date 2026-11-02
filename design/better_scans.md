@@ -1,12 +1,15 @@
 # Scan planning
 
-Status: open design for indexed full-scan scheduling and a possible VCF/BCF record-location
-surface. Explicit `scan_mode := 'sequential'` is implemented for supported readers.
+Status: current implementation guidance for byte-balanced BAM scan pieces and explicit
+`scan_mode := 'sequential'`; open design for BCF/CRAM scheduling, staged pipelines and a
+possible VCF/BCF record-location surface.
 
 ## Current scan ownership
 
-Indexed full-file scans claim each contig once: BAM/CRAM and BCF use the header
-dictionary, while Tabix-backed VCF uses the index dictionary. VCF headers may omit
+Indexed full-file scans claim units of work from a shared atomic counter. A BGZF
+BAM claims byte-balanced pieces of each reference (see below); CRAM and BCF claim
+each contig once from the header dictionary, and Tabix-backed VCF each contig once
+from the index dictionary. VCF headers may omit
 indexed contigs or name empty contigs absent from the index, especially with a
 non-colocated `index_path`; the work list must use the iterator's dictionary.
 Automatic BAM/CRAM scans also claim the no-coordinate tail once.
@@ -120,29 +123,41 @@ promise a staged parallel decoder. The open question is whether overlapping
 decode/transform/materialization beats the ordinary projected DuckDB pipeline
 at equal schema, records, output bytes, memory, and thread count.
 
-## Weighted contig claiming
+## Byte-balanced BAM pieces
 
-The remaining scheduling change is to claim expensive contigs before cheap ones so one large
-late contig does not dominate tail latency. This is an internal scheduling change, not a new
-reader parameter or result-set change.
+A scan that claims whole references runs on one thread when one reference holds
+most of the data: a single-chromosome BAM, or a prefix of a coordinate-sorted one.
+The contract for an indexed full-file BGZF BAM scan is:
 
-The design constraints are:
+- A reference with more indexed compressed data than 16 MiB is cut into at most
+  256 pieces with about equal compressed bytes; every other reference is one piece.
+  Boundaries come from the BAI/CSI chunk offsets of sampled positions, computed once
+  at bind; no record is read to plan the scan.
+- A piece is a half-open position range of one reference, read through its own
+  iterator. A record belongs to the piece that holds its start position, so a record
+  that crosses a boundary is returned exactly once. Records without a reference
+  remain one final partition.
+- `src/bam_partition.c` is the single owner of this mechanism: the partition
+  builder and the ownership rule are host-neutral and tested natively
+  (`test/scripts/bam_partition_test.c`, BAI and CSI, spliced reads across
+  boundaries, placed-unmapped and unplaced reads). A scanner that accumulates
+  fixed-width bins aligns the boundaries to the bin width so no bin is shared.
+- CRAM keeps one owner per reference: its index offsets are container addresses,
+  not BGZF virtual offsets. BCF keeps one owner per contig until the same evidence
+  exists for its iterators. Explicit region lists, sequential scans and
+  index-backed zero-column counts keep their own paths.
+- Pieces do not change what is returned, only who reads it. Validation compares
+  record sets with a sequential scan (count, distinct and summed `FILE_OFFSET`,
+  and a record fingerprint) on uneven, empty and single-reference inputs; tests do
+  not assert parallel output order.
+- DuckDB runs the pieces in parallel only when the plan allows it, for example an
+  aggregate, or `CREATE TABLE AS` with `preserve_insertion_order = false`; a
+  plain `CREATE TABLE AS` with the default setting runs the scan on one thread.
 
-- retain one-owner-per-contig iteration and the existing atomic claim model;
-- derive weights from index statistics when they are available;
-- sort by descending weight with the scan dictionary's contig ordinal as the tie-break;
-- fall back to that dictionary's order when statistics cannot be read reliably;
-- do not split contigs into overlapping region strings; and
-- do not extend this change to explicit or chained region scans.
-
-Before implementation, settle whether a zero-weight contig may be omitted. Keeping it at the
-end is the conservative default because an index statistic should not become a silent data
-filter. Any shared claim-order helper must have one owner and be used by both readers only if
-their fallback behavior is genuinely identical.
-
-Validation should compare row sets and counts with the current paths on uneven and empty
-contigs. Tests must not assert incidental parallel output order. A benchmark is useful only if
-it records the contig distribution, thread count, and tail-time change.
+Byte-balanced pieces replace the earlier plan to claim references in descending
+weight: they balance the work directly, so a heavy late reference no longer sets
+the tail time. A benchmark of this scheduling must record the reference
+distribution, piece count, thread count and the comparison scan.
 
 ## VCF/BCF record location
 

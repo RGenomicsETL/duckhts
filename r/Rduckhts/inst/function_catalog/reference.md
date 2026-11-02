@@ -524,7 +524,7 @@ SELECT * FROM read_bcf_samples('geno_calls.bcf', samples := '^S1') ORDER BY samp
 
 ## read_bam
 
-Read SAM/BAM/CRAM alignments with optional typed SAM tags, auxiliary maps and packed sequence, quality or CIGAR output.
+Read SAM/BAM/CRAM alignments with optional typed SAM tags, auxiliary tag maps or named tag columns, and packed sequence, quality or CIGAR output.
 
 Signature:
 
@@ -537,6 +537,10 @@ Returns:
 ```
 table
 ```
+
+### Tags
+
+auxiliary_tags := TRUE adds the AUXILIARY_TAGS map of the non-standard tags. auxiliary_tags := ['UR', 'UB'] instead adds one VARCHAR column per named tag, after the standard tag columns, formatted like the map value (the SAM text after TYPE:, B arrays as subtype then comma-separated values) and NULL when a record lacks the tag. It builds no map, so reading a few tags from a large file costs much less. Names must match [A-Za-z][A-Za-z0-9], at most 64, unique ignoring case, and with standard_tags := TRUE not equal to a standard tag column ignoring case, since DuckDB column names ignore case while SAM tag names do not. The strings 'true'/'false' and integers are still read as the BOOLEAN form.
 
 ### Map keys
 
@@ -552,7 +556,7 @@ FILE_OFFSET is the BGZF virtual position immediately after each compressed BAM r
 
 ### Scanning
 
-scan_mode='sequential' streams rather than using indexed count/parallel paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy. An indexed full-file scan is split by reference across DuckDB threads and reports the index's row total to the planner as an estimate. Both need the optional per-reference statistics of a BAI or CSI: when a reference has alignments and no statistics, the scan is one sequential stream and no estimate is reported. A CRAM scan is split by reference and reports no estimate. In a region list, '.' is the whole file and '*' is the reads without coordinates. htslib locates both from the same optional statistics; for a BAM whose index lacks them, read_bam reads those two items sequentially, so the result does not depend on the index statistics.
+scan_mode='sequential' streams rather than using indexed count/parallel paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy. An indexed full-file scan is split by reference across DuckDB threads and reports the index's row total to the planner as an estimate. In a BGZF BAM, a reference with more than 16 MiB of indexed data is also cut into up to 256 byte-balanced pieces taken from the index, so a file with one large reference still scans on several threads; each record belongs to the piece holding its start position and is returned once. DuckDB runs those pieces in parallel when the query allows it, for example an aggregate, or CREATE TABLE AS with SET preserve_insertion_order = false; with the default insertion order, a plain CREATE TABLE AS from read_bam runs on one thread. Both need the optional per-reference statistics of a BAI or CSI: when a reference has alignments and no statistics, the scan is one sequential stream and no estimate is reported. A CRAM scan is split by reference and reports no estimate. In a region list, '.' is the whole file and '*' is the reads without coordinates. htslib locates both from the same optional statistics; for a BAM whose index lacks them, read_bam reads those two items sequentially, so the result does not depend on the index statistics.
 
 ### Threads
 
@@ -2898,6 +2902,10 @@ Returns:
 table
 ```
 
+### Execution
+
+The scan runs when the query executes, not at bind: binding checks only that the file opens and a requested chrom exists, so EXPLAIN and PREPARE read no alignments and a prepared statement returns the same bins at every execution. With an index, DuckDB worker threads claim one reference each, heaviest first, so SET threads bounds the parallelism; the reads without coordinates are one more claim, and the streaming duplicate state is stitched across references in reference order after every claim finishes. Without an index the file is one sequential scan.
+
 ### Unmapped records
 
 include_unmapped := TRUE appends one synthetic row with chrom = '*' for no-coordinate records, even when no such records are present; start, end and bin_id are NULL. The default FALSE omits this row. SAM-flag filters, MAPQ filtering and flag-based duplicate removal apply to these records; streaming duplicate removal is not applied to them. Reference-GC fields are NULL for this row.
@@ -3329,6 +3337,10 @@ Returns:
 ```
 table
 ```
+
+### Execution
+
+The BED file and the alignments are read when the query executes, not at bind, so EXPLAIN and PREPARE read neither and a prepared statement reflects the files as they are at each execution. Errors in either input are execution errors.
 
 ### Examples
 

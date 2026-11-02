@@ -216,7 +216,7 @@ cat(paste(catalog, collapse = "\n"))
 
 </details>
 
-`read_fastq` with `mate_path` requires exact QNAME pairing. `read_bam` supports typed `standard_tags` and `auxiliary_tags` maps. `read_tabix` supports header-aware parsing (`header`, `header_names`) and optional type inference (`auto_detect`, `column_types`). Region lists in comma-separated form are supported by `read_bam`, `read_bcf`, `read_fasta`, `read_bigwig`, `read_gff`, `read_gtf`, and `read_tabix`. Indexed `read_bam`, `read_bcf`, `read_bigwig`, `read_gff`, `read_gtf`, and `read_tabix` multi-region queries emit a matching record once when requested regions overlap. `read_fasta` retains its separate per-region sequence-row contract.
+`read_fastq` with `mate_path` requires exact QNAME pairing. `read_bam` returns typed `standard_tags` columns, and `auxiliary_tags` as one map or, given tag names such as `['UR', 'UB']`, as one text column per tag. `read_tabix` supports header-aware parsing (`header`, `header_names`) and optional type inference (`auto_detect`, `column_types`). Region lists in comma-separated form are supported by `read_bam`, `read_bcf`, `read_fasta`, `read_bigwig`, `read_gff`, `read_gtf`, and `read_tabix`. Indexed `read_bam`, `read_bcf`, `read_bigwig`, `read_gff`, `read_gtf`, and `read_tabix` multi-region queries emit a matching record once when requested regions overlap. `read_fasta` retains its separate per-region sequence-row contract.
 
 ## Examples
 

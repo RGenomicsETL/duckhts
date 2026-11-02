@@ -15,6 +15,7 @@ src/bcf_genotypes.c|bcf_genotypes.c
 src/geno_reader.c|geno_reader.c
 src/region_list.c|region_list.c
 src/bam_reader.c|bam_reader.c
+src/bam_partition.c|bam_partition.c
 src/bam_pileup.c|bam_pileup.c
 src/bgzip.c|bgzip.c
 src/hts_index_builder.c|hts_index_builder.c

@@ -36,6 +36,19 @@ expect_equal(registry$transform[registry$id == "sql_scaling_vcf_counts_duplicate
 expect_match(registry$locator[registry$id == "sql_scaling_vcf_counts_duplicate_million"],
              "artifact:sql_scaling_giab_1x", fixed = TRUE)
 
+# The read_bam split-scan workload stages one 1000 Genomes exome BAM and its
+# unmapped-read companion, each with its index, as supplier-checked downloads.
+split_scan <- registry[registry$workload == "bam-split-scan", , drop = FALSE]
+expect_equal(split_scan$id, c("bam_split_hg00403_exome_bam", "bam_split_hg00403_exome_bai",
+                              "bam_split_hg00403_unmapped_bam", "bam_split_hg00403_unmapped_bai"))
+expect_true(all(split_scan$transform == "direct_download"))
+expect_true(all(grepl("^https://ftp\\.1000genomes\\.ebi\\.ac\\.uk/vol1/ftp/phase3/data/HG00403/exome_alignment/",
+                      split_scan$locator)))
+expect_true(all(grepl("(^|;)bytes=[0-9]+(;|$)", split_scan$supplier_identity)))
+expect_true(all(grepl("(^|;)md5=[0-9a-f]{32}(;|$)", split_scan$supplier_identity)))
+expect_true(all(split_scan$consumer == "benchmark_bam_split_scan.Rmd"))
+expect_equal(nrow(duckhts_bench_stage_plan("bam-split-scan")), 4L)
+
 write_repeated_vcf <- getFromNamespace("duckhts_bench_write_repeated_vcf", "duckhtsbench")
 duplicate_vcf <- tempfile("duckhtsbench-duplicate-vcf-")
 header <- c("##fileformat=VCFv4.2", "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG002")
