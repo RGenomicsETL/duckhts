@@ -69,12 +69,16 @@ typedef struct {
     char *mode;
     bool has_query_row_id;
     int64_t query_row_id;
-    duckhts_cgranges_entry_t *entry;
+    duckhts_cgranges_entry_t *entry; /* pinned at bind; a finalized index is immutable */
+} duckhts_cgranges_overlaps_bind_t;
+
+/* One execution's hits and emit cursor; bind data stays immutable. */
+typedef struct {
     int64_t *hits;
     int64_t hits_cap;
     int64_t n_hits;
     int64_t emitted;
-} duckhts_cgranges_overlaps_bind_t;
+} duckhts_cgranges_overlaps_state_t;
 
 static char *chunk_cell_strdup(duckdb_data_chunk input, idx_t col, idx_t row);
 static int64_t chunk_cell_to_int64(duckdb_vector vec, idx_t row, duckdb_type type_id);
@@ -1387,7 +1391,6 @@ static void destroy_overlaps_bind(void *ptr) {
     if (bind->name) duckdb_free(bind->name);
     if (bind->chrom) duckdb_free(bind->chrom);
     if (bind->mode) duckdb_free(bind->mode);
-    free(bind->hits);
     free(bind);
 }
 
@@ -1454,11 +1457,6 @@ static void overlaps_bind(duckdb_bind_info info) {
         goto cleanup;
     }
     pthread_mutex_unlock(&reg->mutex);
-    bind->n_hits = strcmp(bind->mode, "contain") == 0
-        ? cr_contain(bind->entry->cr, bind->chrom, (int32_t)bind->start, (int32_t)bind->end,
-                     &bind->hits, &bind->hits_cap)
-        : cr_overlap(bind->entry->cr, bind->chrom, (int32_t)bind->start, (int32_t)bind->end,
-                     &bind->hits, &bind->hits_cap);
     add_overlaps_result_columns(info, bind->entry);
     duckdb_bind_set_bind_data(info, bind, destroy_overlaps_bind);
     ok = true;
@@ -1470,13 +1468,36 @@ cleanup:
     if (bind && !ok) destroy_overlaps_bind(bind);
 }
 
+static void destroy_overlaps_state(void *ptr) {
+    duckhts_cgranges_overlaps_state_t *state = (duckhts_cgranges_overlaps_state_t *)ptr;
+    if (!state) return;
+    free(state->hits);
+    free(state);
+}
+
+/* The query runs per execution against the index pinned at bind. */
 static void overlaps_init(duckdb_init_info info) {
-    duckhts_cgranges_overlaps_bind_t *bind = (duckhts_cgranges_overlaps_bind_t *)duckdb_init_get_bind_data(info);
-    bind->emitted = 0;
+    const duckhts_cgranges_overlaps_bind_t *bind =
+        (const duckhts_cgranges_overlaps_bind_t *)duckdb_init_get_bind_data(info);
+    duckhts_cgranges_overlaps_state_t *state = calloc(1, sizeof(*state));
+
+    if (!state) {
+        duckdb_init_set_error(info, "duckhts_cgranges_overlaps: out of memory");
+        return;
+    }
+    state->n_hits = strcmp(bind->mode, "contain") == 0
+        ? cr_contain(bind->entry->cr, bind->chrom, (int32_t)bind->start, (int32_t)bind->end,
+                     &state->hits, &state->hits_cap)
+        : cr_overlap(bind->entry->cr, bind->chrom, (int32_t)bind->start, (int32_t)bind->end,
+                     &state->hits, &state->hits_cap);
+    duckdb_init_set_init_data(info, state, destroy_overlaps_state);
 }
 
 static void overlaps_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    duckhts_cgranges_overlaps_bind_t *bind = (duckhts_cgranges_overlaps_bind_t *)duckdb_function_get_bind_data(info);
+    const duckhts_cgranges_overlaps_bind_t *bind =
+        (const duckhts_cgranges_overlaps_bind_t *)duckdb_function_get_bind_data(info);
+    duckhts_cgranges_overlaps_state_t *state =
+        (duckhts_cgranges_overlaps_state_t *)duckdb_function_get_init_data(info);
     duckdb_vector qid_vec = duckdb_data_chunk_get_vector(output, 0);
     duckdb_vector ord_vec = duckdb_data_chunk_get_vector(output, 1);
     duckdb_vector label_vec = duckdb_data_chunk_get_vector(output, 2);
@@ -1490,8 +1511,8 @@ static void overlaps_scan(duckdb_function_info info, duckdb_data_chunk output) {
     idx_t out_idx = 0;
     idx_t max_rows = duckdb_vector_size();
 
-    while (bind->emitted < bind->n_hits && out_idx < max_rows) {
-        int64_t ridx = bind->hits[bind->emitted];
+    while (state->emitted < state->n_hits && out_idx < max_rows) {
+        int64_t ridx = state->hits[state->emitted];
         int32_t ordinal = cr_label(bind->entry->cr, ridx);
         qid_data[out_idx] = bind->query_row_id;
         if (!bind->has_query_row_id) set_null(qid_vec, out_idx);
@@ -1533,7 +1554,7 @@ static void overlaps_scan(duckdb_function_info info, duckdb_data_chunk output) {
         duckdb_vector_assign_string_element(chrom_vec, out_idx, bind->entry->payload.chroms[ordinal]);
         start_data[out_idx] = bind->entry->payload.starts[ordinal];
         end_data[out_idx] = bind->entry->payload.ends[ordinal];
-        bind->emitted++;
+        state->emitted++;
         out_idx++;
     }
     duckdb_data_chunk_set_size(output, out_idx);

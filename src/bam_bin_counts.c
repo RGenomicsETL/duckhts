@@ -13,7 +13,6 @@ DUCKDB_EXTENSION_EXTERN
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
-#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,7 +28,6 @@ DUCKDB_EXTENSION_EXTERN
 #include "duckhts_simd_internal.h"
 
 #define DUCKHTS_DEFAULT_BINCOUNT_DECOMPRESSION_THREADS 2
-#define DUCKHTS_MAX_BINCOUNT_THREADS 16
 
 typedef enum {
     BAM_BIN_RMDUP_NONE = 0,
@@ -143,19 +141,32 @@ typedef struct {
     const duckhts_simd_dispatch_table_t *simd_table;
 } bam_bin_bind_t;
 
+/*
+ * One execution. `run` is a fresh copy of the immutable bind parameters that owns
+ * this execution's contigs, accumulators and rows. Work items are the claimed
+ * contigs, then one item for the reads without coordinates; without an index
+ * the single item is a sequential scan. DuckDB worker threads claim items, so
+ * DuckDB's `threads` setting bounds the concurrency. The thread that completes
+ * the last item applies the cross-contig streaming repairs, builds the rows and
+ * is the only one to emit them.
+ */
 typedef struct {
-    bam_bin_bind_t *bind;
-    bam_bin_contig_t *contigs;
-    int *claim_order;
-    int n_claims;
-    volatile int next_claim;
+    bam_bin_bind_t *run;
+    int indexed;
+    int n_items;
+    volatile int next_item;
+    volatile int items_done;
     volatile int failed;
-    char error[512];
-} bam_bin_worker_shared_t;
+} bam_bin_global_t;
 
 typedef struct {
-    bam_bin_worker_shared_t *shared;
-} bam_bin_worker_arg_t;
+    samFile *fp;
+    sam_hdr_t *hdr;
+    hts_idx_t *idx;
+    bam1_t *rec;
+    int claimed_all; /* this thread has run out of items to claim */
+    int emitter;     /* this thread completed the last item and emits the rows */
+} bam_bin_local_t;
 
 typedef struct {
     int tid;
@@ -591,106 +602,80 @@ static int process_unmapped_record(bam_bin_bind_t *bind, bam1_t *rec) {
     return 0;
 }
 
-static void worker_set_error(bam_bin_worker_shared_t *shared, const char *msg) {
-    if (!shared || !msg) return;
-    if (__sync_bool_compare_and_swap(&shared->failed, 0, 1)) {
-        snprintf(shared->error, sizeof(shared->error), "%s", msg);
-    }
+static void destroy_bam_bin_local(void *data) {
+    bam_bin_local_t *local = (bam_bin_local_t *)data;
+    if (!local) return;
+    if (local->rec) bam_destroy1(local->rec);
+    if (local->idx) hts_idx_destroy(local->idx);
+    if (local->hdr) sam_hdr_destroy(local->hdr);
+    if (local->fp) sam_close(local->fp);
+    duckdb_free(local);
 }
 
-static void *bam_bin_worker_main(void *arg) {
-    bam_bin_worker_arg_t *worker = (bam_bin_worker_arg_t *)arg;
-    bam_bin_worker_shared_t *shared = worker ? worker->shared : NULL;
-    bam_bin_bind_t *bind = shared ? shared->bind : NULL;
-    samFile *fp = NULL;
-    sam_hdr_t *hdr = NULL;
-    bam1_t *rec = NULL;
-    hts_idx_t *idx = NULL;
-    char err[512];
+/* Opens this worker's own handle, header, index and record. Returns 0, or -1
+ * with `err` set. */
+static int open_worker_handles(const bam_bin_bind_t *run, bam_bin_local_t *local,
+                               char *err, size_t errlen) {
+    local->fp = sam_open(run->path, "r");
+    if (!local->fp) {
+        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
+        return -1;
+    }
+    duckhts_apply_remote_hts_tuning(local->fp, run->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
+    if (run->reference && hts_set_opt(local->fp, CRAM_OPT_REFERENCE, run->reference) < 0) {
+        snprintf(err, errlen, "bam_bin_counts: failed to set CRAM reference");
+        return -1;
+    }
+    if (run->decompression_threads > 0 &&
+        hts_set_threads(local->fp, (int)run->decompression_threads) < 0) {
+        snprintf(err, errlen, "bam_bin_counts: failed to configure decompression threads");
+        return -1;
+    }
+    local->hdr = sam_hdr_read(local->fp);
+    if (!local->hdr) {
+        snprintf(err, errlen, "bam_bin_counts: failed to read alignment header");
+        return -1;
+    }
+    local->idx = sam_index_load3(local->fp, run->path, run->index_path, HTS_IDX_SILENT_FAIL);
+    if (!local->idx) {
+        snprintf(err, errlen, "bam_bin_counts: indexed worker requires a BAM/CRAM index");
+        return -1;
+    }
+    local->rec = bam_init1();
+    if (!local->rec) {
+        snprintf(err, errlen, "bam_bin_counts: out of memory allocating BAM record");
+        return -1;
+    }
+    return 0;
+}
 
-    if (!shared || !bind) return NULL;
+/* Accumulates one contig with this worker's handles. Only the claiming worker
+ * writes the contig's arrays. Returns 0, or -1 with `err` set. */
+static int scan_contig_item(bam_bin_bind_t *run, bam_bin_local_t *local,
+                            bam_bin_contig_t *contig, char *err, size_t errlen) {
+    bam_bin_stream_state_t state;
+    hts_itr_t *itr = sam_itr_queryi(local->idx, contig->tid, 0, HTS_POS_MAX);
+    int rc = 0;
 
-    fp = sam_open(bind->path, "r");
-    if (!fp) {
-        worker_set_error(shared, "bam_bin_counts: failed to open alignment file");
-        return NULL;
-    }
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
-                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
-    if (bind->reference) {
-        if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
-            worker_set_error(shared, "bam_bin_counts: failed to set CRAM reference");
-            sam_close(fp);
-            return NULL;
-        }
-    }
-    if (bind->decompression_threads > 0 &&
-        hts_set_threads(fp, (int)bind->decompression_threads) < 0) {
-        worker_set_error(shared, "bam_bin_counts: failed to configure decompression threads");
-        sam_close(fp);
-        return NULL;
-    }
-    hdr = sam_hdr_read(fp);
-    if (!hdr) {
-        worker_set_error(shared, "bam_bin_counts: failed to read alignment header");
-        sam_close(fp);
-        return NULL;
-    }
-    idx = sam_index_load3(fp, bind->path, bind->index_path, HTS_IDX_SILENT_FAIL);
-    if (!idx) {
-        sam_hdr_destroy(hdr);
-        sam_close(fp);
-        worker_set_error(shared, "bam_bin_counts: indexed worker requires a BAM/CRAM index");
-        return NULL;
-    }
-    rec = bam_init1();
-    if (!rec) {
-        sam_hdr_destroy(hdr);
-        hts_idx_destroy(idx);
-        sam_close(fp);
-        worker_set_error(shared, "bam_bin_counts: out of memory allocating BAM record");
-        return NULL;
-    }
-
+    if (!itr) return 0;
+    memset(&state, 0, sizeof(state));
+    contig->final_state = state;
     for (;;) {
-        int claim = __sync_fetch_and_add(&shared->next_claim, 1);
-        bam_bin_contig_t *contig;
-        hts_itr_t *itr;
-        bam_bin_stream_state_t state;
-
-        if (shared->failed) break;
-        if (claim >= shared->n_claims) break;
-
-        contig = &shared->contigs[shared->claim_order[claim]];
-        itr = sam_itr_queryi(idx, contig->tid, 0, HTS_POS_MAX);
-        if (!itr) continue;
-
-        memset(&state, 0, sizeof(state));
-        contig->final_state = state;
-
-        for (;;) {
-            int ret = sam_itr_next(fp, itr, rec);
-            if (ret == -1) break;
-            if (ret < -1) {
-                snprintf(err, sizeof(err), "bam_bin_counts: iterator failure on '%s'", contig->chrom_name);
-                worker_set_error(shared, err);
-                break;
-            }
-            if (process_record_into_contig(bind, contig, rec, &state) != 0) {
-                worker_set_error(shared, "bam_bin_counts: out of memory while accumulating bins");
-                break;
-            }
+        int ret = sam_itr_next(local->fp, itr, local->rec);
+        if (ret == -1) break;
+        if (ret < -1) {
+            snprintf(err, errlen, "bam_bin_counts: iterator failure on '%s'", contig->chrom_name);
+            rc = -1;
+            break;
         }
-
-        hts_itr_destroy(itr);
-        if (shared->failed) break;
+        if (process_record_into_contig(run, contig, local->rec, &state) != 0) {
+            snprintf(err, errlen, "bam_bin_counts: out of memory while accumulating bins");
+            rc = -1;
+            break;
+        }
     }
-
-    bam_destroy1(rec);
-    sam_hdr_destroy(hdr);
-    hts_idx_destroy(idx);
-    sam_close(fp);
-    return NULL;
+    hts_itr_destroy(itr);
+    return rc;
 }
 
 static int build_selected_contigs(bam_bin_bind_t *bind,
@@ -857,54 +842,6 @@ static int sequential_scan_no_index(bam_bin_bind_t *bind, char *err, size_t errl
     bam_destroy1(rec);
     sam_hdr_destroy(hdr);
     sam_close(fp);
-    return 0;
-}
-
-static int indexed_parallel_scan(bam_bin_bind_t *bind, char *err, size_t errlen) {
-    bam_bin_worker_shared_t shared;
-    pthread_t *threads = NULL;
-    bam_bin_worker_arg_t *args = NULL;
-    int n_threads;
-
-    memset(&shared, 0, sizeof(shared));
-    shared.bind = bind;
-    shared.contigs = bind->contigs;
-    shared.claim_order = bind->claim_order;
-    shared.n_claims = bind->n_claims;
-
-    n_threads = bind->n_claims;
-    if (n_threads > DUCKHTS_MAX_BINCOUNT_THREADS) n_threads = DUCKHTS_MAX_BINCOUNT_THREADS;
-    if (n_threads < 1) n_threads = 1;
-
-    threads = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)n_threads);
-    args = (bam_bin_worker_arg_t *)malloc(sizeof(bam_bin_worker_arg_t) * (size_t)n_threads);
-    if (!threads || !args) {
-        free(threads);
-        free(args);
-        snprintf(err, errlen, "bam_bin_counts: out of memory creating worker threads");
-        return -1;
-    }
-
-    for (int i = 0; i < n_threads; i++) {
-        args[i].shared = &shared;
-        if (pthread_create(&threads[i], NULL, bam_bin_worker_main, &args[i]) != 0) {
-            shared.failed = 1;
-            snprintf(shared.error, sizeof(shared.error), "bam_bin_counts: failed to start worker thread");
-            n_threads = i;
-            break;
-        }
-    }
-    for (int i = 0; i < n_threads; i++) {
-        pthread_join(threads[i], NULL);
-    }
-
-    free(threads);
-    free(args);
-
-    if (shared.failed) {
-        snprintf(err, errlen, "%s", shared.error[0] ? shared.error : "bam_bin_counts: worker failure");
-        return -1;
-    }
     return 0;
 }
 
@@ -1165,56 +1102,146 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
     return 0;
 }
 
-static int run_bam_bin_counts(bam_bin_bind_t *bind, char *err, size_t errlen) {
-    samFile *fp = NULL;
-    sam_hdr_t *hdr = NULL;
-    hts_idx_t *idx = NULL;
-    int rc = -1;
+/* Opens the file and its header at bind, and checks a requested chromosome,
+ * so that a missing file or unknown chromosome stays a binder error. */
+static int validate_alignment_input(const bam_bin_bind_t *bind, char *err, size_t errlen) {
+    samFile *fp = sam_open(bind->path, "r");
+    sam_hdr_t *hdr;
+    int rc = 0;
 
-    fp = sam_open(bind->path, "r");
     if (!fp) {
         snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
         return -1;
     }
-    if (bind->reference) {
-        if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
-            sam_close(fp);
-            snprintf(err, errlen, "bam_bin_counts: failed to set CRAM reference");
-            return -1;
-        }
-    }
     hdr = sam_hdr_read(fp);
     if (!hdr) {
-        sam_close(fp);
         snprintf(err, errlen, "bam_bin_counts: failed to read alignment header");
-        return -1;
+        rc = -1;
+    } else if (bind->chrom && sam_hdr_name2tid(hdr, bind->chrom) < 0) {
+        snprintf(err, errlen, "bam_bin_counts: unknown chromosome '%s'", bind->chrom);
+        rc = -1;
     }
+    if (hdr) sam_hdr_destroy(hdr);
+    sam_close(fp);
+    return rc;
+}
 
-    idx = sam_index_load3(fp, bind->path, bind->index_path, HTS_IDX_SILENT_FAIL);
-
-    if (build_selected_contigs(bind, hdr, idx, err, errlen) != 0) goto cleanup;
-
-    if (idx) {
-        if (build_claim_order(bind) != 0) {
-            snprintf(err, errlen, "bam_bin_counts: out of memory building contig claim order");
-            goto cleanup;
+/* Frees what one execution owns; the parameter strings belong to the bind data. */
+static void destroy_bam_bin_run(bam_bin_bind_t *run) {
+    if (!run) return;
+    free(run->claim_order);
+    free(run->rows);
+    if (run->contigs) {
+        for (int i = 0; i < run->n_contigs; i++) {
+            if (run->contigs[i].chrom_name) duckdb_free(run->contigs[i].chrom_name);
+            free_contig_arrays(&run->contigs[i]);
         }
-        if (indexed_parallel_scan(bind, err, errlen) != 0) goto cleanup;
-        apply_streaming_boundary_repairs(bind);
-        if (indexed_unmapped_scan(bind, err, errlen) != 0) goto cleanup;
-    } else {
-        if (sequential_scan_no_index(bind, err, errlen) != 0) goto cleanup;
+        free(run->contigs);
     }
+    duckdb_free(run);
+}
 
-    if (append_rows_from_contigs(bind, err, errlen) != 0) goto cleanup;
+static void destroy_bam_bin_global(void *data) {
+    bam_bin_global_t *global = (bam_bin_global_t *)data;
+    if (!global) return;
+    destroy_bam_bin_run(global->run);
+    duckdb_free(global);
+}
 
-    rc = 0;
+/* Global init runs at execution: copy the parameters into a fresh run, select
+ * the contigs and order the claims by index weight. */
+static void bam_bin_counts_global_init(duckdb_init_info info) {
+    const bam_bin_bind_t *bind = (const bam_bin_bind_t *)duckdb_init_get_bind_data(info);
+    bam_bin_global_t *global = duckdb_malloc(sizeof(*global));
+    bam_bin_bind_t *run = duckdb_malloc(sizeof(*run));
+    samFile *fp = NULL;
+    sam_hdr_t *hdr = NULL;
+    hts_idx_t *idx = NULL;
+    char err[512];
 
-cleanup:
+    if (!global || !run) {
+        if (global) duckdb_free(global);
+        if (run) duckdb_free(run);
+        duckdb_init_set_error(info, "bam_bin_counts: out of memory");
+        return;
+    }
+    memset(global, 0, sizeof(*global));
+    memcpy(run, bind, sizeof(*run));
+    run->contigs = NULL;
+    run->n_contigs = 0;
+    run->claim_order = NULL;
+    run->n_claims = 0;
+    run->rows = NULL;
+    run->row_count = 0;
+    run->emitted = 0;
+    run->unmapped_count_total = run->unmapped_count_fwd = run->unmapped_count_rev = 0;
+    run->unmapped_count_pre = 0;
+    run->unmapped_gc_bases_pre = run->unmapped_bases_pre = 0;
+    run->unmapped_gc_bases_post = run->unmapped_bases_post = 0;
+    run->unmapped_mapq_sum_pre = run->unmapped_mapq_sum_post = 0;
+    global->run = run;
+    duckdb_init_set_init_data(info, global, destroy_bam_bin_global);
+
+    memset(err, 0, sizeof(err));
+    fp = sam_open(run->path, "r");
+    hdr = fp ? sam_hdr_read(fp) : NULL;
+    if (!fp || !hdr) {
+        snprintf(err, sizeof(err), "bam_bin_counts: failed to read alignment header");
+    } else {
+        idx = sam_index_load3(fp, run->path, run->index_path, HTS_IDX_SILENT_FAIL);
+        if (build_selected_contigs(run, hdr, idx, err, sizeof(err)) == 0 && idx &&
+            build_claim_order(run) != 0) {
+            snprintf(err, sizeof(err), "bam_bin_counts: out of memory building contig claim order");
+        }
+    }
     if (idx) hts_idx_destroy(idx);
     if (hdr) sam_hdr_destroy(hdr);
     if (fp) sam_close(fp);
-    return rc;
+    if (err[0]) {
+        duckdb_init_set_error(info, err);
+        return;
+    }
+    global->indexed = idx != NULL;
+    global->n_items = global->indexed ? run->n_claims + 1 : 1;
+    duckdb_init_set_max_threads(info, (idx_t)global->n_items);
+}
+
+static void bam_bin_counts_local_init(duckdb_init_info info) {
+    bam_bin_local_t *local = duckdb_malloc(sizeof(*local));
+    if (!local) {
+        duckdb_init_set_error(info, "bam_bin_counts: out of memory");
+        return;
+    }
+    memset(local, 0, sizeof(*local));
+    duckdb_init_set_init_data(info, local, destroy_bam_bin_local);
+}
+
+/* Runs one claimed item. Returns 0, or -1 with `err` set. */
+static int run_item(bam_bin_global_t *global, bam_bin_local_t *local, int item,
+                    char *err, size_t errlen) {
+    bam_bin_bind_t *run = global->run;
+    if (!global->indexed) return sequential_scan_no_index(run, err, errlen);
+    if (item == run->n_claims) return indexed_unmapped_scan(run, err, errlen);
+    if (!local->fp && open_worker_handles(run, local, err, errlen) != 0) return -1;
+    return scan_contig_item(run, local, &run->contigs[run->claim_order[item]], err, errlen);
+}
+
+/* Claims items until none remain. Returns 1 when this thread completed the
+ * last item and must build and emit the rows, 0 otherwise, -1 on error. */
+static int claim_items(bam_bin_global_t *global, bam_bin_local_t *local,
+                       char *err, size_t errlen) {
+    for (;;) {
+        int item;
+        if (global->failed) return 0;
+        item = __sync_fetch_and_add(&global->next_item, 1);
+        if (item >= global->n_items) return 0;
+        if (run_item(global, local, item, err, errlen) != 0) {
+            __sync_bool_compare_and_swap(&global->failed, 0, 1);
+            return -1;
+        }
+        /* The full barrier publishes this item's accumulators before the count. */
+        if (__sync_add_and_fetch(&global->items_done, 1) == global->n_items) return 1;
+    }
 }
 
 static void add_result_columns(duckdb_bind_info info, const bam_bin_bind_t *bind) {
@@ -1368,35 +1395,55 @@ static void bam_bin_counts_bind(duckdb_bind_info info) {
     if (rmdup) duckdb_free(rmdup);
     if (stats) duckdb_free(stats);
 
-    if (run_bam_bin_counts(bind, err, sizeof(err)) != 0) {
+    /* Bind validates the file and the chromosome only; the scan runs per execution. */
+    if (validate_alignment_input(bind, err, sizeof(err)) != 0) {
         destroy_bam_bin_bind(bind);
         duckdb_bind_set_error(info, err);
         return;
     }
 
     add_result_columns(info, bind);
-    bind->emitted = 0;
     duckdb_bind_set_bind_data(info, bind, destroy_bam_bin_bind);
 }
 
-static void bam_bin_counts_init(duckdb_init_info info) {
-    duckdb_init_set_max_threads(info, 1);
-}
-
 static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    bam_bin_bind_t *bind = (bam_bin_bind_t *)duckdb_function_get_bind_data(info);
+    bam_bin_global_t *global = (bam_bin_global_t *)duckdb_function_get_init_data(info);
+    bam_bin_local_t *local = (bam_bin_local_t *)duckdb_function_get_local_init_data(info);
+    bam_bin_bind_t *run = global ? global->run : NULL;
     idx_t out_size = 0;
     idx_t capacity;
     idx_t col = 0;
 
-    if (!bind || bind->emitted >= bind->row_count) {
+    if (!run || !local) {
+        duckdb_data_chunk_set_size(output, 0);
+        return;
+    }
+    if (!local->claimed_all) {
+        char err[512];
+        int last;
+
+        memset(err, 0, sizeof(err));
+        local->claimed_all = 1;
+        last = claim_items(global, local, err, sizeof(err));
+        if (last == 1) {
+            if (global->indexed) apply_streaming_boundary_repairs(run);
+            if (append_rows_from_contigs(run, err, sizeof(err)) != 0) last = -1;
+            else local->emitter = 1;
+        }
+        if (last < 0) {
+            duckdb_function_set_error(info, err[0] ? err : "bam_bin_counts: scan failed");
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
+    }
+    if (!local->emitter || run->emitted >= run->row_count) {
         duckdb_data_chunk_set_size(output, 0);
         return;
     }
 
     capacity = duckdb_vector_size();
-    out_size = (idx_t)((bind->row_count - bind->emitted) < (size_t)capacity ?
-        (bind->row_count - bind->emitted) : (size_t)capacity);
+    out_size = (idx_t)((run->row_count - run->emitted) < (size_t)capacity ?
+        (run->row_count - run->emitted) : (size_t)capacity);
 
     duckdb_vector chrom_vec = duckdb_data_chunk_get_vector(output, col++);
     duckdb_vector start_vec = duckdb_data_chunk_get_vector(output, col++);
@@ -1443,11 +1490,11 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
     int64_t *mapq_sum_post_data = NULL;
     double *mean_mapq_post_data = NULL;
 
-    if (bind->want_gc || bind->want_mq) {
+    if (run->want_gc || run->want_mq) {
         count_pre_vec = duckdb_data_chunk_get_vector(output, col++);
         count_pre_data = (int64_t *)duckdb_vector_get_data(count_pre_vec);
     }
-    if (bind->want_gc) {
+    if (run->want_gc) {
         gc_bases_pre_vec = duckdb_data_chunk_get_vector(output, col++);
         bases_pre_vec = duckdb_data_chunk_get_vector(output, col++);
         gc_perc_pre_vec = duckdb_data_chunk_get_vector(output, col++);
@@ -1462,7 +1509,7 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
         bases_post_data = (int64_t *)duckdb_vector_get_data(bases_post_vec);
         gc_perc_post_data = (double *)duckdb_vector_get_data(gc_perc_post_vec);
 
-        if (bind->reference) {
+        if (run->reference) {
             ref_gc_bases_vec = duckdb_data_chunk_get_vector(output, col++);
             ref_bases_vec = duckdb_data_chunk_get_vector(output, col++);
             gc_perc_ref_vec = duckdb_data_chunk_get_vector(output, col++);
@@ -1471,7 +1518,7 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
             gc_perc_ref_data = (double *)duckdb_vector_get_data(gc_perc_ref_vec);
         }
     }
-    if (bind->want_mq) {
+    if (run->want_mq) {
         mapq_sum_pre_vec = duckdb_data_chunk_get_vector(output, col++);
         mean_mapq_pre_vec = duckdb_data_chunk_get_vector(output, col++);
         mapq_sum_post_vec = duckdb_data_chunk_get_vector(output, col++);
@@ -1484,7 +1531,7 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
     }
 
     for (idx_t i = 0; i < out_size; i++) {
-        bam_bin_row_t *row = &bind->rows[bind->emitted + i];
+        bam_bin_row_t *row = &run->rows[run->emitted + i];
         duckdb_vector_assign_string_element(chrom_vec, i, row->chrom);
         start_data[i] = row->start;
         end_data[i] = row->end;
@@ -1500,7 +1547,7 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
 
         if (count_pre_data) count_pre_data[i] = row->count_pre;
 
-        if (bind->want_gc) {
+        if (run->want_gc) {
             gc_bases_pre_data[i] = (int64_t)row->gc_bases_pre;
             bases_pre_data[i] = (int64_t)row->bases_pre;
             if (row->bases_pre > 0) gc_perc_pre_data[i] = (double)row->gc_bases_pre / (double)row->bases_pre;
@@ -1511,7 +1558,7 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
             if (row->bases_post > 0) gc_perc_post_data[i] = (double)row->gc_bases_post / (double)row->bases_post;
             else set_null(gc_perc_post_vec, i);
 
-            if (bind->reference) {
+            if (run->reference) {
                 ref_gc_bases_data[i] = (int64_t)row->ref_gc_bases;
                 ref_bases_data[i] = (int64_t)row->ref_bases;
                 if (row->is_unmapped) {
@@ -1526,7 +1573,7 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
             }
         }
 
-        if (bind->want_mq) {
+        if (run->want_mq) {
             mapq_sum_pre_data[i] = (int64_t)row->mapq_sum_pre;
             if (row->count_pre > 0) mean_mapq_pre_data[i] = (double)row->mapq_sum_pre / (double)row->count_pre;
             else set_null(mean_mapq_pre_vec, i);
@@ -1537,7 +1584,7 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
         }
     }
 
-    bind->emitted += out_size;
+    run->emitted += out_size;
     duckdb_data_chunk_set_size(output, out_size);
 }
 
@@ -1561,7 +1608,8 @@ void register_bam_bin_counts_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "exclude_flags", bigint_type);
 
     duckdb_table_function_set_bind(tf, bam_bin_counts_bind);
-    duckdb_table_function_set_init(tf, bam_bin_counts_init);
+    duckdb_table_function_set_init(tf, bam_bin_counts_global_init);
+    duckdb_table_function_set_local_init(tf, bam_bin_counts_local_init);
     duckdb_table_function_set_function(tf, bam_bin_counts_scan);
 
     duckdb_register_table_function(connection, tf);

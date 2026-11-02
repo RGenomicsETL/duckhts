@@ -126,3 +126,35 @@ statement error
 SELECT * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, stats := 'gc,wat');
 ----
 bam_bin_counts: stats must be NULL, 'gc', 'mq', or 'gc,mq'
+
+# The scan runs per execution, not at bind: a prepared statement returns the
+# same rows each time it executes (DuckDB 1.5 keeps the bound plan; DuckDB 2.0
+# binds again at every EXECUTE). The values are the 'none' rows asserted above.
+statement ok
+PREPARE bins AS
+SELECT count(*), sum(count_total)
+FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'none');
+
+query II
+EXECUTE bins;
+----
+10	10
+
+query II
+EXECUTE bins;
+----
+10	10
+
+statement ok
+PREPARE bins_by_path AS
+SELECT count(*), sum(count_total) FROM bam_bin_counts($1, 5000, rmdup := 'none');
+
+query II
+EXECUTE bins_by_path('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam');
+----
+10	10
+
+query II
+EXECUTE bins_by_path('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam');
+----
+10	10

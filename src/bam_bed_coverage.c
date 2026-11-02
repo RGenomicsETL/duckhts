@@ -698,9 +698,7 @@ static void bam_bed_cov_bind(duckdb_bind_info info) {
     duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
     duckdb_value bed_val = duckdb_bind_get_parameter(info, 1);
     duckdb_value val;
-    char err[512];
 
-    memset(err, 0, sizeof(err));
 
     bind = (bam_bed_cov_bind_t *)duckdb_malloc(sizeof(*bind));
     if (!bind) {
@@ -812,24 +810,51 @@ static void bam_bed_cov_bind(duckdb_bind_info info) {
         return;
     }
 
-    if (load_bed_regions(bind->bed_path, &bind->regions, &bind->n_regions, err, sizeof(err)) != 0) {
-        destroy_bam_bed_cov_bind(bind);
-        duckdb_bind_set_error(info, err);
-        return;
-    }
-    if (run_bam_bed_coverage(bind, err, sizeof(err)) != 0) {
-        destroy_bam_bed_cov_bind(bind);
-        duckdb_bind_set_error(info, err);
-        return;
-    }
-
+    /* The BED regions are read and the coverage computed per execution
+     * (bam_bed_cov_init), so bind data stays immutable and a binder pass,
+     * PREPARE or EXPLAIN reads no alignment. */
     add_result_columns(info);
     duckdb_bind_set_bind_data(info, bind, destroy_bam_bed_cov_bind);
 }
 
+/* One execution: a copy of the bind parameters that owns this execution's
+ * regions, their coverage and the emit cursor. Parameter strings stay owned by
+ * the bind data. */
+static void destroy_bam_bed_cov_run(void *data) {
+    bam_bed_cov_bind_t *run = (bam_bed_cov_bind_t *)data;
+    if (!run) return;
+    if (run->regions) {
+        for (size_t i = 0; i < run->n_regions; i++) {
+            if (run->regions[i].chrom) duckdb_free(run->regions[i].chrom);
+            if (run->regions[i].name) duckdb_free(run->regions[i].name);
+            destroy_region_depth_arrays(&run->regions[i]);
+        }
+        free(run->regions);
+    }
+    duckdb_free(run);
+}
+
 static void bam_bed_cov_init(duckdb_init_info info) {
-    bam_bed_cov_bind_t *bind = (bam_bed_cov_bind_t *)duckdb_init_get_bind_data(info);
-    bind->emitted = 0;
+    const bam_bed_cov_bind_t *bind = (const bam_bed_cov_bind_t *)duckdb_init_get_bind_data(info);
+    bam_bed_cov_bind_t *run = (bam_bed_cov_bind_t *)duckdb_malloc(sizeof(*run));
+    char err[512];
+
+    if (!run) {
+        duckdb_init_set_error(info, "duckhts_bam_bed_coverage: out of memory");
+        return;
+    }
+    memcpy(run, bind, sizeof(*run));
+    run->regions = NULL;
+    run->n_regions = 0;
+    run->emitted = 0;
+    duckdb_init_set_init_data(info, run, destroy_bam_bed_cov_run);
+    duckdb_init_set_max_threads(info, 1);
+
+    memset(err, 0, sizeof(err));
+    if (load_bed_regions(run->bed_path, &run->regions, &run->n_regions, err, sizeof(err)) != 0 ||
+        run_bam_bed_coverage(run, err, sizeof(err)) != 0) {
+        duckdb_init_set_error(info, err[0] ? err : "duckhts_bam_bed_coverage: coverage failed");
+    }
 }
 
 static void emit_double_or_null(duckdb_vector vec, idx_t row, double value, int is_null) {
@@ -842,12 +867,12 @@ static void emit_double_or_null(duckdb_vector vec, idx_t row, double value, int 
 }
 
 static void bam_bed_cov_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    bam_bed_cov_bind_t *bind = (bam_bed_cov_bind_t *)duckdb_function_get_bind_data(info);
+    bam_bed_cov_bind_t *run = (bam_bed_cov_bind_t *)duckdb_function_get_init_data(info);
     idx_t out_idx = 0;
     const idx_t max_rows = duckdb_vector_size();
 
-    while (bind->emitted < bind->n_regions && out_idx < max_rows) {
-        bedcov_region_t *r = &bind->regions[bind->emitted++];
+    while (run->emitted < run->n_regions && out_idx < max_rows) {
+        bedcov_region_t *r = &run->regions[run->emitted++];
         double interval_len = r->len > 0 ? (double)r->len : 0.0;
         duckdb_vector chrom_vec = duckdb_data_chunk_get_vector(output, BEDCOV_COL_CHROM);
         duckdb_vector start_vec = duckdb_data_chunk_get_vector(output, BEDCOV_COL_START);

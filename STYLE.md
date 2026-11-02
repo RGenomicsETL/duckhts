@@ -36,6 +36,11 @@ It is not a brace-placement contest and it is not permission to manufacture tiny
   destroy function and make its allocator family obvious.
 - Prefer immutable shared models and worker-owned scratch. Do not share mutable htslib
   iterators, FASTA windows, DuckDB connections, or kernel cursors across workers.
+- Bind data is immutable once bind returns. It holds parameters, the inputs that fix the
+  result schema, and deliberate snapshots such as a pinned index. Reading the input,
+  computing results and every emit cursor belong to init or scan state: DuckDB binds
+  without executing for `EXPLAIN`, binds again at every `EXECUTE` in 2.0, and keeps one
+  bound plan across executions in 1.5.
 - Allocate or grow at bind/init/tile boundaries and reuse storage. No per-base,
   per-transcript-pair, or per-output-row heap allocation in a hot loop.
 - `goto cleanup` is acceptable when it makes one ownership exit auditable. It is better
