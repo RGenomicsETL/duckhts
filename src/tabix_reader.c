@@ -51,7 +51,6 @@ DUCKDB_EXTENSION_EXTERN
  * Constants
  * ================================================================ */
 
-#define TABIX_BATCH_SIZE 2048
 #define TABIX_MAX_GENERIC_COLS 256
 #define TABIX_NUM_PARSE_BUF 128
 
@@ -1645,7 +1644,8 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
         }
     }
 
-    while (row_count < TABIX_BATCH_SIZE) {
+    const idx_t vector_size = duckdb_vector_size();
+    while (row_count < vector_size) {
         int ret;
         if (id->itr) {
             ret = tbx_itr_next(id->fp, id->tbx, id->itr, &id->line);
