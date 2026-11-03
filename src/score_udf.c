@@ -125,7 +125,21 @@ typedef struct {
 } score_summary_t;
 
 typedef struct {
+    int rid;
+    hts_pos_t beg;
+    hts_pos_t end;
+} score_interval_t;
+
+typedef struct {
+    score_interval_t *intervals;
+    size_t count;
+    int active;
+} score_region_list_t;
+
+typedef struct {
     bcf_srs_t *sr;
+    score_region_list_t regions;
+    score_region_list_t targets;
     filter_t *include_filt;
     filter_t *exclude_filt;
 } score_scan_source_t;
@@ -1387,13 +1401,25 @@ static const char *score_region_next_item(const char *item) {
     return comma ? comma + 1 : item + strlen(item);
 }
 
-static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const char *regions, int overlap_mode) {
-    const char *cursor = regions;
-    int match = 0;
-    hts_pos_t rec_end = rec->pos + (rec->rlen > 0 ? rec->rlen : 1);
-    score_region_lookup_t lookup = { hdr, NULL, 0, 0 };
+static int score_interval_compare(const void *a, const void *b) {
+    const score_interval_t *left = (const score_interval_t *)a;
+    const score_interval_t *right = (const score_interval_t *)b;
+    if (left->rid != right->rid) return left->rid < right->rid ? -1 : 1;
+    if (left->beg != right->beg) return left->beg < right->beg ? -1 : 1;
+    return (left->end > right->end) - (left->end < right->end);
+}
 
-    if (!regions || !regions[0]) return 1;
+/* Store disjoint half-open intervals ordered by header RID and start. Merging
+ * also makes their ends increasing within each contig. */
+static int score_parse_region_list(const bcf_hdr_t *hdr, const char *regions, score_region_list_t *list) {
+    const char *cursor = regions;
+    score_region_lookup_t lookup = { hdr, NULL, 0, 0 };
+    size_t capacity = 0;
+    size_t merged = 0;
+    int status = 0;
+
+    if (!regions || !regions[0]) return 0;
+    list->active = 1;
     while (*cursor) {
         int tid;
         hts_pos_t beg, end;
@@ -1404,7 +1430,7 @@ static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const 
         next = hts_parse_region(cursor, &tid, &beg, &end, score_region_name2id,
                                 &lookup, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD);
         if (lookup.out_of_memory) {
-            match = -1;
+            status = -1;
             break;
         }
         if (!next) {
@@ -1415,24 +1441,71 @@ static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const 
             if (tid != -1 || !lookup.lookup_failed || !lookup.missing_name ||
                 !hts_parse_region(cursor, &tid, &beg, &end, score_region_missing_name2id,
                                   lookup.missing_name, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD)) {
-                match = -1;
+                status = -1;
                 break;
             }
             next = score_region_next_item(cursor);
             if (!next) {
-                match = -1;
+                status = -1;
                 break;
             }
             cursor = next;
             continue;
         }
-        cursor = next;
-        if (tid == rec->rid && rec->pos < end && (overlap_mode == 0 ? rec->pos >= beg : rec_end > beg)) {
-            match = 1;
+        if (list->count == capacity) {
+            size_t new_capacity = capacity ? capacity * 2 : 16;
+            score_interval_t *intervals;
+            if (new_capacity < capacity || new_capacity > SIZE_MAX / sizeof(*intervals)) {
+                status = -1;
+                break;
+            }
+            intervals = (score_interval_t *)realloc(list->intervals, new_capacity * sizeof(*intervals));
+            if (!intervals) {
+                status = -1;
+                break;
+            }
+            list->intervals = intervals;
+            capacity = new_capacity;
         }
+        list->intervals[list->count++] = (score_interval_t){tid, beg, end};
+        cursor = next;
     }
     free(lookup.missing_name);
-    return match;
+    if (status < 0 || list->count == 0) return status;
+
+    qsort(list->intervals, list->count, sizeof(*list->intervals), score_interval_compare);
+    for (size_t i = 0; i < list->count; i++) {
+        score_interval_t *current = &list->intervals[i];
+        if (merged && list->intervals[merged - 1].rid == current->rid &&
+            list->intervals[merged - 1].end >= current->beg) {
+            if (list->intervals[merged - 1].end < current->end) {
+                list->intervals[merged - 1].end = current->end;
+            }
+        } else {
+            list->intervals[merged++] = *current;
+        }
+    }
+    list->count = merged;
+    return 0;
+}
+
+static int score_record_in_regions(const bcf1_t *rec, const score_region_list_t *list, int overlap_mode) {
+    hts_pos_t end;
+    size_t lo = 0, hi = list->count;
+    if (!list->active) return 1;
+    end = rec->pos + (overlap_mode == 0 ? 1 : (rec->rlen > 0 ? rec->rlen : 1));
+    /* The last interval starting before the record's exclusive end is the only
+     * candidate needed: earlier disjoint intervals also have earlier ends. */
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        const score_interval_t *interval = &list->intervals[mid];
+        if (interval->rid < rec->rid || (interval->rid == rec->rid && interval->beg < end)) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo > 0 && list->intervals[lo - 1].rid == rec->rid && list->intervals[lo - 1].end > rec->pos;
 }
 
 static int score_append_token(char **out, size_t *len, size_t *cap, const char *tok) {
@@ -1695,6 +1768,8 @@ static int score_source_next(score_scan_source_t *src, bcf1_t **out_rec) {
 
 static void score_source_destroy(score_scan_source_t *src) {
     if (!src) return;
+    free(src->regions.intervals);
+    free(src->targets.intervals);
     if (src->include_filt) filter_destroy(src->include_filt);
     if (src->exclude_filt) filter_destroy(src->exclude_filt);
     if (src->sr) {
@@ -2135,6 +2210,7 @@ static void score_init(duckdb_init_info info) {
     score_bind_t *bind = (score_bind_t *)duckdb_init_get_bind_data(info);
     score_init_t *init = (score_init_t *)duckdb_malloc(sizeof(score_init_t));
     score_scan_source_t src = {0};
+    int regions_parsed = 0;
     bcf_hdr_t *hdr = NULL;
     score_summary_t **summaries = NULL;    /* one summary index per PRS */
     int64_t *matched_markers = NULL;
@@ -2330,14 +2406,20 @@ static void score_init(duckdb_init_info info) {
             bcf_unpack(rec, BCF_UN_ALL);
 
             if (!score_record_passes_filter_list(hdr, rec, bind->apply_filters)) continue;
-            int in_regions = score_record_in_region_list(hdr, rec, bind->regions,
-                                                         bind->regions_overlap >= 0 ? bind->regions_overlap : 1);
-            int in_targets = score_record_in_region_list(hdr, rec, bind->targets,
-                                                         bind->targets_overlap >= 0 ? bind->targets_overlap : 0);
-            if (in_regions < 0 || in_targets < 0) {
-                snprintf(err, sizeof(err), "bcftools_score: invalid region/target expression");
-                goto score_record_error;
+            /* Parse on the first FILTER-passing record; empty or fully FILTER-
+             * excluded inputs do not evaluate region expressions. */
+            if (!regions_parsed) {
+                if (score_parse_region_list(hdr, bind->regions, &src.regions) < 0 ||
+                    score_parse_region_list(hdr, bind->targets, &src.targets) < 0) {
+                    snprintf(err, sizeof(err), "bcftools_score: invalid region/target expression");
+                    goto score_record_error;
+                }
+                regions_parsed = 1;
             }
+            int in_regions = score_record_in_regions(rec, &src.regions,
+                                                     bind->regions_overlap >= 0 ? bind->regions_overlap : 1);
+            int in_targets = score_record_in_regions(rec, &src.targets,
+                                                     bind->targets_overlap >= 0 ? bind->targets_overlap : 0);
             if (!in_regions || !in_targets) continue;
             {
                 int expr_keep = score_record_matches_exprs(rec, &src, err, sizeof(err));

@@ -1,5 +1,5 @@
 # name: test/sql/score_regions.test
-# description: Score BED coordinates and colon-containing contig names
+# description: Score interval selection, BED coordinates and quoted contig names
 # group: [duckhts]
 
 require duckhts
@@ -110,6 +110,105 @@ ORDER BY SAMPLE;
 S1	1.8
 S2	0.1
 
+# Nested, duplicated and adjacent intervals form a union, independent of order.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK',
+                   regions := '1:300-300,1:1-400,1:100-100,1:100-100,1:101-199,1:200-200')
+ORDER BY SAMPLE;
+----
+S1	1.8
+S2	0.1
+
+# Disjoint intervals do not select records in the gap.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK', regions := '1:300-300,1:100-100')
+ORDER BY SAMPLE;
+----
+S1	2.0
+S2	0.5
+
+# Regions and targets each select a union; both selections must match.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK',
+                   regions := '1:300-300,1:100-200', targets := '1:200-200,1:400-500')
+ORDER BY SAMPLE;
+----
+S1	-0.2
+S2	-0.4
+
+# A nonempty list containing only absent contigs selects nothing.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK', targets := 'chrZ:1-1000,chrY')
+ORDER BY SAMPLE;
+----
+S1	0.0
+S2	0.0
+
+# Empty strings leave selection unrestricted.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK', regions := '', targets := '')
+ORDER BY SAMPLE;
+----
+S1	1.8
+S2	0.1
+
+# Select at a deletion's anchor, final reference base, and first base beyond it.
+statement ok
+COPY (
+    SELECT rtrim(replace(content, E'rs1\tA\tT', E'rs1\tTAAA\tT'), E'\n')
+    FROM read_text('test/data/score_input.vcf')
+) TO '__WORKING_DIRECTORY__/test/sql/score_spans.vcf' (HEADER false, QUOTE '', ESCAPE '');
+
+query ITT
+SELECT mode, SAMPLE, round(score_summary, 3)
+FROM (
+    SELECT 0 AS mode, * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_spans.vcf', 'test/data/score_summary.tsv',
+        use := 'GT', columns := 'PLINK', regions := '1:103-103', regions_overlap := 0)
+    UNION ALL
+    SELECT 1 AS mode, * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_spans.vcf', 'test/data/score_summary.tsv',
+        use := 'GT', columns := 'PLINK', regions := '1:103-103', regions_overlap := 1)
+    UNION ALL
+    SELECT 2 AS mode, * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_spans.vcf', 'test/data/score_summary.tsv',
+        use := 'GT', columns := 'PLINK', targets := '1:103-103', targets_overlap := 2)
+    UNION ALL
+    SELECT 3 AS mode, * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_spans.vcf', 'test/data/score_summary.tsv',
+        use := 'GT', columns := 'PLINK', regions := '1:104-104', regions_overlap := 1)
+    UNION ALL
+    SELECT 4 AS mode, * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_spans.vcf', 'test/data/score_summary.tsv',
+        use := 'GT', columns := 'PLINK', targets := '1:100-100', targets_overlap := 0)
+) ORDER BY mode, SAMPLE;
+----
+0	S1	0.0
+0	S2	0.0
+1	S1	0.0
+1	S2	0.5
+2	S1	0.0
+2	S2	0.5
+3	S1	0.0
+3	S2	0.0
+4	S1	0.0
+4	S2	0.5
+
+# Region expressions are not evaluated if FILTER selection excludes every record.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK', apply_filters := 'q10', regions := '{1')
+ORDER BY SAMPLE;
+----
+S1	0.0
+S2	0.0
+
 # An unterminated brace is still a malformed region.
 statement error
 SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
@@ -121,5 +220,11 @@ invalid region/target expression
 statement error
 SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
                              use := 'GT', columns := 'PLINK', regions := '1,chrZ:not-a-position');
+----
+invalid region/target expression
+
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                             use := 'GT', columns := 'PLINK', targets := '1:200-100');
 ----
 invalid region/target expression
