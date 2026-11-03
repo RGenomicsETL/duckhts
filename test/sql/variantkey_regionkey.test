@@ -36,6 +36,32 @@ FROM (SELECT reverse_variantkey(variantkey('1', 1, 'AAAAAAAAAA', 'T')) AS rv);
 ----
 AAAAAAAAAA	T
 
+# Chromosome codes must fit the upstream five-bit field without wrapping.
+query IIIIII
+SELECT count(*) FILTER (WHERE variantkey(chrom, 100, 'A', 'T') IS NULL),
+       count(*) FILTER (WHERE regionkey(chrom, 0, 100) IS NULL),
+       count(*) FILTER (WHERE variantkey_range(chrom, 1, 100) IS NULL),
+       count(*) FILTER (WHERE are_overlapping_regions(chrom, 0, 10, '1', 0, 10) IS NULL),
+       count(*) FILTER (WHERE are_overlapping_region_regionkey(chrom, 0, 10, regionkey('1', 0, 10)) IS NULL),
+       count(*)
+FROM (VALUES ('chr32'), ('chr33'), ('38'), ('257'), ('999999999999999999999999')) t(chrom);
+----
+5	5	5	5	5	5
+
+query II
+SELECT encode_variantkey(33, 0, 145752064) IS NULL,
+       encode_regionkey(33, 0, 10, 0) IS NULL;
+----
+1	1
+
+query IIII
+SELECT extract_variantkey_chrom(variantkey('CHR00031', 1, 'A', 'T')),
+       extract_variantkey_chrom(variantkey('chrX', 1, 'A', 'T')),
+       extract_regionkey_chrom(regionkey('mT', 0, 10)),
+       variantkey('unknown', 1, 'A', 'T') IS NULL;
+----
+31	23	25	1
+
 query TTTTTTTTTTTTT
 SELECT duckhts_contig_key('chr1'),
        duckhts_contig_key('1'),

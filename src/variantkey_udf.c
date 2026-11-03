@@ -126,6 +126,25 @@ static void contig_key_span(const char *value,
     }
 }
 
+static uint8_t encode_chrom_checked(const char *chrom, idx_t length) {
+    uint8_t encoded = encode_chrom(chrom, (size_t)length);
+    if (length > 3 && ascii_lower((unsigned char)chrom[0]) == 'c' &&
+        ascii_lower((unsigned char)chrom[1]) == 'h' && ascii_lower((unsigned char)chrom[2]) == 'r') {
+        chrom += 3;
+        length -= 3;
+    }
+    if (length && chrom[0] >= '0' && chrom[0] <= '9') {
+        unsigned int code = 0;
+        for (idx_t i = 0; i < length; i++) {
+            if (chrom[i] < '0' || chrom[i] > '9') return 0;
+            code = code * 10 + (unsigned int)(chrom[i] - '0');
+            if (code > 31) return 0;
+        }
+        return (uint8_t)code;
+    }
+    return encoded;
+}
+
 static void duckhts_contig_key_scalar(duckdb_function_info info,
                                       duckdb_data_chunk input,
                                       duckdb_vector output) {
@@ -165,7 +184,7 @@ static int get_variantkey_from_parts(const char *chrom,
     if (!chrom || !ref || !alt || !out_vk) return 0;
     if (chrom_len == 0 || ref_len == 0 || alt_len == 0) return 0;
 
-    chrom_code = encode_chrom(chrom, (size_t)chrom_len);
+    chrom_code = encode_chrom_checked(chrom, chrom_len);
     if (chrom_code == 0) return 0;
     if (!duckhts_variantkey_pos1_to_pos0(pos1, &pos0)) return 0;
 
@@ -188,7 +207,7 @@ static int get_regionkey_from_parts(const char *chrom,
     if (end < start) return 0;
     if (!(strand == -1 || strand == 0 || strand == 1)) return 0;
 
-    chrom_code = encode_chrom(chrom, (size_t)chrom_len);
+    chrom_code = encode_chrom_checked(chrom, chrom_len);
     if (chrom_code == 0) return 0;
 
     *out_rk = encode_regionkey(chrom_code,
@@ -211,7 +230,7 @@ static void encode_variantkey_scalar(duckdb_function_info info, duckdb_data_chun
     (void)info;
     for (idx_t row = 0; row < row_count; row++) {
         if (!row_is_valid(chrom_vec, row) || !row_is_valid(pos0_vec, row) || !row_is_valid(refalt_vec, row) ||
-            chrom_data[row] == 0 || pos0_data[row] > DUCKHTS_VARIANTKEY_POS0_MAX || refalt_data[row] > 0x7FFFFFFFU) {
+            chrom_data[row] == 0 || chrom_data[row] > 31 || pos0_data[row] > DUCKHTS_VARIANTKEY_POS0_MAX || refalt_data[row] > 0x7FFFFFFFU) {
             set_null_at(output, row);
             continue;
         }
@@ -452,7 +471,7 @@ static void variantkey_range_scalar(duckdb_function_info info, duckdb_data_chunk
         }
 
         chrom = get_string_at(chrom_vec, row, &chrom_len);
-        chrom_code = encode_chrom(chrom, (size_t)chrom_len);
+        chrom_code = encode_chrom_checked(chrom, chrom_len);
         if (chrom_code == 0 ||
             !duckhts_variantkey_pos1_to_pos0(min_data[row], &pos0_min) ||
             !duckhts_variantkey_pos1_to_pos0(max_data[row], &pos0_max) ||
@@ -483,7 +502,7 @@ static void encode_regionkey_scalar(duckdb_function_info info, duckdb_data_chunk
     for (idx_t row = 0; row < row_count; row++) {
         if (!row_is_valid(chrom_vec, row) || !row_is_valid(start_vec, row) ||
             !row_is_valid(end_vec, row) || !row_is_valid(strand_vec, row) ||
-            chrom_data[row] == 0 || start_data[row] > RK_MAX_POS || end_data[row] > RK_MAX_POS ||
+            chrom_data[row] == 0 || chrom_data[row] > 31 || start_data[row] > RK_MAX_POS || end_data[row] > RK_MAX_POS ||
             end_data[row] < start_data[row] || strand_data[row] > 2) {
             set_null_at(output, row);
             continue;
@@ -749,8 +768,8 @@ static void are_overlapping_regions_scalar(duckdb_function_info info, duckdb_dat
 
         chrom_a = get_string_at(chrom_a_vec, row, &chrom_a_len);
         chrom_b = get_string_at(chrom_b_vec, row, &chrom_b_len);
-        chrom_a_code = encode_chrom(chrom_a, (size_t)chrom_a_len);
-        chrom_b_code = encode_chrom(chrom_b, (size_t)chrom_b_len);
+        chrom_a_code = encode_chrom_checked(chrom_a, chrom_a_len);
+        chrom_b_code = encode_chrom_checked(chrom_b, chrom_b_len);
 
         if (chrom_a_code == 0 || chrom_b_code == 0 ||
             !duckhts_regionkey_pos0_valid(start_a_data[row]) || !duckhts_regionkey_pos0_valid(end_a_data[row]) || end_a_data[row] < start_a_data[row] ||
@@ -792,7 +811,7 @@ static void are_overlapping_region_regionkey_scalar(duckdb_function_info info, d
         }
 
         chrom = get_string_at(chrom_vec, row, &chrom_len);
-        chrom_code = encode_chrom(chrom, (size_t)chrom_len);
+        chrom_code = encode_chrom_checked(chrom, chrom_len);
         if (chrom_code == 0 ||
             !duckhts_regionkey_pos0_valid(start_data[row]) || !duckhts_regionkey_pos0_valid(end_data[row]) ||
             end_data[row] < start_data[row]) {

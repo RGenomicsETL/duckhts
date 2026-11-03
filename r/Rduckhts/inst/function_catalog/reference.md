@@ -3538,7 +3538,7 @@ UBIGINT
 
 ### Chromosome code
 
-The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name becomes its number modulo 256, with no range check, so 257 shares the code of 1. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither has a number that comes to 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names.
+The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name must have a value from 1 through 31 to fit the upstream five-bit field; other numeric names return NULL instead of wrapping. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither does 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names.
 
 ### Examples
 
