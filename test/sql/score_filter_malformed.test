@@ -1,0 +1,39 @@
+# name: test/sql/score_filter_malformed.test
+# description: Incomplete filter expressions return errors without accessing missing tokens
+# group: [duckhts]
+
+require duckhts
+
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', columns := 'PLINK', include := '="."');
+----
+failed to evaluate include expression
+
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', columns := 'PLINK', include := '==1');
+----
+failed to evaluate include expression
+
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', columns := 'PLINK', exclude := '~');
+----
+failed to evaluate exclude expression
+
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', columns := 'PLINK', include := 'TYPE=');
+----
+failed to evaluate include expression
+
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', columns := 'PLINK', include := 'GT=');
+----
+failed to evaluate include expression
+
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', columns := 'PLINK', include := 'FILTER=');
+----
+failed to evaluate include expression
+
+# A standalone string is evaluated without looking past its last token.
+statement ok
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', columns := 'PLINK', include := '"x,y"');

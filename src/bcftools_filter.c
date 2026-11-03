@@ -4223,7 +4223,8 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     // At this point we also initialize regex expressions which, in RPN, must precede the LIKE/NLIKE operator.
     // Additionally, treat "." as missing value rather than a string in numeric equalities; that
     // @file is only used with ID; etc.
-    // This code is fragile: improve me.
+    // DuckHTS deviation from bcftools 1.23: validate neighboring token indices
+    // before interpreting incomplete expressions; errors use the recovery path.
     static int comma_separator_warned = 0;
     int i;
     for (i=0; i<nout; i++)
@@ -4233,7 +4234,8 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
 
         if ( out[i].hash )
         {
-            int j = out[i+1].tok_type==TOK_VAL ? i+1 : i-1;
+            int j = i+1<nout && out[i+1].tok_type==TOK_VAL ? i+1 : i-1;
+            if ( j<0 ) error("Could not parse the expression: %s\n", filter->str);
             if ( out[j].comparator!=filters_cmp_id )
             {
                 if ( out[j].comparator ) error("Error: could not parse the expression with \"@file_name\" syntax (possible todo)\n");
@@ -4247,6 +4249,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         if ( out[i].tok_type==TOK_EQ || out[i].tok_type==TOK_NE )
         {
             // Look for j="." and k numeric type
+            if ( i<2 ) error("Could not parse the expression: %s\n", filter->str);
             int j = i-1, k = i-2;
             if ( !out[j].is_str ) { k = i-1, j = i-2; }
             if ( out[j].is_str && out[j].key && !strcmp(".",out[j].key) )
@@ -4265,6 +4268,7 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         }
         if ( out[i].tok_type==TOK_LIKE || out[i].tok_type==TOK_NLIKE )
         {
+            if ( i<2 ) error("Could not parse the expression: %s\n", filter->str);
             int j = i-1;
             if ( !out[j].key )
                 error("Could not parse the expression, wrong value for regex operator: %s\n", filter->str);
@@ -4287,8 +4291,8 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
         if ( out[i].is_str && out[i].tok_type==TOK_VAL && out[i].key && strchr(out[i].key,',') )
         {
             int print_note = 0;
-            if ( out[i+1].tok_type==TOK_EQ || (out[i+1].is_str && out[i+2].tok_type==TOK_EQ) ) print_note = 1;
-            else if ( out[i+1].tok_type==TOK_NE || (out[i+1].is_str && out[i+2].tok_type==TOK_NE) ) print_note = 1;
+            if ( i+1<nout && (out[i+1].tok_type==TOK_EQ || (out[i+1].is_str && i+2<nout && out[i+2].tok_type==TOK_EQ)) ) print_note = 1;
+            else if ( i+1<nout && (out[i+1].tok_type==TOK_NE || (out[i+1].is_str && i+2<nout && out[i+2].tok_type==TOK_NE)) ) print_note = 1;
             if ( print_note && !comma_separator_warned )
             {
                 comma_separator_warned = 1;
@@ -4306,9 +4310,10 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             int itok, ival;
             if ( out[i+1].tok_type==TOK_EQ || out[i+1].tok_type==TOK_NE ) ival = i - 1, itok = i + 1;
             else if ( out[i+1].tok_type==TOK_LIKE || out[i+1].tok_type==TOK_NLIKE ) ival = i - 1, itok = i + 1;
-            else if ( out[i+2].tok_type==TOK_EQ || out[i+2].tok_type==TOK_NE ) itok = i + 2, ival = i + 1;
-            else if ( out[i+2].tok_type==TOK_LIKE || out[i+2].tok_type==TOK_NLIKE ) itok = i + 2, ival = i + 1;
+            else if ( i+2<nout && (out[i+2].tok_type==TOK_EQ || out[i+2].tok_type==TOK_NE) ) itok = i + 2, ival = i + 1;
+            else if ( i+2<nout && (out[i+2].tok_type==TOK_LIKE || out[i+2].tok_type==TOK_NLIKE) ) itok = i + 2, ival = i + 1;
             else error("[%s:%d %s] Could not parse the expression: %s\n",  __FILE__,__LINE__,__FUNCTION__, filter->str);
+            if ( ival<0 || !out[ival].key ) error("Could not parse the expression: %s\n", filter->str);
             if ( !strcasecmp(out[ival].key,"snp") || !strcasecmp(out[ival].key,"snps") ) { out[ival].threshold = VCF_SNP<<1; out[ival].is_str = 0; }
             else if ( !strcasecmp(out[ival].key,"indel") || !strcasecmp(out[ival].key,"indels") ) { out[ival].threshold = VCF_INDEL<<1; out[ival].is_str = 0; }
             else if ( !strcasecmp(out[ival].key,"mnp") || !strcasecmp(out[ival].key,"mnps") ) { out[ival].threshold = VCF_MNP<<1; out[ival].is_str = 0; }
@@ -4329,10 +4334,11 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             int ival;
             if ( out[i+1].tok_type==TOK_EQ || out[i+1].tok_type==TOK_NE ) ival = i - 1;
             else if ( out[i+1].tok_type==TOK_LIKE || out[i+1].tok_type==TOK_NLIKE ) ival = i - 1;
-            else if ( out[i+2].tok_type==TOK_EQ || out[i+2].tok_type==TOK_NE ) ival = i + 1;
-            else if ( out[i+2].tok_type==TOK_LIKE || out[i+2].tok_type==TOK_NLIKE ) ival = i + 1;
+            else if ( i+2<nout && (out[i+2].tok_type==TOK_EQ || out[i+2].tok_type==TOK_NE) ) ival = i + 1;
+            else if ( i+2<nout && (out[i+2].tok_type==TOK_LIKE || out[i+2].tok_type==TOK_NLIKE) ) ival = i + 1;
             else error("[%s:%d %s] Could not parse the expression: %s\n",  __FILE__,__LINE__,__FUNCTION__, filter->str);
 
+            if ( ival<0 ) error("Could not parse the expression: %s\n", filter->str);
             if ( !out[ival].key ) error("Comparison between samples is not supported, sorry!\n");
 
             // assign correct setters and unify expressions, eg ar->ra, HOM->hom, etc
@@ -4357,11 +4363,11 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
             if ( out[i+1].tok_type==TOK_EQ || out[i+1].tok_type==TOK_NE ) ival = i - 1;
             else if ( out[i+1].tok_type==TOK_LIKE ) out[i+1].tok_type = TOK_IN, ival = i - 1;
             else if ( out[i+1].tok_type==TOK_NLIKE ) out[i+1].tok_type = TOK_NOT_IN, ival = i - 1;
-            else if ( out[i+2].tok_type==TOK_EQ || out[i+2].tok_type==TOK_NE ) ival = ++i;
-            else if ( out[i+2].tok_type==TOK_LIKE ) out[i+2].tok_type = TOK_IN, ival = ++i;
-            else if ( out[i+2].tok_type==TOK_NLIKE ) out[i+2].tok_type = TOK_NOT_IN, ival = ++i;
+            else if ( i+2<nout && (out[i+2].tok_type==TOK_EQ || out[i+2].tok_type==TOK_NE) ) ival = ++i;
+            else if ( i+2<nout && out[i+2].tok_type==TOK_LIKE ) out[i+2].tok_type = TOK_IN, ival = ++i;
+            else if ( i+2<nout && out[i+2].tok_type==TOK_NLIKE ) out[i+2].tok_type = TOK_NOT_IN, ival = ++i;
             else error("[%s:%d %s] Could not parse the expression: %s\n",  __FILE__,__LINE__,__FUNCTION__, filter->str);
-            if ( out[ival].tok_type!=TOK_VAL || !out[ival].key )
+            if ( ival<0 || out[ival].tok_type!=TOK_VAL || !out[ival].key )
                 error("[%s:%d %s] Could not parse the expression, an unquoted string value perhaps? %s\n", __FILE__,__LINE__,__FUNCTION__, filter->str);
             token_t *tok = &out[ival];
             char *bp = tok->key;
