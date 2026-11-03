@@ -893,7 +893,8 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
     int mapping_owns = 0;
     int idx_snp = -1, idx_chr = -1, idx_bp = -1, idx_a1 = -1, idx_beta = -1, idx_or = -1, idx_p = -1, idx_lp = -1;
     score_summary_t *summary = NULL;
-    void *unused_alleles = NULL;
+    char *pending_allele = NULL;
+    uint64_t line_no = 0;
 
     if (bind->columns_file && bind->columns_file[0]) {
         mapping = score_mapping_file(bind->columns_file, &mapping_n);
@@ -920,6 +921,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
     }
 
     while (hts_getline(fp, '\n', &str) >= 0) {
+        line_no++;
         if (str.s[0] == '#' && strncmp(str.s, "#CHR", 4) != 0 && strncmp(str.s, "#ID", 3) != 0) continue;
         break;
     }
@@ -953,6 +955,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
     }
 
     summary = (score_summary_t *)duckdb_malloc(sizeof(score_summary_t));
+    if (!summary) goto oom;
     memset(summary, 0, sizeof(*summary));
     summary->use_snp = bind->use_variant_id || idx_chr < 0 || idx_bp < 0;
     summary->snp_ok = idx_snp >= 0;
@@ -988,11 +991,11 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
 
     if (summary->use_snp) {
         summary->id2idx = khash_str2int_init();
+        if (!summary->id2idx) goto oom;
     } else {
         summary->rid_pos2idx = kh_init(score64);
+        if (!summary->rid_pos2idx) goto oom;
     }
-
-    (void)unused_alleles;
 
     while (hts_getline(fp, '\n', &str) >= 0) {
         int n_fields;
@@ -1003,19 +1006,14 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         int rid = -1;
         int64_t pos = -1;
 
+        line_no++;
         marker.a1 = NULL;
         if (str.s[0] == '#') continue;
         summary->all_markers++;
         n_fields = score_split_fields(str.s, delimiter, fields, 512);
         if (n_fields == 0) continue;
 
-        if (idx_a1 < n_fields) {
-            marker.a1 = score_dup(fields[idx_a1]);
-            if (!marker.a1) continue;
-            score_strtoupper(marker.a1);
-        } else {
-            continue;
-        }
+        if (idx_a1 >= n_fields) continue;
 
         if (idx_beta >= 0 && idx_beta < n_fields) {
             if (score_parse_float(fields[idx_beta], &es) != 0) es = NAN;
@@ -1025,10 +1023,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
             if (score_parse_float(fields[idx_or], &orv) == 0 && !isnan(orv) && orv > 0.0f)
                 es = logf(orv);
         }
-        if (isnan(es)) {
-            duckdb_free(marker.a1);
-            continue;
-        }
+        if (isnan(es)) continue;
 
         if (idx_lp >= 0 && idx_lp < n_fields) {
             if (score_parse_float(fields[idx_lp], &lp) != 0) lp = NAN;
@@ -1037,13 +1032,30 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
             if (score_parse_pvalue_lp(fields[idx_p], &lp) != 0) lp = NAN;
         }
 
+        if (summary->use_snp) {
+            if (idx_snp < 0 || idx_snp >= n_fields || fields[idx_snp][0] == '\0') continue;
+        } else {
+            char *end;
+            if (idx_chr < 0 || idx_chr >= n_fields || idx_bp < 0 || idx_bp >= n_fields) continue;
+            rid = score_hdr_name2id_flexible(bcf_hdr, fields[idx_chr]);
+            if (rid < 0) continue;
+            pos = strtoll(fields[idx_bp], &end, 10) - 1;
+            if (end == fields[idx_bp] || *end != '\0' || pos < 0) continue;
+        }
+
+        pending_allele = score_dup(fields[idx_a1]);
+        if (!pending_allele) goto oom;
+        score_strtoupper(pending_allele);
+        marker.a1 = pending_allele;
         marker.es = es;
         marker.lp = lp;
 
         if (summary->n_markers == summary->m_markers) {
+            if (summary->m_markers > INT_MAX / 2) goto oom;
             int new_m = summary->m_markers ? summary->m_markers * 2 : 1024;
+            if ((size_t)new_m > SIZE_MAX / sizeof(score_marker_t)) goto oom;
             score_marker_t *new_markers = (score_marker_t *)realloc(summary->markers, sizeof(score_marker_t) * (size_t)new_m);
-            if (!new_markers) continue;
+            if (!new_markers) goto oom;
             summary->markers = new_markers;
             summary->m_markers = new_m;
         }
@@ -1051,11 +1063,14 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         if (summary->use_snp) {
             int size;
             int ret;
-            if (idx_snp < 0 || idx_snp >= n_fields || fields[idx_snp][0] == '\0') continue;
             id = score_dup(fields[idx_snp]);
-            if (!id) continue;
+            if (!id) goto oom;
             size = khash_str2int_size(summary->id2idx);
             ret = khash_str2int_inc(summary->id2idx, id);
+            if (ret < 0) {
+                duckdb_free(id);
+                goto oom;
+            }
             if (ret == size) {
                 summary->markers[summary->n_markers++] = marker;
             } else {
@@ -1064,19 +1079,14 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
                 if (marker.a1) duckdb_free(marker.a1);
             }
         } else {
-            char *end = NULL;
             khash_t(score64) *hash;
             khiter_t it;
             int ret;
             uint64_t key;
-            if (idx_chr < 0 || idx_chr >= n_fields || idx_bp < 0 || idx_bp >= n_fields) continue;
-            rid = score_hdr_name2id_flexible(bcf_hdr, fields[idx_chr]);
-            if (rid < 0) continue;
-            pos = strtoll(fields[idx_bp], &end, 10) - 1;
-            if (end == fields[idx_bp] || *end != '\0' || pos < 0) continue;
             key = (((uint64_t)(uint32_t)rid) << 44) | (uint64_t)pos;
             hash = (khash_t(score64) *)summary->rid_pos2idx;
             it = kh_put(score64, hash, key, &ret);
+            if (ret < 0) goto oom;
             if (ret > 0) {
                 kh_val(hash, it) = summary->n_markers;
                 summary->markers[summary->n_markers++] = marker;
@@ -1085,12 +1095,23 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
                 if (marker.a1) duckdb_free(marker.a1);
             }
         }
+        pending_allele = NULL;
     }
 
     hts_close(fp);
     free(str.s);
     if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
     return summary;
+
+oom:
+    snprintf(err, err_sz, "bcftools_score: out of memory loading summary '%s' at line %llu",
+             summary_path, (unsigned long long)line_no);
+    duckdb_free(pending_allele);
+    score_destroy_summary(summary);
+    hts_close(fp);
+    free(str.s);
+    if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
+    return NULL;
 }
 
 /* Load GWAS-VCF summary: reads FORMAT/ES and FORMAT/LP per-sample from a VCF/BCF
@@ -1109,8 +1130,12 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     bcf1_t *rec = NULL;
     score_summary_t **summaries = NULL;
     float *float_arr = NULL;
+    float *lp_arr = NULL;
+    char *pending_allele = NULL;
     int m_float = 0;
-    int i, j;
+    int m_lp = 0;
+    uint64_t record_no = 0;
+    int i;
 
     sfp = hts_open(summary_path, "r");
     if (!sfp) {
@@ -1154,22 +1179,11 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
 
     /* Allocate per-PRS summaries */
     summaries = (score_summary_t **)duckdb_malloc(sizeof(score_summary_t *) * (size_t)n_prs);
-    if (!summaries) {
-        snprintf(err, err_sz, "bcftools_score: out of memory");
-        bcf_hdr_destroy(shdr);
-        hts_close(sfp);
-        return NULL;
-    }
+    if (!summaries) goto oom;
+    memset(summaries, 0, sizeof(score_summary_t *) * (size_t)n_prs);
     for (i = 0; i < n_prs; i++) {
         summaries[i] = (score_summary_t *)duckdb_malloc(sizeof(score_summary_t));
-        if (!summaries[i]) {
-            for (j = 0; j < i; j++) score_destroy_summary(summaries[j]);
-            duckdb_free(summaries);
-            bcf_hdr_destroy(shdr);
-            hts_close(sfp);
-            snprintf(err, err_sz, "bcftools_score: out of memory");
-            return NULL;
-        }
+        if (!summaries[i]) goto oom;
         memset(summaries[i], 0, sizeof(score_summary_t));
         summaries[i]->use_snp = 0; /* match by chr:pos */
         summaries[i]->chr_ok = 1;
@@ -1178,15 +1192,18 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
         summaries[i]->beta_ok = 1;
         summaries[i]->p_ok = bind->q_thr_lp ? 1 : 0;
         summaries[i]->rid_pos2idx = kh_init(score64);
+        if (!summaries[i]->rid_pos2idx) goto oom;
     }
 
     rec = bcf_init1();
+    if (!rec) goto oom;
     while (bcf_read(sfp, shdr, rec) == 0) {
         int n_es, n_lp = 0;
         int rid;
         uint64_t key;
         const char *chrom;
 
+        record_no++;
         bcf_unpack(rec, BCF_UN_ALL);
         for (i = 0; i < n_prs; i++) summaries[i]->all_markers++;
         if (rec->n_allele < 2) continue;
@@ -1197,16 +1214,16 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
 
         key = (((uint64_t)(uint32_t)rid) << 44) | (uint64_t)rec->pos;
 
-        /* Read FORMAT/ES */
+        /* htslib 1.24 returns -4 when a FORMAT buffer allocation fails. */
         n_es = bcf_get_format_float(shdr, rec, "ES", &float_arr, &m_float);
+        if (n_es == -4) goto oom;
         if (n_es < n_prs) continue;
 
         /* Read FORMAT/LP if needed */
-        float *lp_arr = NULL;
-        int m_lp = 0;
         if (bind->q_thr_lp) {
             n_lp = bcf_get_format_float(shdr, rec, "LP", &lp_arr, &m_lp);
-            if (n_lp < n_prs) { free(lp_arr); continue; }
+            if (n_lp == -4) goto oom;
+            if (n_lp < n_prs) continue;
         }
 
         /* Add marker to each PRS summary */
@@ -1222,24 +1239,28 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
             if (bind->q_thr_lp && score_is_missing(lp)) continue;
 
             /* Effect allele = ALT (allele index 1) — upstream convention */
-            marker.a1 = score_dup(rec->d.allele[1]);
-            if (!marker.a1) continue;
-            score_strtoupper(marker.a1);
+            pending_allele = score_dup(rec->d.allele[1]);
+            if (!pending_allele) goto oom;
+            score_strtoupper(pending_allele);
+            marker.a1 = pending_allele;
             marker.es = es;
             marker.lp = lp;
 
             /* Grow markers array if needed */
             if (summaries[i]->n_markers == summaries[i]->m_markers) {
+                if (summaries[i]->m_markers > INT_MAX / 2) goto oom;
                 int new_m = summaries[i]->m_markers ? summaries[i]->m_markers * 2 : 1024;
+                if ((size_t)new_m > SIZE_MAX / sizeof(score_marker_t)) goto oom;
                 score_marker_t *new_mk = (score_marker_t *)realloc(summaries[i]->markers,
                                                                      sizeof(score_marker_t) * (size_t)new_m);
-                if (!new_mk) { duckdb_free(marker.a1); continue; }
+                if (!new_mk) goto oom;
                 summaries[i]->markers = new_mk;
                 summaries[i]->m_markers = new_m;
             }
 
             hash = (khash_t(score64) *)summaries[i]->rid_pos2idx;
             it = kh_put(score64, hash, key, &ret);
+            if (ret < 0) goto oom;
             if (ret > 0) {
                 kh_val(hash, it) = summaries[i]->n_markers;
                 summaries[i]->markers[summaries[i]->n_markers++] = marker;
@@ -1247,15 +1268,31 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
                 summaries[i]->duplicate_markers++;
                 duckdb_free(marker.a1);
             }
+            pending_allele = NULL;
         }
-        if (lp_arr) free(lp_arr);
     }
 
     bcf_destroy1(rec);
     free(float_arr);
+    free(lp_arr);
     bcf_hdr_destroy(shdr);
     hts_close(sfp);
     return summaries;
+
+oom:
+    snprintf(err, err_sz, "bcftools_score: out of memory loading GWAS-VCF summary '%s' at record %llu",
+             summary_path, (unsigned long long)record_no);
+    duckdb_free(pending_allele);
+    if (summaries) {
+        for (i = 0; i < n_prs; i++) score_destroy_summary(summaries[i]);
+        duckdb_free(summaries);
+    }
+    bcf_destroy1(rec);
+    free(float_arr);
+    free(lp_arr);
+    bcf_hdr_destroy(shdr);
+    hts_close(sfp);
+    return NULL;
 }
 
 static int score_resolve_use_tag(score_bind_t *bind, bcf_hdr_t *hdr, char *err, size_t err_sz) {
