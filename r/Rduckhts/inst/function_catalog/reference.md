@@ -3980,6 +3980,10 @@ Returns:
 UBIGINT
 ```
 
+### Limits
+
+size must be between 0 and 2^32-1 inclusive; values outside that range return NULL.
+
 ### Examples
 
 ```sql

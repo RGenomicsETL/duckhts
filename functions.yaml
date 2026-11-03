@@ -1998,6 +1998,9 @@
       "returns": "UBIGINT",
       "r_wrapper": "",
       "description": "Extend a RegionKey interval by a fixed number of bases on both sides, clamping to the official 28-bit RegionKey position range.",
+      "details": {
+        "Limits": "size must be between 0 and 2^32-1 inclusive; values outside that range return NULL."
+      },
       "examples": [
         "SELECT reverse_regionkey(extend_regionkey(regionkey('X', 10000, 20000, -1), 1000));"
       ]

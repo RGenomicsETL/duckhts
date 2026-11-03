@@ -4,6 +4,36 @@
 
 require duckhts
 
+# BIGINT positions retain their value with and without reference matching.
+query II
+SELECT m.pos, m.alleles_swapped::INTEGER
+FROM (
+  SELECT bcftools_munge_row('chrF', 4294967297, 'C', 'A', NULL,
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    fasta, 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL) AS m
+  FROM (VALUES (NULL), ('__WORKING_DIRECTORY__/test/data/liftover_src.fa')) t(fasta)
+) s;
+----
+4294967297	0
+4294967297	0
+
+statement error
+SELECT bcftools_munge_row('chrF', -4294967295, 'C', 'A', NULL,
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  NULL, 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL);
+----
+pos must be >= 1
+
+statement error
+SELECT bcftools_munge_row('chrF', 9223372036854775807, 'CCC', 'A', NULL,
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL);
+----
+allele end exceeds the BIGINT coordinate range
+
 query I
 SELECT CASE WHEN success THEN 1 ELSE 0 END
 FROM fasta_index(

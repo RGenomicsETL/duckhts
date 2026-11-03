@@ -127,6 +127,19 @@ SELECT count(*) FROM (
 ----
 0
 
+# Integer copy-number correction must reject results outside its INTEGER output range.
+statement ok
+CREATE TEMP TABLE ds_large_ratio AS
+SELECT 'large' AS sample_id, '1' AS chrom, i * 100 AS start, (i + 1) * 100 AS "end",
+       CASE WHEN i < 50 THEN (i % 5) * 0.01 ELSE 40.0 + (i % 5) * 0.01 END AS log2_ratio,
+       true AS kept
+FROM range(100) r(i);
+
+statement error
+SELECT * FROM duckhts_depth_state_segments('ds_large_ratio', normal_fractions := [0.5], ploidies := [2.0]);
+----
+invalid model parameters
+
 # Option contracts.
 statement error
 SELECT * FROM duckhts_depth_state_solutions('ds_bins', max_cn := 1);

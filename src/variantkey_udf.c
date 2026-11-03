@@ -730,7 +730,8 @@ static void extend_regionkey_scalar(duckdb_function_info info, duckdb_data_chunk
 
     (void)info;
     for (idx_t row = 0; row < row_count; row++) {
-        if (!row_is_valid(rk_vec, row) || !row_is_valid(size_vec, row) || size_data[row] < 0) {
+        if (!row_is_valid(rk_vec, row) || !row_is_valid(size_vec, row) ||
+            size_data[row] < 0 || size_data[row] > UINT32_MAX) {
             set_null_at(output, row);
             continue;
         }

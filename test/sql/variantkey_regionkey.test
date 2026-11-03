@@ -36,6 +36,20 @@ FROM (SELECT reverse_variantkey(variantkey('1', 1, 'AAAAAAAAAA', 'T')) AS rv);
 ----
 AAAAAAAAAA	T
 
+# Extension sizes must fit the upstream uint32 parameter without wrapping.
+query III
+SELECT extend_regionkey(regionkey('1', 10, 20), 4294967296) IS NULL,
+       extend_regionkey(regionkey('1', 10, 20), 9223372036854775807) IS NULL,
+       extend_regionkey(regionkey('1', 10, 20), -1) IS NULL;
+----
+1	1	1
+
+query II
+SELECT extract_regionkey_startpos(extend_regionkey(regionkey('1', 10, 20), 4294967295)),
+       extract_regionkey_endpos(extend_regionkey(regionkey('1', 10, 20), 4294967295));
+----
+0	268435455
+
 # Chromosome codes must fit the upstream five-bit field without wrapping.
 query IIIIII
 SELECT count(*) FILTER (WHERE variantkey(chrom, 100, 'A', 'T') IS NULL),
