@@ -1,0 +1,32 @@
+# name: test/sql/bcf_contig_gaps.test
+# description: Indexed BCF headers may have gaps in contig IDX values
+# group: [duckhts]
+
+require duckhts
+
+# Fixture: bcftools 1.24 view --no-version -Ob -o test/data/bcf_contig_gaps.bcf test/data/bcf_contig_gaps.vcf
+#          bcftools 1.24 index test/data/bcf_contig_gaps.bcf
+statement ok
+SET threads=3;
+
+query TI rowsort
+SELECT CHROM, POS FROM read_bcf('test/data/bcf_contig_gaps.bcf');
+----
+chr1	1
+chr2	5
+
+query I
+SELECT count(*) FROM read_bcf('test/data/bcf_contig_gaps.bcf');
+----
+2
+
+query TI rowsort
+SELECT CHROM, POS FROM read_bcf('test/data/bcf_contig_gaps.bcf', scan_mode := 'sequential');
+----
+chr1	1
+chr2	5
+
+query TI
+SELECT CHROM, POS FROM read_bcf('test/data/bcf_contig_gaps.bcf', region := 'chr2:1-10');
+----
+chr2	5

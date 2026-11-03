@@ -228,12 +228,11 @@ typedef struct {
  * every Tabix contig, especially when index_path is not colocated with the file.
  * BCF record IDs remain tied to the header. Bind owns the copied names. */
 static int bcf_bind_contig_names(bcf_bind_data_t *bind, bcf_hdr_t *hdr, tbx_t *tbx) {
-    int count = hdr->n[BCF_DT_CTG];
-    const char **names = NULL;
-    if (tbx) {
-        names = tbx_seqnames(tbx, &count); /* free array; names borrow the index */
-        if (!names) return 0;
-    }
+    int count = 0;
+    /* Both APIs return compact names even when BCF contig IDs have gaps.
+     * Free the array; each name borrows the header or index. */
+    const char **names = tbx ? tbx_seqnames(tbx, &count) : bcf_hdr_seqnames(hdr, &count);
+    if (!names) return 0;
     int ok = 0;
     if (count < 0) goto cleanup;
     bind->n_contigs = count;
@@ -241,7 +240,7 @@ static int bcf_bind_contig_names(bcf_bind_data_t *bind, bcf_hdr_t *hdr, tbx_t *t
         bind->contig_names = duckhts_alloc_array(count, sizeof(*bind->contig_names));
         if (!bind->contig_names) goto cleanup;
         for (int i = 0; i < count; i++) {
-            bind->contig_names[i] = duckhts_copy_string(names ? names[i] : hdr->id[BCF_DT_CTG][i].key);
+            bind->contig_names[i] = duckhts_copy_string(names[i]);
             if (!bind->contig_names[i]) goto cleanup;
         }
     }
