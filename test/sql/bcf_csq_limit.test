@@ -16,22 +16,22 @@ COPY (
         UNION ALL SELECT 5, 'chr1' || chr(9) || '1' || chr(9) || '.' || chr(9) || 'A' || chr(9) ||
             'G' || chr(9) || '.' || chr(9) || 'PASS' || chr(9) || '.'
     ) ORDER BY ordinal
-) TO '__TEST_DIR__/csq_257_fields.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+) TO '__WORKING_DIRECTORY__/test/sql/csq_257_fields.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
 
 statement error
-SELECT count(*) FROM read_bcf('__TEST_DIR__/csq_257_fields.vcf');
+SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/sql/csq_257_fields.vcf');
 ----
 exceeds the supported annotation field count
 
 statement ok
 COPY (
     SELECT replace(line, '|Field257', '') AS line
-    FROM read_csv('__TEST_DIR__/csq_257_fields.vcf', header := false, columns := {'line': 'VARCHAR'},
+    FROM read_csv('__WORKING_DIRECTORY__/test/sql/csq_257_fields.vcf', header := false, columns := {'line': 'VARCHAR'},
                   delim := chr(1), quote := '', escape := '')
-) TO '__TEST_DIR__/csq_256_fields.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+) TO '__WORKING_DIRECTORY__/test/sql/csq_256_fields.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
 
 query I
-SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bcf('__TEST_DIR__/csq_256_fields.vcf'))
+SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/sql/csq_256_fields.vcf'))
 WHERE starts_with(column_name, 'VEP_');
 ----
 256

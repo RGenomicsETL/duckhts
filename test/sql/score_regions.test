@@ -5,12 +5,12 @@
 require duckhts
 
 statement ok
-COPY (SELECT '1', 100, 200) TO '__TEST_DIR__/score_selection.bed' (HEADER false, DELIMITER '\t');
+COPY (SELECT '1', 100, 200) TO '__WORKING_DIRECTORY__/test/sql/score_selection.bed' (HEADER false, DELIMITER '\t');
 
 query TT
 SELECT SAMPLE, round(score_summary, 3)
 FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
-                   use := 'GT', columns := 'PLINK', regions_file := '__TEST_DIR__/score_selection.bed')
+                   use := 'GT', columns := 'PLINK', regions_file := '__WORKING_DIRECTORY__/test/sql/score_selection.bed')
 ORDER BY SAMPLE;
 ----
 S1	-0.2
@@ -19,20 +19,20 @@ S2	-0.4
 query TT
 SELECT SAMPLE, round(score_summary, 3)
 FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
-                   use := 'GT', columns := 'PLINK', targets_file := '__TEST_DIR__/score_selection.bed')
+                   use := 'GT', columns := 'PLINK', targets_file := '__WORKING_DIRECTORY__/test/sql/score_selection.bed')
 ORDER BY SAMPLE;
 ----
 S1	-0.2
 S2	-0.4
 
 statement ok
-COPY (SELECT '1', 100, 200) TO '__TEST_DIR__/score_selection.bed.gz'
+COPY (SELECT '1', 100, 200) TO '__WORKING_DIRECTORY__/test/sql/score_selection.bed.gz'
 (HEADER false, DELIMITER '\t', COMPRESSION gzip);
 
 query TT
 SELECT SAMPLE, round(score_summary, 3)
 FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
-                   use := 'GT', columns := 'PLINK', targets_file := '__TEST_DIR__/score_selection.bed.gz')
+                   use := 'GT', columns := 'PLINK', targets_file := '__WORKING_DIRECTORY__/test/sql/score_selection.bed.gz')
 ORDER BY SAMPLE;
 ----
 S1	-0.2
@@ -40,12 +40,12 @@ S2	-0.4
 
 # Non-BED region files remain 1-based inclusive.
 statement ok
-COPY (SELECT '1', 100, 200) TO '__TEST_DIR__/score_selection.tsv' (HEADER false, DELIMITER '\t');
+COPY (SELECT '1', 100, 200) TO '__WORKING_DIRECTORY__/test/sql/score_selection.tsv' (HEADER false, DELIMITER '\t');
 
 query TT
 SELECT SAMPLE, round(score_summary, 3)
 FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
-                   use := 'GT', columns := 'PLINK', regions_file := '__TEST_DIR__/score_selection.tsv')
+                   use := 'GT', columns := 'PLINK', regions_file := '__WORKING_DIRECTORY__/test/sql/score_selection.tsv')
 ORDER BY SAMPLE;
 ----
 S1	-0.2
@@ -68,12 +68,12 @@ ORDER BY SAMPLE;
 S1	-0.4
 
 statement ok
-COPY (SELECT 'HLA-A*01:01', 100, 200) TO '__TEST_DIR__/score_hla.bed' (HEADER false, DELIMITER '\t');
+COPY (SELECT 'HLA-A*01:01', 100, 200) TO '__WORKING_DIRECTORY__/test/sql/score_hla.bed' (HEADER false, DELIMITER '\t');
 
 query TT
 SELECT SAMPLE, round(score_hla_summary, 3)
 FROM bcftools_score('test/data/score_hla.vcf', 'test/data/score_hla_summary.tsv',
-                   use := 'GT', columns := 'PLINK', regions_file := '__TEST_DIR__/score_hla.bed')
+                   use := 'GT', columns := 'PLINK', regions_file := '__WORKING_DIRECTORY__/test/sql/score_hla.bed')
 ORDER BY SAMPLE;
 ----
 S1	-0.4
