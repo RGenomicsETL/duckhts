@@ -208,7 +208,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
         idx_t ed_len = 0;
         char *ed_flipped = NULL;
         bool swapped = false;
-        int32_t pos;
+        int64_t pos;
 
         if (!row_is_valid(chrom_vec, row)) {
             set_munge_error(info, "bcftools_munge_row: chrom must be non-null");
@@ -246,7 +246,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             return;
         }
 
-        pos = (int32_t)get_int64_at(pos_vec, row);
+        pos = get_int64_at(pos_vec, row);
         if (pos < 1) {
             set_munge_error(info, "bcftools_munge_row: pos must be >= 1");
             free(cached_fasta_path);
@@ -348,6 +348,17 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             return;
         }
 
+        size_t ref_len = strlen(norm_ref);
+        size_t alt_len = strlen(norm_alt);
+        size_t span = ref_len > alt_len ? ref_len : alt_len;
+        if (span - 1 > (uint64_t)(INT64_MAX - (pos - 1))) {
+            set_munge_error(info, "bcftools_munge_row: allele end exceeds the BIGINT coordinate range");
+            free(norm_alt);
+            free(norm_ref);
+            free(cached_fasta_path);
+            return;
+        }
+
         chrom_cstr = dup_span(chrom, chrom_len);
         if (!chrom_cstr) {
             set_munge_error(info, "bcftools_munge_row: out of memory");
@@ -360,7 +371,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
             fai,
             chrom_cstr,
             pos - 1,
-            pos + (hts_pos_t)((strlen(norm_ref) > strlen(norm_alt) ? strlen(norm_ref) : strlen(norm_alt))) - 2,
+            (pos - 1) + (hts_pos_t)(span - 1),
             DUCKHTS_REFERENCE_EXACT
         );
         free(chrom_cstr);

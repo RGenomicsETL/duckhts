@@ -2,6 +2,72 @@
 
 # duckhts (development version)
 
+- Fixes from a review of the whole first-party C tree. Each fix has a regression test
+  that fails on the previous code.
+  - Inputs that crashed or hung the host process now return errors:
+    `duckhts_samtools_idxstats` and `bam_bin_counts` with an index holding fewer
+    references than the BAM header; `reverse_variantkey` on a key whose REF/ALT length
+    fields cannot come from `variantkey()` (stack overflow); `bcftools_score` with DS, AP
+    or GP values that do not match the allele count (heap overflow); malformed
+    include/exclude expressions such as `'="."'` (out-of-bounds token reads inherited from
+    bcftools 1.23); `fasta_nuc(bin_width := ...)` on a FASTA with no sequences;
+    `bam_index`, `bcf_index` and `tabix_index` with `min_shift` outside 0–30, the range
+    `bcftools index -m` accepts (`min_shift := 100` looped forever); and a `LOAD` whose
+    macro registration failed after taking its lock, which left every later `LOAD` in the
+    process waiting.
+  - Errors that were reported as success or as end of data: sequential
+    `duckhts_mosdepth` reported success after a contig failed; `duckhts_bam_bed_coverage`
+    and `read_pileup` treated an alignment decode error as the end of the data;
+    `bgzip(p, output_path := p, overwrite := TRUE, keep := FALSE)` deleted the input and
+    reported success, and input/output aliases are now rejected by file identity; and
+    `overwrite := TRUE` deleted the existing output before writing, so a failed mosdepth,
+    idxstats or bgzip run lost both. Replacements are now written beside the destination
+    and renamed into place only after the writer and its indexes succeed.
+  - Wrong rows or values:
+    - parallel full scans of indexed BAM and BCF files dropped records with a reference
+      and position 0, so they disagreed with `scan_mode := 'sequential'`;
+    - `region := 'chr1:1,000-1,500'` split on the thousands separators and read the
+      whole contig;
+    - `read_hts_index` named TBI/CSI contigs by header order instead of index order;
+    - VariantKey and RegionKey chromosome codes above 31 wrapped onto other
+      chromosomes (`chr33` gave the key of `chr1`) and now return NULL;
+    - a full `read_fasta` scan uppercased soft-masked bases and turned IUPAC codes into
+      N, while a region query returned the raw text;
+    - `read_fastq` and `read_fasta` rejected valid files that htslib's format sniffer
+      refuses, such as a FASTQ whose first read has a `.` and protein FASTA;
+    - `input_quality_encoding := 'auto'` guessed phred64 from ambiguous qualities (all
+      `I`, so Q40 became Q9) and failed on zero-length reads; ambiguous evidence is now
+      an error asking for an explicit encoding;
+    - standard BAM tag columns invented values when a tag's stored type differed from
+      its declared type, such as `NM:Z:abc` as 0;
+    - `bam_bin_counts(rmdup := 'streaming')` repaired only the first record of each
+      contig and could report negative GC bases;
+    - `bcftools_liftover` read the base before contig position 1 and returned
+      deletions there as insertions;
+    - `bcftools_norm_row` left-aligned records mixing `*` with real ALTs, which
+      bcftools 1.23 returns unchanged, and did not check REF on REF-only records;
+    - unparseable or overflowing CSQ/ANN/BCSQ numeric subfields became numbers;
+    - `bcftools_score` read BED region and target files as 1-based and could not
+      parse quoted contig names such as HLA alleles;
+    - `read_bcf` printed an integer-missing GT allele as `-65`, failed on a BCF with
+      gaps in contig IDX, and silently dropped the typed columns of a CSQ header with
+      more than 256 fields;
+    - GFF/GTF in non-strict mode turned a `.` coordinate into 0;
+    - `read_tabix(column_types := 'INTEGER')`, `bcftools_munge_row` positions,
+      `extend_regionkey` sizes, `duckhts_bam_bed_coverage` depth thresholds and
+      depth-state copy numbers wrapped out-of-range values.
+  - `read_hts_header`, `read_hts_index` and `read_hts_index_spans` read their file at
+    execution, not at bind, so `EXPLAIN` does not open it and a prepared statement sees
+    the file as it is at each execution. Tabix and interval scans fill DuckDB's vector
+    size instead of a fixed 2,048 rows.
+  - Removed parameters that did nothing: `read_gff`/`read_gtf` `header`,
+    `header_names`, `column_types` and `auto_detect` (also from
+    `duckhts_gff_convert_parquet_sql`), and `duckhts_bam_bed_coverage`
+    `bed_index_path`, `fragment_mode` and `processing_threads`.
+  - `read_pileup` documents htslib's 8,000-read depth limit per position.
+  - `bam_bin_counts(rmdup := 'streaming')` now reads its contigs on one thread, in
+    header order, to keep one deduplication state; the other modes still read contigs
+    in parallel. No benchmark covers this mode.
 - `read_bam(..., auxiliary_tags := ['UR', 'UB'])` returns one VARCHAR column per named
   tag, after the standard tag columns, instead of the `AUXILIARY_TAGS` map. Each value is
   formatted exactly like the map value and is NULL when a record lacks the tag; no map is

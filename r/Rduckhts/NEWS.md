@@ -1,5 +1,23 @@
 # Rduckhts (development version)
 
+- The bundled extension fixes crashes, hangs and wrong results found by a review of its
+  C code. Calls that used to end the R session now return an R error: idxstats or bin
+  counts with a stale index, a malformed VariantKey, score files with mismatched DS/AP/GP
+  counts, malformed include/exclude expressions, `fasta_nuc()` on an empty FASTA, and
+  index building with `min_shift` outside 0–30. Among the wrong results now fixed:
+  region strings with thousands separators (`"chr1:1,000-1,500"`), parallel BAM/BCF
+  scans that dropped records at position 0, VariantKey chromosome codes above 31,
+  soft-masking lost in full `read_fasta` scans, contig names from VCF tabix indexes,
+  CSQ numbers parsed from text, BED regions in `rduckhts_bcftools_score()`, and
+  `bcftools_norm` on records mixing `*` with other alleles.
+- `input_quality_encoding = "auto"` now stops with an error when the qualities fit more
+  than one encoding, instead of guessing phred64; pass the encoding explicitly.
+- A failed `overwrite = TRUE` run of bgzip, bgunzip, mosdepth or idxstats keeps the
+  existing output file instead of deleting it.
+- `rduckhts_bam_bed_coverage()` no longer has the `bed_index_path`, `fragment_mode` and
+  `processing_threads` arguments, which did nothing or always failed.
+  `rduckhts_gff()`, `rduckhts_gtf()` and `rduckhts_gff_convert_parquet()` no longer have
+  `header`, `header_names`, `auto_detect` and `column_types`, which the reader ignored.
 - `rduckhts_bam()` and `rduckhts_bam_multi()` accept tag names in `auxiliary_tags`, such as
   `c("UR", "UB")`, and then return one text column per tag instead of the
   `AUXILIARY_TAGS` map; a single name is still sent as a list. `TRUE` and `FALSE` keep

@@ -84,6 +84,71 @@ static hts_header_mode_t parse_header_mode(const char *s) {
     return HTS_HEADER_MODE_BOTH;
 }
 
+typedef struct {
+    char *file_path;
+    char *format_hint;
+    char *index_path;
+    hts_header_mode_t mode;
+} hts_meta_options_t;
+
+static void destroy_hts_meta_options(void *data) {
+    hts_meta_options_t *options = data;
+    if (!options) return;
+    duckdb_free(options->file_path);
+    duckdb_free(options->format_hint);
+    duckdb_free(options->index_path);
+    free(options);
+}
+
+static hts_meta_options_t *bind_hts_meta_options(duckdb_bind_info info, int header) {
+    hts_meta_options_t *options = calloc(1, sizeof(*options));
+    if (!options) {
+        duckdb_bind_set_error(info, "Out of memory");
+        return NULL;
+    }
+    duckdb_value value = duckdb_bind_get_parameter(info, 0);
+    options->file_path = duckdb_get_varchar(value);
+    duckdb_destroy_value(&value);
+    if (!options->file_path || !*options->file_path) {
+        duckdb_bind_set_error(info, "HTS metadata reader requires a file path");
+        destroy_hts_meta_options(options);
+        return NULL;
+    }
+    value = duckdb_bind_get_named_parameter(info, "format");
+    if (value && !duckdb_is_null_value(value)) {
+        options->format_hint = duckdb_get_varchar(value);
+        if (!options->format_hint) goto allocation_error;
+    }
+    if (value) duckdb_destroy_value(&value);
+    value = duckdb_bind_get_named_parameter(info, header ? "mode" : "index_path");
+    if (value && !duckdb_is_null_value(value)) {
+        char *text = duckdb_get_varchar(value);
+        if (!text) goto allocation_error;
+        if (header) {
+            if (!valid_header_mode(text)) {
+                duckdb_bind_set_error(info, "mode must be one of: parsed, raw, both");
+                duckdb_free(text);
+                duckdb_destroy_value(&value);
+                destroy_hts_meta_options(options);
+                return NULL;
+            }
+            options->mode = parse_header_mode(text);
+            duckdb_free(text);
+        } else {
+            options->index_path = text;
+        }
+    }
+    if (value) duckdb_destroy_value(&value);
+    duckdb_bind_set_bind_data(info, options, destroy_hts_meta_options);
+    return options;
+
+allocation_error:
+    duckdb_destroy_value(&value);
+    duckdb_bind_set_error(info, "Out of memory");
+    destroy_hts_meta_options(options);
+    return NULL;
+}
+
 static hts_kind_t kind_from_hts_format(const htsFormat *fmt) {
     if (!fmt) return HTS_KIND_UNKNOWN;
     switch (fmt->format) {
@@ -178,18 +243,13 @@ typedef struct {
 } hts_header_entry_t;
 
 typedef struct {
-    char *file_path;
-    char *format_hint;
     char *file_format;
     char *compression;
     hts_header_mode_t mode;
     hts_header_entry_t *entries;
     int64_t n_entries;
-} hts_header_bind_t;
-
-typedef struct {
     int64_t offset;
-} hts_header_init_t;
+} hts_header_data_t;
 
 static void free_header_entries(hts_header_entry_t *entries, int64_t n) {
     if (!entries) return;
@@ -212,19 +272,13 @@ static void free_header_entries(hts_header_entry_t *entries, int64_t n) {
     free(entries);
 }
 
-static void destroy_hts_header_bind(void *data) {
-    hts_header_bind_t *bind = (hts_header_bind_t *)data;
+static void destroy_hts_header_data(void *data) {
+    hts_header_data_t *bind = data;
     if (!bind) return;
-    free(bind->file_path);
-    free(bind->format_hint);
     free(bind->file_format);
     free(bind->compression);
     free_header_entries(bind->entries, bind->n_entries);
     free(bind);
-}
-
-static void destroy_hts_header_init(void *data) {
-    if (data) free(data);
 }
 
 static void header_add_kv(hts_header_entry_t *e, const char *key, const char *val) {
@@ -264,7 +318,7 @@ static const char *header_kv_value(const hts_header_entry_t *e, const char *key)
     return NULL;
 }
 
-static void build_vcf_header_entries(bcf_hdr_t *hdr, hts_header_bind_t *bind) {
+static void build_vcf_header_entries(bcf_hdr_t *hdr, hts_header_data_t *bind) {
     if (!hdr || !bind) return;
 
     int nsamples = bcf_hdr_nsamples(hdr);
@@ -343,7 +397,7 @@ static void build_vcf_header_entries(bcf_hdr_t *hdr, hts_header_bind_t *bind) {
     free(ks.s);
 }
 
-static void build_sam_header_entries(sam_hdr_t *hdr, hts_header_bind_t *bind) {
+static void build_sam_header_entries(sam_hdr_t *hdr, hts_header_data_t *bind) {
     if (!hdr || !bind) return;
     const char *text = sam_hdr_str(hdr);
     size_t text_len = sam_hdr_length(hdr);
@@ -447,7 +501,7 @@ static void build_sam_header_entries(sam_hdr_t *hdr, hts_header_bind_t *bind) {
     bind->n_entries = n_entries;
 }
 
-static void build_tabix_header_entries(htsFile *fp, hts_header_bind_t *bind) {
+static void build_tabix_header_entries(htsFile *fp, hts_header_data_t *bind) {
     if (!fp || !bind) return;
     kstring_t line = {0, 0, NULL};
     int64_t cap = 16;
@@ -478,100 +532,8 @@ static void build_tabix_header_entries(htsFile *fp, hts_header_bind_t *bind) {
 }
 
 static void read_hts_header_bind(duckdb_bind_info info) {
-    duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
-    char *file_path = duckdb_get_varchar(path_val);
-    duckdb_destroy_value(&path_val);
-
-    if (!file_path || strlen(file_path) == 0) {
-        duckdb_bind_set_error(info, "read_hts_header requires a file path");
-        if (file_path) duckdb_free(file_path);
-        return;
-    }
-
-    char *format_hint = NULL;
-    duckdb_value fmt_val = duckdb_bind_get_named_parameter(info, "format");
-    if (fmt_val && !duckdb_is_null_value(fmt_val)) {
-        format_hint = duckdb_get_varchar(fmt_val);
-    }
-    if (fmt_val) duckdb_destroy_value(&fmt_val);
-
-    char *mode = NULL;
-    duckdb_value mode_val = duckdb_bind_get_named_parameter(info, "mode");
-    if (mode_val && !duckdb_is_null_value(mode_val)) {
-        mode = duckdb_get_varchar(mode_val);
-    }
-    if (mode_val) duckdb_destroy_value(&mode_val);
-    if (mode && !valid_header_mode(mode)) {
-        duckdb_bind_set_error(info, "mode must be one of: parsed, raw, both");
-        if (file_path) duckdb_free(file_path);
-        if (format_hint) duckdb_free(format_hint);
-        if (mode) duckdb_free(mode);
-        return;
-    }
-
-    hts_header_bind_t *bind = (hts_header_bind_t *)calloc(1, sizeof(hts_header_bind_t));
-    if (!bind) {
-        duckdb_bind_set_error(info, "Out of memory");
-        if (file_path) duckdb_free(file_path);
-        if (format_hint) duckdb_free(format_hint);
-        if (mode) duckdb_free(mode);
-        return;
-    }
-    bind->file_path = dup_str(file_path);
-    bind->format_hint = format_hint ? dup_str(format_hint) : NULL;
-    bind->mode = parse_header_mode(mode);
-
-    htsFile *fp = hts_open(file_path, "r");
-    if (!fp) {
-        duckdb_bind_set_error(info, "Failed to open file for header reading");
-        destroy_hts_header_bind(bind);
-        duckdb_free(file_path);
-        if (format_hint) duckdb_free(format_hint);
-        if (mode) duckdb_free(mode);
-        return;
-    }
-
-    const htsFormat *fmt = hts_get_format(fp);
-    const char *fmt_ext = fmt ? hts_format_file_extension(fmt) : "unknown";
-    bind->file_format = dup_str(fmt_ext ? fmt_ext : "unknown");
-    bind->compression = dup_str(fmt ? compression_to_string(fmt->compression) : "unknown");
-
-    hts_kind_t hint_kind = parse_format_hint(format_hint);
-    hts_kind_t kind = (hint_kind == HTS_KIND_AUTO) ? kind_from_hts_format(fmt) : hint_kind;
-    if (hint_kind == HTS_KIND_AUTO &&
-        (kind == HTS_KIND_UNKNOWN || kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) &&
-        has_tabix_index(file_path)) {
-        kind = HTS_KIND_TABIX;
-    }
-
-    if (kind == HTS_KIND_VCF || kind == HTS_KIND_BCF) {
-        bcf_hdr_t *hdr = bcf_hdr_read(fp);
-        if (!hdr) {
-            hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to read VCF/BCF header");
-            destroy_hts_header_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (mode) duckdb_free(mode);
-            return;
-        }
-        build_vcf_header_entries(hdr, bind);
-        bcf_hdr_destroy(hdr);
-    } else if (kind == HTS_KIND_SAM || kind == HTS_KIND_BAM || kind == HTS_KIND_CRAM ||
-               kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) {
-        sam_hdr_t *hdr = sam_hdr_read(fp);
-        if (hdr) {
-            build_sam_header_entries(hdr, bind);
-            sam_hdr_destroy(hdr);
-        }
-    } else if (kind == HTS_KIND_TABIX) {
-        build_tabix_header_entries(fp, bind);
-    }
-
-    hts_close(fp);
-    duckdb_free(file_path);
-    if (format_hint) duckdb_free(format_hint);
-    if (mode) duckdb_free(mode);
+    const hts_meta_options_t *bind = bind_hts_meta_options(info, 1);
+    if (!bind) return;
 
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -613,17 +575,66 @@ static void read_hts_header_bind(duckdb_bind_info info) {
     duckdb_destroy_logical_type(&val_type);
     duckdb_destroy_logical_type(&map_type);
 
-    duckdb_bind_set_bind_data(info, bind, destroy_hts_header_bind);
 }
 
 static void read_hts_header_init(duckdb_init_info info) {
-    hts_header_init_t *init = (hts_header_init_t *)calloc(1, sizeof(hts_header_init_t));
-    duckdb_init_set_init_data(info, init, destroy_hts_header_init);
+    const hts_meta_options_t *options = duckdb_init_get_bind_data(info);
+    hts_header_data_t *data = calloc(1, sizeof(*data));
+    if (!data) {
+        duckdb_init_set_error(info, "Out of memory");
+        return;
+    }
+    data->mode = options->mode;
+    duckdb_init_set_init_data(info, data, destroy_hts_header_data);
+    duckdb_init_set_max_threads(info, 1);
+
+    htsFile *fp = hts_open(options->file_path, "r");
+    if (!fp) {
+        duckdb_init_set_error(info, "Failed to open file for header reading");
+        return;
+    }
+    const htsFormat *fmt = hts_get_format(fp);
+    const char *fmt_ext = fmt ? hts_format_file_extension(fmt) : "unknown";
+    data->file_format = dup_str(fmt_ext ? fmt_ext : "unknown");
+    data->compression = dup_str(fmt ? compression_to_string(fmt->compression) : "unknown");
+    if (!data->file_format || !data->compression) {
+        hts_close(fp);
+        duckdb_init_set_error(info, "Out of memory");
+        return;
+    }
+
+    hts_kind_t hint_kind = parse_format_hint(options->format_hint);
+    hts_kind_t kind = (hint_kind == HTS_KIND_AUTO) ? kind_from_hts_format(fmt) : hint_kind;
+    if (hint_kind == HTS_KIND_AUTO &&
+        (kind == HTS_KIND_UNKNOWN || kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) &&
+        has_tabix_index(options->file_path)) {
+        kind = HTS_KIND_TABIX;
+    }
+    if (kind == HTS_KIND_VCF || kind == HTS_KIND_BCF) {
+        bcf_hdr_t *hdr = bcf_hdr_read(fp);
+        if (!hdr) {
+            hts_close(fp);
+            duckdb_init_set_error(info, "Failed to read VCF/BCF header");
+            return;
+        }
+        build_vcf_header_entries(hdr, data);
+        bcf_hdr_destroy(hdr);
+    } else if (kind == HTS_KIND_SAM || kind == HTS_KIND_BAM || kind == HTS_KIND_CRAM ||
+               kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) {
+        sam_hdr_t *hdr = sam_hdr_read(fp);
+        if (hdr) {
+            build_sam_header_entries(hdr, data);
+            sam_hdr_destroy(hdr);
+        }
+    } else if (kind == HTS_KIND_TABIX) {
+        build_tabix_header_entries(fp, data);
+    }
+    hts_close(fp);
 }
 
 static void read_hts_header_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    hts_header_bind_t *bind = (hts_header_bind_t *)duckdb_function_get_bind_data(info);
-    hts_header_init_t *init = (hts_header_init_t *)duckdb_function_get_init_data(info);
+    hts_header_data_t *init = duckdb_function_get_init_data(info);
+    const hts_header_data_t *bind = init;
 
     if (!bind || !init || bind->n_entries <= 0) {
         duckdb_data_chunk_set_size(output, 0);
@@ -774,19 +785,14 @@ typedef struct {
 } hts_index_entry_t;
 
 typedef struct {
-    char *file_path;
-    char *format_hint;
     char *file_format;
     char *compression;
     hts_index_entry_t *entries;
     int64_t n_entries;
     uint8_t *meta;
     uint32_t meta_len;
-} hts_index_bind_t;
-
-typedef struct {
     int64_t offset;
-} hts_index_init_t;
+} hts_index_data_t;
 
 static void free_index_entries(hts_index_entry_t *entries, int64_t n) {
     if (!entries) return;
@@ -798,20 +804,14 @@ static void free_index_entries(hts_index_entry_t *entries, int64_t n) {
     free(entries);
 }
 
-static void destroy_hts_index_bind(void *data) {
-    hts_index_bind_t *bind = (hts_index_bind_t *)data;
+static void destroy_hts_index_data(void *data) {
+    hts_index_data_t *bind = data;
     if (!bind) return;
-    free(bind->file_path);
-    free(bind->format_hint);
     free(bind->file_format);
     free(bind->compression);
     free_index_entries(bind->entries, bind->n_entries);
     free(bind->meta);
     free(bind);
-}
-
-static void destroy_hts_index_init(void *data) {
-    if (data) free(data);
 }
 
 static const char *index_fmt_to_string(int fmt) {
@@ -824,7 +824,7 @@ static const char *index_fmt_to_string(int fmt) {
     }
 }
 
-static void add_index_entry(hts_index_bind_t *bind, const char *seqname, int64_t tid,
+static void add_index_entry(hts_index_data_t *bind, const char *seqname, int64_t tid,
                             int64_t length, int has_stat, uint64_t mapped, uint64_t unmapped,
                             int has_n_no_coor, uint64_t n_no_coor, const char *index_type,
                             const char *index_path) {
@@ -854,7 +854,7 @@ static int index_has_bins(hts_idx_t *idx) {
     return idx != NULL && hts_idx_fmt(idx) != HTS_FMT_CRAI;
 }
 
-static void capture_index_meta(hts_index_bind_t *bind, hts_idx_t *idx) {
+static void capture_index_meta(hts_index_data_t *bind, hts_idx_t *idx) {
     if (!bind || !idx) return;
     uint32_t meta_len = 0;
     uint8_t *meta = hts_idx_get_meta(idx, &meta_len);
@@ -867,49 +867,22 @@ static void capture_index_meta(hts_index_bind_t *bind, hts_idx_t *idx) {
     }
 }
 
-static void read_hts_index_bind(duckdb_bind_info info) {
-    duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
-    char *file_path = duckdb_get_varchar(path_val);
-    duckdb_destroy_value(&path_val);
-
-    if (!file_path || strlen(file_path) == 0) {
-        duckdb_bind_set_error(info, "read_hts_index requires a file path");
-        if (file_path) duckdb_free(file_path);
-        return;
-    }
-
-    char *format_hint = NULL;
-    duckdb_value fmt_val = duckdb_bind_get_named_parameter(info, "format");
-    if (fmt_val && !duckdb_is_null_value(fmt_val)) {
-        format_hint = duckdb_get_varchar(fmt_val);
-    }
-    if (fmt_val) duckdb_destroy_value(&fmt_val);
-
-    char *index_path = NULL;
-    duckdb_value idx_val = duckdb_bind_get_named_parameter(info, "index_path");
-    if (idx_val && !duckdb_is_null_value(idx_val)) {
-        index_path = duckdb_get_varchar(idx_val);
-    }
-    if (idx_val) duckdb_destroy_value(&idx_val);
-
-    hts_index_bind_t *bind = (hts_index_bind_t *)calloc(1, sizeof(hts_index_bind_t));
+static void read_hts_index_init(duckdb_init_info info) {
+    const hts_meta_options_t *options = duckdb_init_get_bind_data(info);
+    const char *file_path = options->file_path;
+    const char *format_hint = options->format_hint;
+    const char *index_path = options->index_path;
+    hts_index_data_t *bind = calloc(1, sizeof(*bind));
     if (!bind) {
-        duckdb_bind_set_error(info, "Out of memory");
-        if (file_path) duckdb_free(file_path);
-        if (format_hint) duckdb_free(format_hint);
-        if (index_path) duckdb_free(index_path);
+        duckdb_init_set_error(info, "Out of memory");
         return;
     }
-    bind->file_path = dup_str(file_path);
-    bind->format_hint = format_hint ? dup_str(format_hint) : NULL;
+    duckdb_init_set_init_data(info, bind, destroy_hts_index_data);
+    duckdb_init_set_max_threads(info, 1);
 
     htsFile *fp = hts_open(file_path, "r");
     if (!fp) {
-        duckdb_bind_set_error(info, "Failed to open file for index reading");
-        destroy_hts_index_bind(bind);
-        duckdb_free(file_path);
-        if (format_hint) duckdb_free(format_hint);
-        if (index_path) duckdb_free(index_path);
+        duckdb_init_set_error(info, "Failed to open file for index reading");
         return;
     }
 
@@ -925,11 +898,7 @@ static void read_hts_index_bind(duckdb_bind_info info) {
         sam_hdr_t *hdr = sam_hdr_read(fp);
         if (!hdr) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to read SAM/BAM/CRAM header");
-            destroy_hts_index_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to read SAM/BAM/CRAM header");
             return;
         }
 
@@ -938,11 +907,7 @@ static void read_hts_index_bind(duckdb_bind_info info) {
         if (!idx) {
             sam_hdr_destroy(hdr);
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load index for SAM/BAM/CRAM file");
-            destroy_hts_index_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load index for SAM/BAM/CRAM file");
             return;
         }
 
@@ -967,11 +932,7 @@ static void read_hts_index_bind(duckdb_bind_info info) {
         bcf_hdr_t *hdr = bcf_hdr_read(fp);
         if (!hdr) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to read VCF/BCF header");
-            destroy_hts_index_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to read VCF/BCF header");
             return;
         }
 
@@ -988,23 +949,30 @@ static void read_hts_index_bind(duckdb_bind_info info) {
         if (!idx) {
             bcf_hdr_destroy(hdr);
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load index for VCF/BCF file");
-            destroy_hts_index_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load index for VCF/BCF file");
             return;
         }
 
         capture_index_meta(bind, idx);
         int nseq = hts_idx_nseq(idx);
+        int tbx_nseq = 0;
+        const char **tbx_names = tbx ? tbx_seqnames(tbx, &tbx_nseq) : NULL;
+        if (tbx && (tbx_nseq != nseq || (nseq > 0 && !tbx_names))) {
+            free(tbx_names);
+            tbx_destroy(tbx);
+            bcf_hdr_destroy(hdr);
+            hts_close(fp);
+            duckdb_init_set_error(info, "Failed to read tabix sequence names");
+            return;
+        }
         for (int tid = 0; tid < nseq; tid++) {
-            const char *name = bcf_hdr_id2name(hdr, tid);
+            const char *name = tbx ? tbx_names[tid] : bcf_hdr_id2name(hdr, tid);
             uint64_t mapped = 0, unmapped = 0;
             int has_stat = (hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0);
             add_index_entry(bind, name, tid, -1, has_stat, mapped, unmapped, 0, 0,
                             index_fmt_to_string(hts_idx_fmt(idx)), index_path);
         }
+        free(tbx_names);
         if (tbx) tbx_destroy(tbx);
         else hts_idx_destroy(idx);
         bcf_hdr_destroy(hdr);
@@ -1013,11 +981,7 @@ static void read_hts_index_bind(duckdb_bind_info info) {
         tbx_t *tbx = tbx_index_load3(file_path, index_path, flags);
         if (!tbx) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load tabix index");
-            destroy_hts_index_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load tabix index");
             return;
         }
         capture_index_meta(bind, tbx->idx);
@@ -1036,11 +1000,7 @@ static void read_hts_index_bind(duckdb_bind_info info) {
         faidx_t *fai = fai_load3_format(file_path, index_path, NULL, 0, ffmt);
         if (!fai) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load FASTA/FASTQ index");
-            destroy_hts_index_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load FASTA/FASTQ index");
             return;
         }
         int nseq = faidx_nseq(fai);
@@ -1054,9 +1014,10 @@ static void read_hts_index_bind(duckdb_bind_info info) {
     }
 
     hts_close(fp);
-    duckdb_free(file_path);
-    if (format_hint) duckdb_free(format_hint);
-    if (index_path) duckdb_free(index_path);
+}
+
+static void read_hts_index_bind(duckdb_bind_info info) {
+    if (!bind_hts_meta_options(info, 0)) return;
 
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -1077,17 +1038,11 @@ static void read_hts_index_bind(duckdb_bind_info info) {
     duckdb_destroy_logical_type(&bigint_type);
     duckdb_destroy_logical_type(&blob_type);
 
-    duckdb_bind_set_bind_data(info, bind, destroy_hts_index_bind);
-}
-
-static void read_hts_index_init(duckdb_init_info info) {
-    hts_index_init_t *init = (hts_index_init_t *)calloc(1, sizeof(hts_index_init_t));
-    duckdb_init_set_init_data(info, init, destroy_hts_index_init);
 }
 
 static void read_hts_index_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    hts_index_bind_t *bind = (hts_index_bind_t *)duckdb_function_get_bind_data(info);
-    hts_index_init_t *init = (hts_index_init_t *)duckdb_function_get_init_data(info);
+    hts_index_data_t *init = duckdb_function_get_init_data(info);
+    const hts_index_data_t *bind = init;
 
     if (!bind || !init || bind->n_entries <= 0) {
         duckdb_data_chunk_set_size(output, 0);
@@ -1204,19 +1159,14 @@ typedef struct {
 } hts_index_span_entry_t;
 
 typedef struct {
-    char *file_path;
-    char *format_hint;
     char *file_format;
     char *compression;
     hts_index_span_entry_t *entries;
     int64_t n_entries;
     uint8_t *meta;
     uint32_t meta_len;
-} hts_index_spans_bind_t;
-
-typedef struct {
     int64_t offset;
-} hts_index_spans_init_t;
+} hts_index_spans_data_t;
 
 static void free_index_span_entries(hts_index_span_entry_t *entries, int64_t n) {
     if (!entries) return;
@@ -1228,11 +1178,9 @@ static void free_index_span_entries(hts_index_span_entry_t *entries, int64_t n) 
     free(entries);
 }
 
-static void destroy_hts_index_spans_bind(void *data) {
-    hts_index_spans_bind_t *bind = (hts_index_spans_bind_t *)data;
+static void destroy_hts_index_spans_data(void *data) {
+    hts_index_spans_data_t *bind = data;
     if (!bind) return;
-    free(bind->file_path);
-    free(bind->format_hint);
     free(bind->file_format);
     free(bind->compression);
     free_index_span_entries(bind->entries, bind->n_entries);
@@ -1240,11 +1188,7 @@ static void destroy_hts_index_spans_bind(void *data) {
     free(bind);
 }
 
-static void destroy_hts_index_spans_init(void *data) {
-    if (data) free(data);
-}
-
-static void capture_index_spans_meta(hts_index_spans_bind_t *bind, hts_idx_t *idx) {
+static void capture_index_spans_meta(hts_index_spans_data_t *bind, hts_idx_t *idx) {
     if (!bind || !idx) return;
     uint32_t meta_len = 0;
     uint8_t *meta = hts_idx_get_meta(idx, &meta_len);
@@ -1268,7 +1212,7 @@ static void index_bin_interval(const duckhts_idx_view_t *idx, int bin, int64_t s
     if (seq_end) *seq_end = (int64_t)end;
 }
 
-static void add_index_span_entry(hts_index_spans_bind_t *bind, const char *seqname, int64_t tid,
+static void add_index_span_entry(hts_index_spans_data_t *bind, const char *seqname, int64_t tid,
                                  int has_bin, int64_t bin,
                                  int has_chunk_beg_vo, uint64_t chunk_beg_vo,
                                  int has_chunk_end_vo, uint64_t chunk_end_vo,
@@ -1325,7 +1269,7 @@ static int compare_index_span_entries(const void *lhs_void, const void *rhs_void
     return 0;
 }
 
-static void add_index_chunk_rows(hts_index_spans_bind_t *bind, const duckhts_idx_view_t *idx_view,
+static void add_index_chunk_rows(hts_index_spans_data_t *bind, const duckhts_idx_view_t *idx_view,
                                  const char *seqname, int64_t tid, int64_t seq_length,
                                  int has_stat, uint64_t mapped, uint64_t unmapped,
                                  int has_n_no_coor, uint64_t n_no_coor,
@@ -1384,49 +1328,22 @@ static void add_index_chunk_rows(hts_index_spans_bind_t *bind, const duckhts_idx
     }
 }
 
-static void read_hts_index_spans_bind(duckdb_bind_info info) {
-    duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
-    char *file_path = duckdb_get_varchar(path_val);
-    duckdb_destroy_value(&path_val);
-
-    if (!file_path || strlen(file_path) == 0) {
-        duckdb_bind_set_error(info, "read_hts_index_spans requires a file path");
-        if (file_path) duckdb_free(file_path);
-        return;
-    }
-
-    char *format_hint = NULL;
-    duckdb_value fmt_val = duckdb_bind_get_named_parameter(info, "format");
-    if (fmt_val && !duckdb_is_null_value(fmt_val)) {
-        format_hint = duckdb_get_varchar(fmt_val);
-    }
-    if (fmt_val) duckdb_destroy_value(&fmt_val);
-
-    char *index_path = NULL;
-    duckdb_value idx_val = duckdb_bind_get_named_parameter(info, "index_path");
-    if (idx_val && !duckdb_is_null_value(idx_val)) {
-        index_path = duckdb_get_varchar(idx_val);
-    }
-    if (idx_val) duckdb_destroy_value(&idx_val);
-
-    hts_index_spans_bind_t *bind = (hts_index_spans_bind_t *)calloc(1, sizeof(hts_index_spans_bind_t));
+static void read_hts_index_spans_init(duckdb_init_info info) {
+    const hts_meta_options_t *options = duckdb_init_get_bind_data(info);
+    const char *file_path = options->file_path;
+    const char *format_hint = options->format_hint;
+    const char *index_path = options->index_path;
+    hts_index_spans_data_t *bind = calloc(1, sizeof(*bind));
     if (!bind) {
-        duckdb_bind_set_error(info, "Out of memory");
-        if (file_path) duckdb_free(file_path);
-        if (format_hint) duckdb_free(format_hint);
-        if (index_path) duckdb_free(index_path);
+        duckdb_init_set_error(info, "Out of memory");
         return;
     }
-    bind->file_path = dup_str(file_path);
-    bind->format_hint = format_hint ? dup_str(format_hint) : NULL;
+    duckdb_init_set_init_data(info, bind, destroy_hts_index_spans_data);
+    duckdb_init_set_max_threads(info, 1);
 
     htsFile *fp = hts_open(file_path, "r");
     if (!fp) {
-        duckdb_bind_set_error(info, "Failed to open file for index reading");
-        destroy_hts_index_spans_bind(bind);
-        duckdb_free(file_path);
-        if (format_hint) duckdb_free(format_hint);
-        if (index_path) duckdb_free(index_path);
+        duckdb_init_set_error(info, "Failed to open file for index reading");
         return;
     }
 
@@ -1442,11 +1359,7 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         sam_hdr_t *hdr = sam_hdr_read(fp);
         if (!hdr) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to read SAM/BAM/CRAM header");
-            destroy_hts_index_spans_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to read SAM/BAM/CRAM header");
             return;
         }
 
@@ -1455,11 +1368,7 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         if (!idx) {
             sam_hdr_destroy(hdr);
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load index for SAM/BAM/CRAM file");
-            destroy_hts_index_spans_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load index for SAM/BAM/CRAM file");
             return;
         }
 
@@ -1486,11 +1395,7 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         bcf_hdr_t *hdr = bcf_hdr_read(fp);
         if (!hdr) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to read VCF/BCF header");
-            destroy_hts_index_spans_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to read VCF/BCF header");
             return;
         }
 
@@ -1505,11 +1410,7 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         if (!idx) {
             bcf_hdr_destroy(hdr);
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load index for VCF/BCF file");
-            destroy_hts_index_spans_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load index for VCF/BCF file");
             return;
         }
 
@@ -1519,10 +1420,18 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         const char **tbx_names = NULL;
         int tbx_nseq = 0;
         if (tbx) tbx_names = tbx_seqnames(tbx, &tbx_nseq);
+        if (tbx && (tbx_nseq != nseq || (nseq > 0 && !tbx_names))) {
+            free(tbx_names);
+            tbx_destroy(tbx);
+            bcf_hdr_destroy(hdr);
+            hts_close(fp);
+            duckdb_init_set_error(info, "Failed to read tabix sequence names");
+            return;
+        }
         for (int tid = 0; tid < nseq; tid++) {
             const char *name = NULL;
             int64_t len = -1;
-            if (tbx && tbx_names && tid < tbx_nseq) {
+            if (tbx) {
                 name = tbx_names[tid];
             } else {
                 name = bcf_hdr_id2name(hdr, tid);
@@ -1546,11 +1455,7 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         tbx_t *tbx = tbx_index_load3(file_path, index_path, flags);
         if (!tbx) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load tabix index");
-            destroy_hts_index_spans_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load tabix index");
             return;
         }
         capture_index_spans_meta(bind, tbx->idx);
@@ -1572,11 +1477,7 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         faidx_t *fai = fai_load3_format(file_path, index_path, NULL, 0, ffmt);
         if (!fai) {
             hts_close(fp);
-            duckdb_bind_set_error(info, "Failed to load FASTA/FASTQ index");
-            destroy_hts_index_spans_bind(bind);
-            duckdb_free(file_path);
-            if (format_hint) duckdb_free(format_hint);
-            if (index_path) duckdb_free(index_path);
+            duckdb_init_set_error(info, "Failed to load FASTA/FASTQ index");
             return;
         }
         const char *index_type = (kind == HTS_KIND_FASTQ) ? "FQI" : "FAI";
@@ -1599,14 +1500,14 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
     }
 
     hts_close(fp);
-    duckdb_free(file_path);
-    if (format_hint) duckdb_free(format_hint);
-    if (index_path) duckdb_free(index_path);
-
     if (bind->n_entries > 1) {
         qsort(bind->entries, (size_t)bind->n_entries, sizeof(hts_index_span_entry_t),
               compare_index_span_entries);
     }
+}
+
+static void read_hts_index_spans_bind(duckdb_bind_info info) {
+    if (!bind_hts_meta_options(info, 0)) return;
 
     duckdb_logical_type varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -1634,18 +1535,11 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
     duckdb_destroy_logical_type(&ubigint_type);
     duckdb_destroy_logical_type(&blob_type);
 
-    duckdb_bind_set_bind_data(info, bind, destroy_hts_index_spans_bind);
-}
-
-static void read_hts_index_spans_init(duckdb_init_info info) {
-    hts_index_spans_init_t *init =
-        (hts_index_spans_init_t *)calloc(1, sizeof(hts_index_spans_init_t));
-    duckdb_init_set_init_data(info, init, destroy_hts_index_spans_init);
 }
 
 static void read_hts_index_spans_scan(duckdb_function_info info, duckdb_data_chunk output) {
-    hts_index_spans_bind_t *bind = (hts_index_spans_bind_t *)duckdb_function_get_bind_data(info);
-    hts_index_spans_init_t *init = (hts_index_spans_init_t *)duckdb_function_get_init_data(info);
+    hts_index_spans_data_t *init = duckdb_function_get_init_data(info);
+    const hts_index_spans_data_t *bind = init;
 
     if (!bind || !init || bind->n_entries <= 0) {
         duckdb_data_chunk_set_size(output, 0);
