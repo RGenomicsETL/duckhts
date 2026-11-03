@@ -1524,6 +1524,40 @@ static int bcf_fill_gt_string(duckdb_vector vec, idx_t row_count,
         duckhts_bcf_field_null(vec, row_count, 0);
         return 1;
     }
+    /* HTSlib's formatter recognizes GT's zero encoding but not BCF integer
+     * missing sentinels. Normalize only this worker-owned sample's GT values
+     * before formatting, preserving vector-end padding and phase bits. */
+    int width;
+    int32_t missing, vector_end;
+    switch (gt->type) {
+        case BCF_BT_INT8:
+            width = 1;
+            missing = bcf_int8_missing;
+            vector_end = bcf_int8_vector_end;
+            break;
+        case BCF_BT_INT16:
+            width = 2;
+            missing = bcf_int16_missing;
+            vector_end = bcf_int16_vector_end;
+            break;
+        case BCF_BT_INT32:
+            width = 4;
+            missing = bcf_int32_missing;
+            vector_end = bcf_int32_vector_end;
+            break;
+        case BCF_BT_NULL:
+            width = 0;
+            missing = vector_end = 0;
+            break;
+        default:
+            return -1;
+    }
+    uint8_t *value = width ? gt->p + (size_t)sample_idx * gt->size : NULL;
+    for (int i = 0; width && i < gt->n; i++, value += width) {
+        int32_t allele = width == 1 ? le_to_i8(value) : width == 2 ? le_to_i16(value) : le_to_i32(value);
+        if (allele == vector_end) break;
+        if (allele == missing) memset(value, 0, (size_t)width);
+    }
     init->gt_kstr.l = 0;
     /* HTSlib owns the GT text convention, including VCF 4.4's leading phase
      * marker. A failed formatter must never publish a partial genotype. */
