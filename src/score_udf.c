@@ -1346,24 +1346,59 @@ static int score_record_passes_filter_list(const bcf_hdr_t *hdr, bcf1_t *rec, co
     return pass;
 }
 
-static int score_region_name2id(void *hdr, const char *name) {
-    return bcf_hdr_name2id((bcf_hdr_t *)hdr, name);
+typedef struct {
+    const bcf_hdr_t *hdr;
+    int last_lookup_missing; /* the most recent contig lookup found no header contig */
+} score_region_lookup_t;
+
+static int score_region_name2id(void *data, const char *name) {
+    score_region_lookup_t *lookup = (score_region_lookup_t *)data;
+    int id = bcf_hdr_name2id(lookup->hdr, name);
+    lookup->last_lookup_missing = id < 0;
+    return id;
+}
+
+/* Start of the next list item after `item`, splitting like hts_parse_region with
+ * HTS_PARSE_LIST: a braced name ends at its closing brace, then the item at the next
+ * comma. Returns NULL for an unterminated brace. */
+static const char *score_region_next_item(const char *item) {
+    const char *from = item;
+    const char *comma;
+    if (*item == '{') {
+        from = strchr(item, '}');
+        if (!from) return NULL;
+    }
+    comma = strchr(from, ',');
+    return comma ? comma + 1 : item + strlen(item);
 }
 
 static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const char *regions, int overlap_mode) {
     const char *cursor = regions;
     int match = 0;
     hts_pos_t rec_end = rec->pos + (rec->rlen > 0 ? rec->rlen : 1);
+    score_region_lookup_t lookup = { hdr, 0 };
 
     if (!regions || !regions[0]) return 1;
     while (*cursor) {
         int tid;
         hts_pos_t beg, end;
+        const char *next;
         /* Use HTSlib's bcftools-style coordinates and braced contig quoting,
          * including names containing colons or commas. */
-        cursor = hts_parse_region(cursor, &tid, &beg, &end, score_region_name2id,
-                                  (void *)hdr, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD);
-        if (!cursor) return -1;
+        lookup.last_lookup_missing = 0;
+        next = hts_parse_region(cursor, &tid, &beg, &end, score_region_name2id,
+                                &lookup, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD);
+        if (!next) {
+            /* A contig absent from this VCF matches no record, as in the htslib
+             * synced reader; malformed items, such as bad coordinates or an
+             * unterminated brace, remain errors. */
+            if (tid != -1 || !lookup.last_lookup_missing) return -1;
+            next = score_region_next_item(cursor);
+            if (!next) return -1;
+            cursor = next;
+            continue;
+        }
+        cursor = next;
         if (tid == rec->rid && rec->pos < end && (overlap_mode == 0 ? rec->pos >= beg : rec_end > beg)) {
             match = 1;
         }

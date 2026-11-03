@@ -77,3 +77,42 @@ FROM bcftools_score('test/data/score_hla.vcf', 'test/data/score_hla_summary.tsv'
 ORDER BY SAMPLE;
 ----
 S1	-0.4
+
+# A contig absent from the VCF header matches no record instead of failing the query,
+# so a genome-wide region list can be applied to a single-contig VCF.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK', regions := '2,1')
+ORDER BY SAMPLE;
+----
+S1	1.8
+S2	0.1
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK', targets := '1:100-100,chrZ:5-9')
+ORDER BY SAMPLE;
+----
+S1	0.0
+S2	0.5
+
+statement ok
+COPY (SELECT * FROM (VALUES ('chrZ', 0, 1000), ('1', 0, 1000)) t(c, s, e)) TO '__WORKING_DIRECTORY__/test/sql/score_absent_contig.bed' (HEADER false, DELIMITER '\t');
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                   use := 'GT', columns := 'PLINK', regions_file := '__WORKING_DIRECTORY__/test/sql/score_absent_contig.bed')
+ORDER BY SAMPLE;
+----
+S1	1.8
+S2	0.1
+
+# An unterminated brace is still a malformed region.
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                             use := 'GT', columns := 'PLINK', regions := '{1');
+----
+invalid region/target expression
