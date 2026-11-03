@@ -397,6 +397,14 @@ static void reverse_variantkey_scalar(duckdb_function_info info, duckdb_data_chu
         chrom_code = extract_variantkey_chrom(vk);
         pos0 = extract_variantkey_pos(vk);
         refalt_code = extract_variantkey_refalt(vk);
+        if (!(refalt_code & 1)) {
+            uint32_t ref_length = (refalt_code >> 27) & 15;
+            uint32_t alt_length = (refalt_code >> 23) & 15;
+            if (ref_length == 0 || alt_length == 0 || ref_length + alt_length > 11) {
+                duckdb_scalar_function_set_error(info, "reverse_variantkey: invalid reversible REF/ALT lengths");
+                return;
+            }
+        }
         decode_chrom(chrom_code, chrom_buf);
         decoded = decode_refalt(refalt_code, ref_buf, &ref_len, alt_buf, &alt_len);
         reversible = (decoded > 0);

@@ -4,6 +4,38 @@
 
 require duckhts
 
+# Reversible allele fields must encode two nonempty alleles totaling at most 11 bases.
+statement error
+SELECT reverse_variantkey(2139095040::UBIGINT);
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(encode_variantkey(1, 0, ((11 << 27) | (1 << 23))::UINTEGER));
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(parse_variantkey_hex('0000000060800000'));
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(encode_variantkey(1, 0, ((6 << 27) | (6 << 23))::UINTEGER));
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(0::UBIGINT);
+----
+invalid reversible REF/ALT lengths
+
+query TT
+SELECT rv.ref, rv.alt
+FROM (SELECT reverse_variantkey(variantkey('1', 1, 'AAAAAAAAAA', 'T')) AS rv);
+----
+AAAAAAAAAA	T
+
 query TTTTTTTTTTTTT
 SELECT duckhts_contig_key('chr1'),
        duckhts_contig_key('1'),
