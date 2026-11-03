@@ -711,7 +711,8 @@ static int build_selected_contigs(bam_bin_bind_t *bind,
         }
         if (idx) {
             uint64_t mapped = 0, unmapped = 0;
-            if (hts_idx_get_stat(idx, target_tid, &mapped, &unmapped) == 0) {
+            if (target_tid < hts_idx_nseq(idx) &&
+                hts_idx_get_stat(idx, target_tid, &mapped, &unmapped) == 0) {
                 bind->contigs[0].weight = mapped + unmapped;
             }
         }
@@ -736,7 +737,8 @@ static int build_selected_contigs(bam_bin_bind_t *bind,
         bind->contigs[selected].max_bin = -1;
         if (idx) {
             uint64_t mapped = 0, unmapped = 0;
-            if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0) {
+            if (tid < hts_idx_nseq(idx) &&
+                hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0) {
                 bind->contigs[selected].weight = mapped + unmapped;
             }
         }

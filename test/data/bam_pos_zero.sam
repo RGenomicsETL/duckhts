@@ -1,0 +1,15 @@
+@HD	VN:1.6	SO:coordinate
+@SQ	SN:a	LN:100
+@SQ	SN:b	LN:100
+u1	4	a	1	0	*	*	0	0	A	I
+a1	0	a	1	60	1M	*	0	0	A	I
+a2	0	a	2	60	1M	*	0	0	A	I
+a3	0	a	3	60	1M	*	0	0	A	I
+a4	0	a	4	60	1M	*	0	0	A	I
+a5	0	a	5	60	1M	*	0	0	A	I
+u2	4	b	1	0	*	*	0	0	A	I
+b1	0	b	1	60	1M	*	0	0	A	I
+b2	0	b	2	60	1M	*	0	0	A	I
+b3	0	b	3	60	1M	*	0	0	A	I
+b4	0	b	4	60	1M	*	0	0	A	I
+b5	0	b	5	60	1M	*	0	0	A	I

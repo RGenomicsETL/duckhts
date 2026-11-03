@@ -170,7 +170,9 @@ static int fast_idxstats_to_file(samFile *fp, sam_hdr_t *header, const char *pat
     for (int i = 0; i < sam_hdr_nref(header); ++i) {
         mapped = 0;
         unmapped = 0;
-        hts_idx_get_stat(idx, i, &mapped, &unmapped);
+        if (i < hts_idx_nseq(idx)) {
+            hts_idx_get_stat(idx, i, &mapped, &unmapped);
+        }
         if (fprintf(out, "%s\t%" PRId64 "\t%" PRIu64 "\t%" PRIu64 "\n",
                     sam_hdr_tid2name(header, i),
                     (int64_t)sam_hdr_tid2len(header, i),
