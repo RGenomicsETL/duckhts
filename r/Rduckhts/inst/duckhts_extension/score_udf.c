@@ -1348,14 +1348,27 @@ static int score_record_passes_filter_list(const bcf_hdr_t *hdr, bcf1_t *rec, co
 
 typedef struct {
     const bcf_hdr_t *hdr;
-    int last_lookup_missing; /* the most recent contig lookup found no header contig */
+    char *missing_name; /* owned copy of the most recent name absent from the header */
+    int lookup_failed;  /* the most recent lookup found no header contig */
+    int out_of_memory;
 } score_region_lookup_t;
 
 static int score_region_name2id(void *data, const char *name) {
     score_region_lookup_t *lookup = (score_region_lookup_t *)data;
     int id = bcf_hdr_name2id(lookup->hdr, name);
-    lookup->last_lookup_missing = id < 0;
+    lookup->lookup_failed = id < 0;
+    if (id < 0) {
+        free(lookup->missing_name);
+        lookup->missing_name = strdup(name);
+        if (!lookup->missing_name) lookup->out_of_memory = 1;
+    }
     return id;
+}
+
+/* Resolves only the recorded missing name, so a second parse checks the
+ * coordinates of an item whose contig the header lacks. */
+static int score_region_missing_name2id(void *data, const char *name) {
+    return strcmp((const char *)data, name) == 0 ? 0 : -1;
 }
 
 /* Start of the next list item after `item`, splitting like hts_parse_region with
@@ -1376,7 +1389,7 @@ static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const 
     const char *cursor = regions;
     int match = 0;
     hts_pos_t rec_end = rec->pos + (rec->rlen > 0 ? rec->rlen : 1);
-    score_region_lookup_t lookup = { hdr, 0 };
+    score_region_lookup_t lookup = { hdr, NULL, 0, 0 };
 
     if (!regions || !regions[0]) return 1;
     while (*cursor) {
@@ -1385,16 +1398,29 @@ static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const 
         const char *next;
         /* Use HTSlib's bcftools-style coordinates and braced contig quoting,
          * including names containing colons or commas. */
-        lookup.last_lookup_missing = 0;
+        lookup.lookup_failed = 0;
         next = hts_parse_region(cursor, &tid, &beg, &end, score_region_name2id,
                                 &lookup, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD);
+        if (lookup.out_of_memory) {
+            match = -1;
+            break;
+        }
         if (!next) {
             /* A contig absent from this VCF matches no record, as in the htslib
-             * synced reader; malformed items, such as bad coordinates or an
-             * unterminated brace, remain errors. */
-            if (tid != -1 || !lookup.last_lookup_missing) return -1;
+             * synced reader. hts_parse_region stops at the failed lookup, so parse
+             * the item again with that name resolved: bad coordinates or an
+             * unterminated brace remain errors. */
+            if (tid != -1 || !lookup.lookup_failed || !lookup.missing_name ||
+                !hts_parse_region(cursor, &tid, &beg, &end, score_region_missing_name2id,
+                                  lookup.missing_name, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD)) {
+                match = -1;
+                break;
+            }
             next = score_region_next_item(cursor);
-            if (!next) return -1;
+            if (!next) {
+                match = -1;
+                break;
+            }
             cursor = next;
             continue;
         }
@@ -1403,6 +1429,7 @@ static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const 
             match = 1;
         }
     }
+    free(lookup.missing_name);
     return match;
 }
 

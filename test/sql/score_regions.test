@@ -116,3 +116,10 @@ SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summa
                              use := 'GT', columns := 'PLINK', regions := '{1');
 ----
 invalid region/target expression
+
+# An absent contig is skipped only when the rest of its item parses.
+statement error
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv',
+                             use := 'GT', columns := 'PLINK', regions := '1,chrZ:not-a-position');
+----
+invalid region/target expression
