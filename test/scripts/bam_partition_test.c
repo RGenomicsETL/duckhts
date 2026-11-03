@@ -221,7 +221,7 @@ static int check_ownership_rule(void) {
     return 0;
 }
 
-/* argv[1] is a writable directory owned by the build, such as cmake_build/release. */
+/* argv[1] is a writable scratch directory; the Makefile passes a mktemp -d directory. */
 int main(int argc, char **argv) {
     char bam_path[4096];
     int rc = 1;
