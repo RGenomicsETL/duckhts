@@ -2916,7 +2916,7 @@ table
 
 ### Execution
 
-The scan runs when the query executes, not at bind: binding checks only that the file opens and a requested chrom exists, so EXPLAIN and PREPARE read no alignments and a prepared statement returns the same bins at every execution. With an index, DuckDB worker threads claim one reference each, heaviest first, so SET threads bounds the parallelism; the reads without coordinates are one more claim, and the streaming duplicate state is stitched across references in reference order after every claim finishes. Without an index the file is one sequential scan.
+The scan runs when the query executes, not at bind: binding checks only that the file opens and a requested chrom exists, so EXPLAIN and PREPARE read no alignments and a prepared statement returns the same bins at every execution. With an index, DuckDB worker threads claim one reference each, heaviest first, so SET threads bounds the parallelism; the reads without coordinates are one more claim. Streaming deduplication instead uses one worker visiting selected references in header order. Without an index the file is one sequential scan. Streaming deduplication preserves previous position and mate position across selected references, including empty references, and updates this state before applying the MAPQ threshold.
 
 ### Unmapped records
 
