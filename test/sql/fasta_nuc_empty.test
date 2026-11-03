@@ -1,0 +1,12 @@
+require duckhts
+
+statement ok
+COPY (SELECT '' WHERE false) TO '__TEST_DIR__/empty_nuc.fa' (FORMAT CSV, HEADER false);
+
+statement ok
+COPY (SELECT '' WHERE false) TO '__TEST_DIR__/empty_nuc.fa.fai' (FORMAT CSV, HEADER false);
+
+query I
+SELECT count(*) FROM fasta_nuc('__TEST_DIR__/empty_nuc.fa', bin_width := 100);
+----
+0

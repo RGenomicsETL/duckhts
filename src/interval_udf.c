@@ -865,8 +865,12 @@ static void fasta_nuc_init(duckdb_init_info info) {
         } else {
             init->current_tid = 0;
             init->next_bin_start = 0;
-            const char *seqname = faidx_iseq(init->fai, 0);
-            init->current_seq_end_exclusive = faidx_seq_len64(init->fai, seqname);
+            if (faidx_nseq(init->fai) == 0) {
+                init->done = true;
+            } else {
+                const char *seqname = faidx_iseq(init->fai, 0);
+                init->current_seq_end_exclusive = faidx_seq_len64(init->fai, seqname);
+            }
         }
     }
 
