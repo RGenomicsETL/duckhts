@@ -364,7 +364,12 @@ vep_schema_t* vep_schema_parse(const bcf_hdr_t* hdr, const char* tag, const char
     
     int n_fields = 0;
     const char* format = parse_format_string(description, &n_fields);
-    if (!format || n_fields == 0 || n_fields > VEP_MAX_FIELDS) return NULL;
+    if (!format || n_fields == 0) return NULL;
+    /* Distinguish a present but unsupported schema from absent annotations. */
+    if (n_fields > VEP_MAX_FIELDS) {
+        errno = E2BIG;
+        return NULL;
+    }
     
     char** field_names = split_format_fields(format, n_fields);
     if (!field_names) return NULL;

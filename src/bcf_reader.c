@@ -17,6 +17,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <math.h>
 #include <stdbool.h>
 #include <limits.h>
+#include <errno.h>
 #include <strings.h>
 
 // htslib headers
@@ -1056,7 +1057,15 @@ static void bcf_read_bind(duckdb_bind_info info) {
     // -------------------------------------------------------------------------
     // VEP/CSQ/BCSQ/ANN fields (auto-detected)
     // -------------------------------------------------------------------------
+    errno = 0;
     bind->vep_schema = vep_schema_parse(hdr, NULL, bind->additional_csq_column_types);
+    if (!bind->vep_schema && errno == E2BIG) {
+        char error[128];
+        snprintf(error, sizeof(error), "read_bcf: header exceeds the supported annotation field count (%d)",
+                 VEP_MAX_FIELDS);
+        duckdb_bind_set_error(info, error);
+        goto bind_error;
+    }
     if (bind->vep_schema) {
         bind->n_vep_fields = bind->vep_schema->n_fields;
         if (bind->n_vep_fields > INT_MAX - col_idx) goto bind_too_many_columns;
