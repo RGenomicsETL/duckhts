@@ -40,6 +40,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 
 #include "include/hts_io_tuning.h"
+#include "include/duckhts_errors.h"
 #include "include/duckdb_alloc.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
@@ -441,11 +442,8 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     /* Verify the file opens and is the expected format */
     samFile *fp = sam_open(file_path, "r");
     if (!fp) {
-        kstring_t message = {0, 0, NULL};
-        int result = ksprintf(&message, "%s: Failed to open file: %s",
-                             is_fastq ? "read_fastq" : "read_fasta", file_path);
-        duckdb_bind_set_error(info, result < 0 ? "sequence reader: out of memory reporting open failure" : message.s);
-        free(message.s);
+        duckhts_bind_errorf(info, "%s: Failed to open file: %s",
+                            is_fastq ? "read_fastq" : "read_fasta", file_path);
         duckdb_free(file_path);
         return;
     }
@@ -677,11 +675,8 @@ static void fastq_read_bind(duckdb_bind_info info) { seq_read_bind(info, 1); }
 
 static void seq_init_path_error(duckdb_init_info info, const seq_bind_data_t *bind,
                                 const char *detail, const char *path) {
-    kstring_t message = {0, 0, NULL};
-    int result = ksprintf(&message, "%s: %s: %s",
-                         bind->is_fastq ? "read_fastq" : "read_fasta", detail, path);
-    duckdb_init_set_error(info, result < 0 ? "sequence reader: out of memory reporting input failure" : message.s);
-    free(message.s);
+    duckhts_init_errorf(info, "%s: %s: %s", bind->is_fastq ? "read_fastq" : "read_fasta", detail,
+                        path);
 }
 
 static void seq_read_init(duckdb_init_info info) {
@@ -877,12 +872,9 @@ static void seq_read_init(duckdb_init_info info) {
 
 static void seq_mate_mismatch(duckdb_function_info info, const seq_bind_data_t *bind,
                               const char *first_name, const char *second_name) {
-    kstring_t message = {0, 0, NULL};
-    int result = ksprintf(&message,
-                         "read_fastq: mate files out of sync (QNAME mismatch: '%s' vs '%s') in '%s' and '%s'",
-                         first_name, second_name, bind->file_path, bind->mate_path);
-    duckdb_function_set_error(info, result < 0 ? "read_fastq: out of memory reporting mate mismatch" : message.s);
-    free(message.s);
+    duckhts_scan_errorf(info,
+                        "read_fastq: mate files out of sync (QNAME mismatch: '%s' vs '%s') in '%s' and '%s'",
+                        first_name, second_name, bind->file_path, bind->mate_path);
 }
 
 static uint8_t fastq_stored_quality(char ascii_quality) {
@@ -1215,11 +1207,8 @@ static void seq_fasta_count_only_function(duckdb_function_info info,
 
 static void seq_alignment_read_error(duckdb_function_info info, seq_bind_data_t *bind,
                                      const char *path, int status) {
-    kstring_t message = {0, 0, NULL};
-    int result = ksprintf(&message, "%s: failed to read '%s' (htslib status %d)",
-                         bind->is_fastq ? "read_fastq" : "read_fasta", path, status);
-    duckdb_function_set_error(info, result < 0 ? "sequence reader: out of memory reporting read failure" : message.s);
-    free(message.s);
+    duckhts_scan_errorf(info, "%s: failed to read '%s' (htslib status %d)",
+                        bind->is_fastq ? "read_fastq" : "read_fasta", path, status);
 }
 
 static void seq_read_function(duckdb_function_info info, duckdb_data_chunk output) {

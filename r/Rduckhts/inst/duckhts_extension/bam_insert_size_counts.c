@@ -107,9 +107,8 @@ static samFile *isize_open(const isize_bind_t *bind) {
     /* Riker sam/pair_orientation.rs:43-51 needs CIGAR only for the reverse
      * read's end. CRAM can omit SEQ, QUAL, AUX, QNAME and MAPQ entirely. */
     if ((bind->reference && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) ||
-        (hts_get_format(fp)->format == cram &&
-         hts_set_opt(fp, CRAM_OPT_REQUIRED_FIELDS,
-                     SAM_FLAG | SAM_RNAME | SAM_POS | SAM_CIGAR | SAM_RNEXT | SAM_PNEXT | SAM_TLEN) < 0) ||
+        duckhts_cram_require_fields(fp, SAM_FLAG | SAM_RNAME | SAM_POS | SAM_CIGAR |
+                                        SAM_RNEXT | SAM_PNEXT | SAM_TLEN) < 0 ||
         (bind->decompression_threads && hts_set_threads(fp, bind->decompression_threads) < 0)) {
         sam_close(fp);
         return NULL;

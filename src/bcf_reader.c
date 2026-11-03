@@ -36,6 +36,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckhts_column_names.h"
 #include "include/duckhts_bind_params.h"
 #include "include/duckhts_attributes.h"
+#include "include/duckhts_errors.h"
 #include "include/regions_bind.h"
 #include "include/bcf_scan.h"
 #include "include/bcf_field_vector.h"
@@ -795,7 +796,6 @@ static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
     kstring_t name = KS_INITIALIZE;
     const char *claimed = NULL;
     char detail[512];
-    char message[640];
     va_list args;
     va_start(args, fmt);
     int written = kvsprintf(&name, fmt, args);
@@ -804,9 +804,8 @@ static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
     if (rc == 0) {
         duckdb_bind_add_result_column(info, claimed, type);
     } else if (rc == -1) {
-        snprintf(message, sizeof(message),
-                 "read_bcf: %s; set duplicate_names := 'suffix' to rename the later column", detail);
-        duckdb_bind_set_error(info, message);
+        duckhts_bind_errorf(info, "read_bcf: %s; set duplicate_names := 'suffix' to rename the later column",
+                            detail);
     } else {
         duckdb_bind_set_error(info, "read_bcf: out of memory declaring columns");
     }

@@ -105,6 +105,7 @@ typedef struct {
 typedef struct {
     uint64_t *counts;
     size_t len;
+    size_t used;
     uint64_t n;
 } mosdepth_count_stat_t;
 
@@ -228,6 +229,7 @@ static void count_stat_destroy(mosdepth_count_stat_t *stat) {
     free(stat->counts);
     stat->counts = NULL;
     stat->len = 0;
+    stat->used = 0;
     stat->n = 0;
 }
 
@@ -236,7 +238,8 @@ static void count_stat_clear(mosdepth_count_stat_t *stat) {
         if (stat) stat->n = 0;
         return;
     }
-    memset(stat->counts, 0, stat->len * sizeof(uint64_t));
+    memset(stat->counts, 0, stat->used * sizeof(uint64_t));
+    stat->used = 0;
     stat->n = 0;
 }
 
@@ -245,6 +248,7 @@ static inline void count_stat_add(mosdepth_count_stat_t *stat, uint32_t depth) {
     if (!stat || !stat->counts || stat->len == 0) return;
     idx = (size_t)depth;
     if (idx >= stat->len) idx = stat->len - 1;
+    if (idx >= stat->used) stat->used = idx + 1;
     stat->counts[idx] += 1;
     stat->n += 1;
 }
@@ -255,7 +259,7 @@ static uint32_t count_stat_median(const mosdepth_count_stat_t *stat) {
 
     if (!stat || !stat->counts || stat->len == 0 || stat->n == 0) return 0;
     stop_n = (uint64_t)(0.5 + (double)stat->n * 0.5);
-    for (size_t i = 0; i < stat->len; i++) {
+    for (size_t i = 0; i < stat->used; i++) {
         cum += stat->counts[i];
         if (cum >= stop_n) return (uint32_t)i;
     }

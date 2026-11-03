@@ -36,6 +36,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/bed_line.h"
 #include "include/hts_io_tuning.h"
+#include "include/duckhts_errors.h"
 
 
 enum {
@@ -462,12 +463,10 @@ static inline int next_bed_line(duckdb_function_info info, bed_init_data_t *init
             init->finished = true;
             if (ret < -1) {
                 bed_bind_data_t *bind = duckdb_function_get_bind_data(info);
-                kstring_t message = {0, 0, NULL};
-                int result = ksprintf(&message, "read_bed: failed to read '%s' after %s %lld (htslib status %d)",
-                         bind->file_path, init->itr ? "region record" : "line",
-                         (long long)init->line_number, ret);
-                duckdb_function_set_error(info, result < 0 ? "read_bed: out of memory reporting read failure" : message.s);
-                free(message.s);
+                duckhts_scan_errorf(info,
+                                    "read_bed: failed to read '%s' after %s %lld (htslib status %d)",
+                                    bind->file_path, init->itr ? "region record" : "line",
+                                    (long long)init->line_number, ret);
                 return ret;
             }
             return 0;
@@ -998,12 +997,10 @@ static int next_fasta_nuc_bed_interval(duckdb_function_info info, fasta_nuc_init
         if (ret < 0) {
             init->bed_finished = true;
             if (ret < -1) {
-                kstring_t message = {0, 0, NULL};
-                int result = ksprintf(&message, "fasta_nuc: failed to read BED '%s' after %s %llu (htslib status %d)",
-                         init->bind->bed_path, init->bed_itr ? "region record" : "line",
-                         (unsigned long long)init->bed_line_number, ret);
-                duckdb_function_set_error(info, result < 0 ? "fasta_nuc: out of memory reporting read failure" : message.s);
-                free(message.s);
+                duckhts_scan_errorf(info,
+                                    "fasta_nuc: failed to read BED '%s' after %s %llu (htslib status %d)",
+                                    init->bind->bed_path, init->bed_itr ? "region record" : "line",
+                                    (unsigned long long)init->bed_line_number, ret);
                 return -1;
             }
             return 0;
@@ -1022,12 +1019,10 @@ static int next_fasta_nuc_bed_interval(duckdb_function_info info, fasta_nuc_init
         }
         char *chrom_buf = (char *)malloc((size_t)len0 + 1);
         if (!chrom_buf) {
-            kstring_t message = {0, 0, NULL};
-            int result = ksprintf(&message, "fasta_nuc: out of memory copying chromosome from BED '%s' at %s %llu",
-                     init->bind->bed_path, init->bed_itr ? "region record" : "line",
-                     (unsigned long long)init->bed_line_number);
-            duckdb_function_set_error(info, result < 0 ? "fasta_nuc: out of memory copying BED chromosome" : message.s);
-            free(message.s);
+            duckhts_scan_errorf(info,
+                                "fasta_nuc: out of memory copying chromosome from BED '%s' at %s %llu",
+                                init->bind->bed_path, init->bed_itr ? "region record" : "line",
+                                (unsigned long long)init->bed_line_number);
             return -1;
         }
         memcpy(chrom_buf, f0, (size_t)len0);

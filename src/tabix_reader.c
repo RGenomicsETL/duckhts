@@ -44,6 +44,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/duckdb_map.h"
 #include "include/hts_io_tuning.h"
+#include "include/duckhts_errors.h"
 #include "include/region_list.h"
 #include "include/named_attribute_columns.h"
 
@@ -1311,10 +1312,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         /* Generic tabix: if indexed, use header/meta settings; otherwise peek */
         htsFile *fp = hts_open(bd->file_path, "r");
         if (!fp) {
-            kstring_t message = {0, 0, NULL};
-            int result = ksprintf(&message, "read_tabix: Cannot open file: %s", bd->file_path);
-            duckdb_bind_set_error(info, result < 0 ? "read_tabix: out of memory reporting open failure" : message.s);
-            free(message.s);
+            duckhts_bind_errorf(info, "read_tabix: Cannot open file: %s", bd->file_path);
             tabix_bind_data_destroy(bd);
             return;
         }
@@ -1361,11 +1359,9 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         hts_close(fp);
         if (tbx) tbx_destroy(tbx);
         if (read_status < -1) {
-            kstring_t message = {0, 0, NULL};
-            int result = ksprintf(&message, "read_tabix: failed to read '%s' during schema discovery (htslib status %d)",
-                                  bd->file_path, read_status);
-            duckdb_bind_set_error(info, result < 0 ? "read_tabix: out of memory reporting read failure" : message.s);
-            free(message.s);
+            duckhts_bind_errorf(info,
+                                "read_tabix: failed to read '%s' during schema discovery (htslib status %d)",
+                                bd->file_path, read_status);
             free(header_candidate);
             tabix_bind_data_destroy(bd);
             return;
@@ -1441,11 +1437,9 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
                 free(l2.s);
                 hts_close(fp2);
                 if (read_status < -1) {
-                    kstring_t message = {0, 0, NULL};
-                    int result = ksprintf(&message, "read_tabix: failed to read '%s' during type inference (htslib status %d)",
-                                          bd->file_path, read_status);
-                    duckdb_bind_set_error(info, result < 0 ? "read_tabix: out of memory reporting read failure" : message.s);
-                    free(message.s);
+                    duckhts_bind_errorf(info,
+                                        "read_tabix: failed to read '%s' during type inference (htslib status %d)",
+                                        bd->file_path, read_status);
                     free(type_state);
                     free(fields);
                     tabix_bind_data_destroy(bd);
@@ -1573,10 +1567,7 @@ static void tabix_init(duckdb_init_info info) {
                        bd->mode == TABIX_MODE_GFF ? "read_gff" : "read_tabix";
     id->fp = hts_open(bd->file_path, "r");
     if (!id->fp) {
-        kstring_t message = {0, 0, NULL};
-        int result = ksprintf(&message, "%s: Cannot open file: %s", name, bd->file_path);
-        duckdb_init_set_error(info, result < 0 ? "tabix reader: out of memory reporting open failure" : message.s);
-        free(message.s);
+        duckhts_init_errorf(info, "%s: Cannot open file: %s", name, bd->file_path);
         tabix_init_data_destroy(id);
         return;
     }
@@ -1595,11 +1586,8 @@ static void tabix_init(duckdb_init_info info) {
 
     if (bd->n_regions > 0) {
         if (!id->tbx) {
-            kstring_t message = {0, 0, NULL};
-            int result = ksprintf(&message, "%s: Region query requested but no tabix index found for: %s",
-                                  name, bd->file_path);
-            duckdb_init_set_error(info, result < 0 ? "tabix reader: out of memory reporting index failure" : message.s);
-            free(message.s);
+            duckhts_init_errorf(info, "%s: Region query requested but no tabix index found for: %s",
+                                name, bd->file_path);
             tabix_init_data_destroy(id);
             return;
         }
@@ -1687,12 +1675,9 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
             if (ret < -1) {
                 const char *name = bd->mode == TABIX_MODE_GTF ? "read_gtf" :
                                    bd->mode == TABIX_MODE_GFF ? "read_gff" : "read_tabix";
-                kstring_t message = {0, 0, NULL};
-                int result = ksprintf(&message, "%s: failed to read '%s' after %s %llu (htslib status %d)",
-                                      name, bd->file_path, id->itr ? "region record" : "line",
-                                      (unsigned long long)id->line_number, ret);
-                duckdb_function_set_error(info, result < 0 ? "tabix reader: out of memory reporting read failure" : message.s);
-                free(message.s);
+                duckhts_scan_errorf(info, "%s: failed to read '%s' after %s %llu (htslib status %d)",
+                                    name, bd->file_path, id->itr ? "region record" : "line",
+                                    (unsigned long long)id->line_number, ret);
                 free(vectors);
                 duckdb_data_chunk_set_size(output, 0);
                 return;

@@ -36,6 +36,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckhts_column_names.h"
 #include "include/duckhts_bind_params.h"
 #include "include/duckhts_attributes.h"
+#include "include/duckhts_errors.h"
 #include "include/regions_bind.h"
 #include "include/bcf_scan.h"
 #include "include/bcf_field_vector.h"
@@ -795,7 +796,6 @@ static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
     kstring_t name = KS_INITIALIZE;
     const char *claimed = NULL;
     char detail[512];
-    char message[640];
     va_list args;
     va_start(args, fmt);
     int written = kvsprintf(&name, fmt, args);
@@ -804,9 +804,8 @@ static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
     if (rc == 0) {
         duckdb_bind_add_result_column(info, claimed, type);
     } else if (rc == -1) {
-        snprintf(message, sizeof(message),
-                 "read_bcf: %s; set duplicate_names := 'suffix' to rename the later column", detail);
-        duckdb_bind_set_error(info, message);
+        duckhts_bind_errorf(info, "read_bcf: %s; set duplicate_names := 'suffix' to rename the later column",
+                            detail);
     } else {
         duckdb_bind_set_error(info, "read_bcf: out of memory declaring columns");
     }
@@ -1400,6 +1399,11 @@ static void bcf_read_local_init(duckdb_init_info info) {
         destroy_init_data(local);
         return;
     }
+
+    /* VCF parsing precedes bcf_unpack: limit both stages to projected fields.
+     * Zero means parse everything to HTSlib, so count/POS-only scans use STR.
+     * SAMPLE_ID and tidy row counts come from the selected header samples. */
+    local->rec->max_unpack = local->unpack_mask ? local->unpack_mask : BCF_UN_STR;
 
     // Set up region query if user specified a region (non-parallel case)
     if (!is_parallel && bind->has_selector) {
