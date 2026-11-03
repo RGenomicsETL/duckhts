@@ -64,19 +64,31 @@ test_quality_encoding <- function() {
   legacy_q <- DBI::dbGetQuery(con, "SELECT QUALITY FROM legacy_fq LIMIT 1")
   expect_equal(legacy_q$QUALITY[1], "hhhh")
 
-  # Explicit auto-detection normalizes legacy text qualities to canonical Phred+33 text
+  # Auto-detection refuses ambiguous evidence instead of guessing an encoding
+  expect_error(
+    rduckhts_fastq(
+      con,
+      "legacy_fq_auto",
+      legacy_fastq,
+      input_quality_encoding = "auto",
+      overwrite = TRUE
+    ),
+    pattern = "ambiguous quality encoding"
+  )
+
+  # Explicit legacy decoding normalizes the qualities to canonical Phred+33 text
   rduckhts_fastq(
     con,
-    "legacy_fq_auto",
+    "legacy_fq_phred64",
     legacy_fastq,
-    input_quality_encoding = "auto",
+    input_quality_encoding = "phred64",
     overwrite = TRUE
   )
-  legacy_q_auto <- DBI::dbGetQuery(
+  legacy_q_phred64 <- DBI::dbGetQuery(
     con,
-    "SELECT QUALITY FROM legacy_fq_auto LIMIT 1"
+    "SELECT QUALITY FROM legacy_fq_phred64 LIMIT 1"
   )
-  expect_equal(legacy_q_auto$QUALITY[1], "IIII")
+  expect_equal(legacy_q_phred64$QUALITY[1], "IIII")
 
   # Explicit legacy decoding + numeric representation returns raw Phred scores
   rduckhts_fastq(

@@ -10,7 +10,6 @@ rduckhts_bam_bed_coverage(
   bed_path,
   reference = NULL,
   index_path = NULL,
-  bed_index_path = NULL,
   mapq = 0,
   min_baseq = 0,
   min_read_len = 0,
@@ -19,9 +18,7 @@ rduckhts_bam_bed_coverage(
   min_depth = 1,
   max_depth = 1e+06,
   decompression_threads = 0,
-  fragment_mode = FALSE,
-  strand_outputs = TRUE,
-  processing_threads = 0
+  strand_outputs = TRUE
 )
 }
 \arguments{
@@ -34,8 +31,6 @@ rduckhts_bam_bed_coverage(
 \item{reference}{Optional reference FASTA path for CRAM input when required}
 
 \item{index_path}{Optional explicit BAM/CRAM index path}
-
-\item{bed_index_path}{Optional explicit BED index path (reserved for future use)}
 
 \item{mapq}{Minimum mapping quality threshold for post-filter summaries}
 
@@ -55,11 +50,7 @@ rduckhts_bam_bed_coverage(
 \item{decompression_threads}{Integer. Number of htslib decompression worker
 threads to use for BAM/CRAM input. `0` disables htslib worker threads.}
 
-\item{fragment_mode}{Logical. Reserved for future fragment-level semantics.}
-
 \item{strand_outputs}{Logical. Emit forward/reverse post-filter summary columns.}
-
-\item{processing_threads}{Reserved for future parallel interval processing.}
 }
 \value{
 A data frame with one row per BED interval and pre/post regional summaries

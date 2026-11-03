@@ -10,10 +10,6 @@ rduckhts_gtf(
   path,
   region = NULL,
   index_path = NULL,
-  header = NULL,
-  header_names = NULL,
-  auto_detect = NULL,
-  column_types = NULL,
   scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
@@ -32,14 +28,6 @@ rduckhts_gtf(
 \item{region}{Optional genomic region (e.g., "chr1:1000-2000")}
 
 \item{index_path}{Optional explicit path to index file (.tbi/.csi)}
-
-\item{header}{Logical. If TRUE, use first non-meta line as column names}
-
-\item{header_names}{Character vector to override column names}
-
-\item{auto_detect}{Logical. If TRUE, infer basic numeric column types}
-
-\item{column_types}{Character vector of column types (e.g. "BIGINT", "VARCHAR")}
 
 \item{scan_mode}{Optional scan mode. Use \code{"auto"} (default extension
 behavior) or \code{"sequential"} to force full-file streaming/counting

@@ -47,15 +47,6 @@ expect_error(
   "standard_tags must be TRUE or FALSE"
 )
 expect_error(
-  rduckhts_gff_convert_parquet(
-    NULL,
-    "input.gff3",
-    tempfile(fileext = ".parquet"),
-    header = "yes"
-  ),
-  "header must be TRUE or FALSE"
-)
-expect_error(
   rduckhts_tabix_convert_parquet(
     NULL,
     "input.tsv.gz",
