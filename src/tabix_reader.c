@@ -1816,12 +1816,7 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                     switch (logical_col) {
                         case GXF_COL_START:
                         case GXF_COL_END: {
-                            if (bd->strict && bd->mode == TABIX_MODE_GFF) {
-                                set_null(vectors[c], row_count);
-                            } else {
-                                int64_t *data = (int64_t *)duckdb_vector_get_data(vectors[c]);
-                                data[row_count] = 0;
-                            }
+                            set_null(vectors[c], row_count);
                             break;
                         }
                         case GXF_COL_SCORE: {
@@ -1880,7 +1875,8 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
                 int t = bd->col_types ? bd->col_types[logical_col] : DUCKDB_TYPE_VARCHAR;
                 if (t == DUCKDB_TYPE_INTEGER || t == DUCKDB_TYPE_BIGINT) {
                     int64_t v = 0;
-                    if (parse_int64_span(fld, flen, &v)) {
+                    if (parse_int64_span(fld, flen, &v) &&
+                        (t != DUCKDB_TYPE_INTEGER || (v >= INT32_MIN && v <= INT32_MAX))) {
                         if (t == DUCKDB_TYPE_INTEGER) {
                             int32_t *data = (int32_t *)duckdb_vector_get_data(vectors[c]);
                             data[row_count] = (int32_t)v;
