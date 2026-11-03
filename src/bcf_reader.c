@@ -35,6 +35,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/region_list.h"
 #include "include/duckhts_column_names.h"
 #include "include/duckhts_bind_params.h"
+#include "include/duckhts_attributes.h"
 #include "include/regions_bind.h"
 #include "include/bcf_scan.h"
 #include "include/bcf_field_vector.h"
@@ -787,6 +788,9 @@ static duckdb_logical_type create_vep_field_type(vep_field_type_t vep_type, int 
  * with an earlier column ignoring case is an error, or gets a __N suffix under
  * duplicate_names := 'suffix'. Returns 0, or -1 with the bind error set. */
 static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
+                          duckdb_logical_type type, const char *fmt, ...) DUCKHTS_PRINTF(4, 5);
+
+static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
                           duckdb_logical_type type, const char *fmt, ...) {
     kstring_t name = KS_INITIALIZE;
     const char *claimed = NULL;
@@ -846,28 +850,28 @@ static void bcf_read_bind(duckdb_bind_info info) {
     int64_t requested_threads = duckhts_bind_int64(info, "decompression_threads", 0);
     int scan_sequential = 0;
     duckhts_bcf_decode_policy_t decode_error_policy = DUCKHTS_BCF_DECODE_NULL;
-    char err[256] = "";
+    char param_err[256] = "";
 
     if (!read_ok || duplicate_names == -2) {
-        snprintf(err, sizeof(err), "%s: out of memory reading parameters", reader_name);
+        snprintf(param_err, sizeof(param_err), "%s: out of memory reading parameters", reader_name);
     } else if (scan_mode && !duckhts_bcf_parse_scan_mode(scan_mode, &scan_sequential)) {
-        snprintf(err, sizeof(err), "%s: scan_mode must be 'auto' or 'sequential'", reader_name);
+        snprintf(param_err, sizeof(param_err), "%s: scan_mode must be 'auto' or 'sequential'", reader_name);
     } else if (scan_sequential && region && region[0] != '\0') {
-        snprintf(err, sizeof(err), "%s: scan_mode := 'sequential' is incompatible with region queries", reader_name);
+        snprintf(param_err, sizeof(param_err), "%s: scan_mode := 'sequential' is incompatible with region queries", reader_name);
     } else if (decode_policy && !duckhts_bcf_parse_decode_policy(decode_policy, &decode_error_policy)) {
-        snprintf(err, sizeof(err), "%s: decode_error_policy must be 'null', 'warn', or 'error'", reader_name);
+        snprintf(param_err, sizeof(param_err), "%s: decode_error_policy must be 'null', 'warn', or 'error'", reader_name);
     } else if (duplicate_names < 0) {
-        snprintf(err, sizeof(err), "%s: duplicate_names must be 'error' or 'suffix'", reader_name);
+        snprintf(param_err, sizeof(param_err), "%s: duplicate_names must be 'error' or 'suffix'", reader_name);
     } else if (additional_csq_column_types &&
-               !vep_validate_column_type_rules(additional_csq_column_types, err, sizeof(err))) {
-        /* the validator wrote err */
+               !vep_validate_column_type_rules(additional_csq_column_types, param_err, sizeof(param_err))) {
+        /* the validator wrote param_err */
     } else if (requested_threads < 0 || requested_threads > INT_MAX) {
-        snprintf(err, sizeof(err), "%s: decompression_threads must be between 0 and INT_MAX", reader_name);
+        snprintf(param_err, sizeof(param_err), "%s: decompression_threads must be between 0 and INT_MAX", reader_name);
     }
     if (scan_mode) duckdb_free(scan_mode);
     if (decode_policy) duckdb_free(decode_policy);
-    if (err[0]) {
-        duckdb_bind_set_error(info, err);
+    if (param_err[0]) {
+        duckdb_bind_set_error(info, param_err);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
