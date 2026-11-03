@@ -13,6 +13,10 @@
   sets them, keeps the mate fields CRAM 1.x needs for flag reconstruction, and replaces
   the hand-written calls in insert-size counts and idxstats; idxstats now reports a
   failure to configure CRAM.
+- `bcftools_score` parses its `regions`, `targets` and region-file lists once, into sorted
+  merged intervals, instead of re-parsing the whole list for every VCF record. A
+  50,000-interval list on a synthetic VCF fell from 224 s to 0.112 s; the region and overlap
+  semantics are unchanged.
 - `duckhts_mosdepth(use_median := TRUE)` clears and scans only the depth counters a window
   used instead of all 65,536 per window; output files are byte-identical.
 - Errors that were lost or reported as success:
@@ -26,6 +30,11 @@
     did not free the result.
   - A failing bigWig scan could return the rows of a partly filled chunk with its error.
   - `bcftools_norm_row` could return a passthrough result after failing to copy REF or ALT.
+  - `bcftools_score` leaked a marker's allele on rows it skipped, dropped markers or rows when
+    an allocation failed, and returned the markers read so far when a TSV or GWAS-VCF summary
+    could not be read. Allocation and read failures now stop the query, naming the summary
+    file and line; rows skipped for their data (missing allele or effect, unknown contig) are
+    still skipped.
   - Messages from the reference cache, `read_bam`, `read_tabix` and the sequence readers now
     name the function and path, and keep long mate names instead of truncating them.
 - `read_bcf(..., duplicate_names := 'suffix')` reads VCF/BCF files whose INFO keys,

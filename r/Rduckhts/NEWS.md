@@ -3,6 +3,9 @@
 - The bundled extension reads VCF/BCF sites without parsing genotypes when no FORMAT or
   sample column is selected, and decodes only the CRAM fields each function uses.
   `duckhts_mosdepth(use_median = TRUE)` no longer clears 512 KiB of counters per window.
+- `rduckhts_bcftools_score()` with long `regions` or `targets` lists no longer re-parses the
+  list for every variant, and a summary file that cannot be read or loaded now stops with an
+  error instead of scoring with the markers read so far.
 - Read errors in tabix, BED, FASTA/FASTQ and `fasta_nuc` inputs now stop with an error
   naming the file instead of returning a shorter result, and more error messages name the
   function and file.
