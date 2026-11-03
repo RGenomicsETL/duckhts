@@ -394,6 +394,9 @@
       "kind": "table",
       "category": "Coverage",
       "signature": "read_pileup(path, region := NULL, index_path := NULL, min_mapq := 0, flag_mask := 1796)",
+      "details": {
+        "Limits": "Uses htslib's default pileup admission limit of 8000 reads per input file, as does samtools mpileup -d 8000. At high depth, reads can be discarded before bases and qualities are emitted; this is not an uncapped depth counter. The limit is not configurable. Alignment I/O and decode failures return an error."
+      },
       "returns": "table",
       "r_wrapper": "rduckhts_pileup",
       "description": "Construct a region-scoped BAM pileup with one row per covered position, emitting chrom, 1-based position, depth, observed bases, and Phred+33 qualities after SAM flag and MAPQ filtering. This is a compact htslib pileup view, not samtools mpileup text parity.",

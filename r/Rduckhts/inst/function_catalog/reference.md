@@ -712,6 +712,10 @@ Returns:
 table
 ```
 
+### Limits
+
+Uses htslib's default pileup admission limit of 8000 reads per input file, as does samtools mpileup -d 8000. At high depth, reads can be discarded before bases and qualities are emitted; this is not an uncapped depth counter. The limit is not configurable. Alignment I/O and decode failures return an error.
+
 ### Examples
 
 ```sql

@@ -2006,6 +2006,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         khash_t(mdmate) *seen = NULL;
         int saw_record = 0;
         int iter_rc = -1;
+        int contig_rc = -1;
         mosdepth_dist_t chrom_global_dist = {0};
         mosdepth_dist_t chrom_region_dist = {0};
         mosdepth_stat_t chrom_stat;
@@ -2211,14 +2212,14 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
             }
         }
 
-        rc = 0;
+        contig_rc = 0;
 
 contig_cleanup:
         if (itr) hts_itr_destroy(itr);
         if (seen) seen_mates_destroy(seen);
         dist_destroy(&chrom_global_dist);
         dist_destroy(&chrom_region_dist);
-        if (rc != 0) goto cleanup;
+        if (contig_rc != 0) goto cleanup;
     }
 
     } /* end sequential else block */

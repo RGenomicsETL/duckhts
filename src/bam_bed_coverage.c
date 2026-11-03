@@ -605,13 +605,17 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
 
     for (i = 0; i < bind->n_regions; i++) {
         hts_itr_t *itr;
+        int iter_rc;
         bedcov_region_t *region = &bind->regions[i];
         bedcov_tile_t *tiles = NULL;
         if (region->len <= 0) continue;
 
         itr = sam_itr_queryi(idx, region->tid, region->start, region->end);
-        if (!itr) continue;
-        while (sam_itr_next(fp, itr, rec) >= 0) {
+        if (!itr) {
+            snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to create iterator for '%s'", region->chrom);
+            goto read_error;
+        }
+        while ((iter_rc = sam_itr_next(fp, itr, rec)) >= 0) {
             int64_t clip_start;
             int64_t clip_end;
             int64_t tile_start;
@@ -647,6 +651,11 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
             }
         }
         hts_itr_destroy(itr);
+        if (iter_rc < -1) {
+            snprintf(err, errlen, "duckhts_bam_bed_coverage: error while reading alignments for '%s'", region->chrom);
+            destroy_tile_list(tiles);
+            goto read_error;
+        }
         flush_completed_tiles(&tiles, region, bind, INT64_MAX);
         destroy_tile_list(tiles);
     }
@@ -656,6 +665,13 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
     sam_hdr_destroy(hdr);
     sam_close(fp);
     return 0;
+
+read_error:
+    bam_destroy1(rec);
+    hts_idx_destroy(idx);
+    sam_hdr_destroy(hdr);
+    sam_close(fp);
+    return -1;
 }
 
 static void add_result_columns(duckdb_bind_info info) {

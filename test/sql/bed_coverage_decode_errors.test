@@ -1,0 +1,14 @@
+# name: test/sql/bed_coverage_decode_errors.test
+# description: Regional coverage propagates indexed BAM decode errors
+# group: [duckhts]
+# Fixture: python3 test/scripts/prepare_coverage_decode_fixture.py
+
+require duckhts
+
+statement ok
+COPY (SELECT 'bad', 0, 100) TO '__WORKING_DIRECTORY__/test_decode.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE);
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/coverage_decode_error.bam', '__WORKING_DIRECTORY__/test_decode.bed');
+----
+error while reading alignments

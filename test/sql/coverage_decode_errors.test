@@ -1,0 +1,22 @@
+# name: test/sql/coverage_decode_errors.test
+# description: Coverage readers propagate indexed BAM decode errors
+# group: [duckhts]
+# Fixture: python3 test/scripts/prepare_coverage_decode_fixture.py
+# Source: test/data/coverage_decode_error.sam; the second record has an invalid sequence length.
+
+require duckhts
+
+query I
+SELECT sum(depth) FROM read_pileup('__WORKING_DIRECTORY__/test/data/coverage_decode_error.bam', region := 'good');
+----
+1
+
+statement error
+SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/test_decode_sequential', '__WORKING_DIRECTORY__/test/data/coverage_decode_error.bam', processing_threads := 1);
+----
+failed while scanning 'bad'
+
+statement error
+SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/test_decode_parallel', '__WORKING_DIRECTORY__/test/data/coverage_decode_error.bam', processing_threads := 2);
+----
+worker failed scanning 'bad'
