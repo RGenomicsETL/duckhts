@@ -293,7 +293,7 @@ test-bam-partition:
 	@if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
 		cmake --build cmake_build/release --target duckhts_bam_partition_test; \
 	fi
-	./cmake_build/release/duckhts_bam_partition_test
+	./cmake_build/release/duckhts_bam_partition_test cmake_build/release
 
 .PHONY: test-bam-site-counts
 test-bam-site-counts:

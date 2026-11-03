@@ -221,15 +221,19 @@ static int check_ownership_rule(void) {
     return 0;
 }
 
-int main(void) {
-    char path[] = "/tmp/duckhts-bam-partition-XXXXXX";
-    char bam_path[sizeof(path) + 8];
-    int fd = mkstemp(path);
+/* argv[1] is a writable directory owned by the build, such as cmake_build/release. */
+int main(int argc, char **argv) {
+    char bam_path[4096];
     int rc = 1;
+    int n;
 
-    if (fd < 0) return fail_check(__FILE__, __LINE__, "mkstemp");
-    close(fd);
-    snprintf(bam_path, sizeof(bam_path), "%s.bam", path);
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s WORK_DIR\n", argv[0]);
+        return 2;
+    }
+    n = snprintf(bam_path, sizeof(bam_path), "%s/duckhts_bam_partition_test.bam", argv[1]);
+    if (n < 0 || (size_t)n >= sizeof(bam_path))
+        return fail_check(__FILE__, __LINE__, "work directory path too long");
 
     if (check_ownership_rule() == 0 && write_bam(bam_path, REF_A_LENGTH) == 0 &&
         check_index(bam_path, 0, 0) == 0 &&    /* BAI */
@@ -242,7 +246,6 @@ int main(void) {
         rc = 0;
     }
 
-    unlink(path);
     unlink(bam_path);
     remove_indexes(bam_path);
     if (rc == 0) printf("bam_partition_test: OK\n");
