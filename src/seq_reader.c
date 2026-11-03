@@ -76,6 +76,7 @@ typedef struct {
     int paired;
     int scan_sequential;
     int direct_fastq;    /* FASTQ reader over non-alignment input */
+    int direct_fasta;    /* FASTA reader over non-alignment input */
     int seq_nt16;       /* 1 if sequence_encoding := 'nt16'; SEQUENCE → LIST(UTINYINT) */
     duckhts_quality_representation qual_repr;
     duckhts_quality_encoding input_quality_encoding;
@@ -111,6 +112,7 @@ typedef struct {
     int paired;
     int count_only;
     int direct_fastq;
+    int direct_fasta;
     int fasta_count_only;
     uint64_t count_remaining;
     int pending_mate;
@@ -458,6 +460,7 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     bind->file_path = file_path;
     bind->is_fastq = is_fastq;
     bind->direct_fastq = is_fastq && fmt != sam && fmt != bam && fmt != cram;
+    bind->direct_fasta = !is_fastq && fmt != sam && fmt != bam && fmt != cram;
     bind->qual_repr = DUCKHTS_QUALITY_REPR_STRING;
     bind->input_quality_encoding = DUCKHTS_QUALITY_ENCODING_PHRED33;
 
@@ -694,6 +697,7 @@ static void seq_read_init(duckdb_init_info info) {
 
     init->is_fastq = bind->is_fastq;
     init->direct_fastq = bind->direct_fastq;
+    init->direct_fasta = bind->direct_fasta && bind->n_regions == 0;
     init->paired = bind->paired;
     init->interleaved = bind->interleaved;
     init->seq_nt16 = bind->seq_nt16;
@@ -765,7 +769,7 @@ static void seq_read_init(duckdb_init_info info) {
         }
     }
 
-    if (bind->direct_fastq || (!bind->is_fastq && bind->n_regions == 0)) {
+    if (bind->direct_fastq || init->direct_fasta) {
         init->count_fp = hts_open(bind->file_path, "r");
         if (!init->count_fp) {
             duckdb_init_set_error(info, "Failed to open sequence file");
@@ -790,7 +794,7 @@ static void seq_read_init(duckdb_init_info info) {
         return;
     }
 
-    if (!bind->is_fastq) {
+    if (!bind->is_fastq && bind->n_regions > 0) {
         init->fai = fai_load3_format(bind->file_path, bind->index_path,
                                      bind->gzi_path, 0, FAI_FASTA);
         if (!init->fai) {
@@ -1223,7 +1227,7 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         seq_fasta_count_only_function(info, output, init, bind);
         return;
     }
-    if (!init->is_fastq && !init->fai) {
+    if (init->direct_fasta) {
         seq_fasta_direct_function(info, output, init);
         return;
     }

@@ -27,3 +27,11 @@ SELECT count(*) FROM (
 );
 ----
 0
+
+# Alignment input still goes through htslib's sequence adapter, not the FASTA text parser.
+query TT
+SELECT NAME, SEQUENCE FROM read_fasta('__WORKING_DIRECTORY__/test/data/bam_scan_single.bam') ORDER BY NAME;
+----
+mapped1	A
+placed_unmapped	C
+unplaced	G
