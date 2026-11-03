@@ -406,7 +406,7 @@ FILTER is VARCHAR[] in header order. PASS is [PASS], an unapplied dot is NULL, a
 
 ### Errors
 
-decode_error_policy is null, warn or error for header/payload type mismatches and oversized numeric scalars. Multiple scalar elements before vector-end padding count as malformed, including missing elements. FORMAT null/warn withholds that tag for every selected sample on the record.
+decode_error_policy is null, warn or error for header/payload type mismatches and oversized numeric scalars. Multiple scalar elements before vector-end padding count as malformed, including missing elements. FORMAT null/warn withholds that tag for every selected sample on the record. Checks are projection-aware: a text VCF field that no selected column reads is not parsed, so its syntax and decode errors are not reported; a query that selects it reports them under this policy. Read, decompression and allocation failures always error.
 
 ### Samples
 

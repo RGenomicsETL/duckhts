@@ -1199,11 +1199,7 @@ static void bam_read_local_init(duckdb_init_info info) {
 
     if (hts_get_format(local->fp)->format == cram) {
         int fields = bam_cram_required_fields(bind, local->column_ids, local->column_count);
-        /* CRAM 1.x reconstructs mate flag bits from mate data (cram_io.c). */
-        if (hts_get_format(local->fp)->version.major == 1) {
-            fields |= SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
-        }
-        if (hts_set_opt(local->fp, CRAM_OPT_REQUIRED_FIELDS, fields) < 0) {
+        if (duckhts_cram_require_fields(local->fp, fields) < 0) {
             duckdb_init_set_error(info, "read_bam: failed to set the CRAM required fields");
             destroy_bam_local(local);
             return;

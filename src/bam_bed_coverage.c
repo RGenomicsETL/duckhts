@@ -557,13 +557,8 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
     }
     /* QUAL feeds base-quality filtering. SEQ and AUX preserve CG long-CIGAR
      * restoration; coverage does not use read names or mate fields. */
-    int fields = SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ | SAM_CIGAR |
-                 SAM_SEQ | SAM_QUAL | SAM_AUX;
-    /* CRAM 1.x reconstructs mate flag bits from mate data (cram_io.c). */
-    if (hts_get_format(fp)->format == cram && hts_get_format(fp)->version.major == 1) {
-        fields |= SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
-    }
-    if (hts_set_opt(fp, CRAM_OPT_REQUIRED_FIELDS, fields) < 0) {
+    if (duckhts_cram_require_fields(fp, SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ | SAM_CIGAR |
+                                        SAM_SEQ | SAM_QUAL | SAM_AUX) < 0) {
         snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to configure CRAM required fields");
         sam_close(fp);
         return -1;
