@@ -3345,7 +3345,7 @@ Compute samtools coverage-like regional summaries for BAM or CRAM input over a B
 Signature:
 
 ```sql
-duckhts_bam_bed_coverage(path, bed_path, reference := NULL, index_path := NULL, bed_index_path := NULL, mapq := 0, min_baseq := 0, min_read_len := 0, require_flags := 0, exclude_flags := 1796, min_depth := 1, max_depth := 1000000, decompression_threads := 0, fragment_mode := FALSE, strand_outputs := TRUE, processing_threads := 0)
+duckhts_bam_bed_coverage(path, bed_path, reference := NULL, index_path := NULL, mapq := 0, min_baseq := 0, min_read_len := 0, require_flags := 0, exclude_flags := 1796, min_depth := 1, max_depth := 1000000, decompression_threads := 0, strand_outputs := TRUE)
 ```
 
 Returns:

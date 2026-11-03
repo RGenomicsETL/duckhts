@@ -85,7 +85,7 @@ SELECT * FROM duckhts_bam_bed_coverage(
   fragment_mode := TRUE
 );
 ----
-duckhts_bam_bed_coverage: fragment_mode is not implemented yet
+Invalid named parameter "fragment_mode"
 
 # Coverage is computed per execution, not at bind: a prepared statement returns
 # the same rows each time it executes. The values are the rows asserted first above.
