@@ -4,6 +4,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2228,6 +2229,7 @@ static void score_init(duckdb_init_info info) {
     int n_metrics;
     int n_prs;
     int i;
+    int scan_failed = 0;
     char err[512];
 
     memset(init, 0, sizeof(*init));
@@ -2411,23 +2413,7 @@ static void score_init(duckdb_init_info info) {
             {
                 int expr_keep = score_record_matches_exprs(rec, &src, err, sizeof(err));
                 if (expr_keep < 0) {
-                    if (idxs) duckdb_free(idxs);
-                    if (int32_arr) free(int32_arr);
-                    if (float_arr) free(float_arr);
-                    if (aps) duckdb_free(aps);
-                    if (missing) duckdb_free(missing);
-                    if (matched_markers) duckdb_free(matched_markers);
-                    if (allele_mismatch_markers) duckdb_free(allele_mismatch_markers);
-                    score_source_destroy(&src);
-                    if (summaries) {
-                        for (i = 0; i < n_prs; i++) {
-                            if (summaries[i]) score_destroy_summary(summaries[i]);
-                        }
-                        duckdb_free(summaries);
-                    }
-                    score_destroy_init(init);
-                    duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to evaluate include/exclude expression");
-                    return;
+                    goto score_record_error;
                 }
                 if (expr_keep == 0) continue;
             }
@@ -2453,14 +2439,22 @@ static void score_init(duckdb_init_info info) {
 
             /* Phase 2: Extract genotype/dosage into per-allele-per-sample array */
             memset(missing, 0, sizeof(float) * (size_t)n_samples);
-            if (m_aps < rec->n_allele * n_samples) {
-                int new_m = rec->n_allele * n_samples;
-                float *new_aps = (float *)realloc(aps, sizeof(float) * (size_t)new_m);
-                if (!new_aps) continue;
-                aps = new_aps;
-                m_aps = new_m;
+            /* Keep allele/sample offsets representable in the int indexing below. */
+            uint64_t n_aps = (uint64_t)rec->n_allele * (uint64_t)n_samples;
+            if (n_aps > INT_MAX || n_aps > SIZE_MAX / sizeof(float)) {
+                snprintf(err, sizeof(err), "bcftools_score: allele/sample array exceeds allocation or indexing limits");
+                goto score_record_error;
             }
-            memset(aps, 0, sizeof(float) * (size_t)(rec->n_allele * n_samples));
+            if (m_aps < (int)n_aps) {
+                float *new_aps = (float *)realloc(aps, sizeof(float) * (size_t)n_aps);
+                if (!new_aps) {
+                    snprintf(err, sizeof(err), "bcftools_score: out of memory");
+                    goto score_record_error;
+                }
+                aps = new_aps;
+                m_aps = (int)n_aps;
+            }
+            memset(aps, 0, sizeof(float) * (size_t)n_aps);
 
             switch (bind->use_tag) {
             case SCORE_USE_GT:
@@ -2489,6 +2483,11 @@ static void score_init(duckdb_init_info info) {
             case SCORE_USE_DS:
                 number = bcf_get_format_float(hdr, rec, "DS", &float_arr, &m_float);
                 if (number <= 0) continue;
+                if ((int64_t)number != (int64_t)n_samples * (rec->n_allele - 1)) {
+                    snprintf(err, sizeof(err), "bcftools_score: invalid DS FORMAT cardinality at %s:%" PRId64,
+                             bcf_hdr_id2name(hdr, rec->rid), (int64_t)rec->pos + 1);
+                    goto score_record_error;
+                }
                 number /= n_samples;
                 if (number == 1 && rec->n_allele == 2) {
                     for (k = 0; k < n_samples; k++) {
@@ -2532,6 +2531,11 @@ static void score_init(duckdb_init_info info) {
                 for (ap = 0; ap < 2; ap++) {
                     number = bcf_get_format_float(hdr, rec, ap_tags[ap], &float_arr, &m_float);
                     if (number <= 0) continue;
+                    if ((int64_t)number != (int64_t)n_samples * (rec->n_allele - 1)) {
+                        snprintf(err, sizeof(err), "bcftools_score: invalid %s FORMAT cardinality at %s:%" PRId64,
+                                 ap_tags[ap], bcf_hdr_id2name(hdr, rec->rid), (int64_t)rec->pos + 1);
+                        goto score_record_error;
+                    }
                     number /= n_samples;
                     if (number == 1 && rec->n_allele == 2) {
                         for (k = 0; k < n_samples; k++) {
@@ -2561,6 +2565,11 @@ static void score_init(duckdb_init_info info) {
             case SCORE_USE_GP:
                 number = bcf_get_format_float(hdr, rec, "GP", &float_arr, &m_float);
                 if (number <= 0) continue;
+                if ((int64_t)number != (int64_t)n_samples * rec->n_allele * (rec->n_allele + 1) / 2) {
+                    snprintf(err, sizeof(err), "bcftools_score: invalid GP FORMAT cardinality at %s:%" PRId64,
+                             bcf_hdr_id2name(hdr, rec->rid), (int64_t)rec->pos + 1);
+                    goto score_record_error;
+                }
                 number /= n_samples;
                 if (number == 3 && rec->n_allele == 2) {
                     for (k = 0; k < n_samples; k++) {
@@ -2577,7 +2586,7 @@ static void score_init(duckdb_init_info info) {
                         float *ptr = float_arr + number * k;
                         for (b = 0; b < rec->n_allele; b++) {
                             for (a = 0; a <= b; a++) {
-                                int idx = b * (b + 1) / 2 + a;
+                                int idx = (int)((int64_t)b * (b + 1) / 2 + a);
                                 if (score_is_missing(ptr[idx])) missing[k] = 1;
                                 else {
                                     aps[a * n_samples + k] += ptr[idx];
@@ -2652,8 +2661,14 @@ static void score_init(duckdb_init_info info) {
             }
         }
 
+        goto score_records_done;
+score_record_error:
+        scan_failed = 1;
+score_records_done:
         if (idxs) duckdb_free(idxs);
     }
+
+    if (scan_failed) goto score_cleanup;
 
     if (bind->log_path && bind->log_path[0]) {
         if (score_write_log(bind, summaries, matched_markers, allele_mismatch_markers, n_samples, err, sizeof(err)) != 0) {
@@ -2676,6 +2691,7 @@ static void score_init(duckdb_init_info info) {
         }
     }
 
+score_cleanup:
     if (int32_arr) free(int32_arr);
     if (float_arr) free(float_arr);
     if (aps) duckdb_free(aps);
@@ -2690,6 +2706,11 @@ static void score_init(duckdb_init_info info) {
         duckdb_free(summaries);
     }
     hdr = NULL;
+    if (scan_failed) {
+        score_destroy_init(init);
+        duckdb_init_set_error(info, err);
+        return;
+    }
 
     duckdb_init_set_init_data(info, init, score_destroy_init);
 }
