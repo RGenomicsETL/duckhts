@@ -998,13 +998,28 @@ static void read_hts_index_bind(duckdb_bind_info info) {
 
         capture_index_meta(bind, idx);
         int nseq = hts_idx_nseq(idx);
+        int tbx_nseq = 0;
+        const char **tbx_names = tbx ? tbx_seqnames(tbx, &tbx_nseq) : NULL;
+        if (tbx && (tbx_nseq != nseq || (nseq > 0 && !tbx_names))) {
+            free(tbx_names);
+            tbx_destroy(tbx);
+            bcf_hdr_destroy(hdr);
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to read tabix sequence names");
+            destroy_hts_index_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
         for (int tid = 0; tid < nseq; tid++) {
-            const char *name = bcf_hdr_id2name(hdr, tid);
+            const char *name = tbx ? tbx_names[tid] : bcf_hdr_id2name(hdr, tid);
             uint64_t mapped = 0, unmapped = 0;
             int has_stat = (hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0);
             add_index_entry(bind, name, tid, -1, has_stat, mapped, unmapped, 0, 0,
                             index_fmt_to_string(hts_idx_fmt(idx)), index_path);
         }
+        free(tbx_names);
         if (tbx) tbx_destroy(tbx);
         else hts_idx_destroy(idx);
         bcf_hdr_destroy(hdr);
@@ -1519,10 +1534,22 @@ static void read_hts_index_spans_bind(duckdb_bind_info info) {
         const char **tbx_names = NULL;
         int tbx_nseq = 0;
         if (tbx) tbx_names = tbx_seqnames(tbx, &tbx_nseq);
+        if (tbx && (tbx_nseq != nseq || (nseq > 0 && !tbx_names))) {
+            free(tbx_names);
+            tbx_destroy(tbx);
+            bcf_hdr_destroy(hdr);
+            hts_close(fp);
+            duckdb_bind_set_error(info, "Failed to read tabix sequence names");
+            destroy_hts_index_spans_bind(bind);
+            duckdb_free(file_path);
+            if (format_hint) duckdb_free(format_hint);
+            if (index_path) duckdb_free(index_path);
+            return;
+        }
         for (int tid = 0; tid < nseq; tid++) {
             const char *name = NULL;
             int64_t len = -1;
-            if (tbx && tbx_names && tid < tbx_nseq) {
+            if (tbx) {
                 name = tbx_names[tid];
             } else {
                 name = bcf_hdr_id2name(hdr, tid);

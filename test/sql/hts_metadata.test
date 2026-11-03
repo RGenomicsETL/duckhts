@@ -1,0 +1,43 @@
+# Index sequence IDs follow the index dictionary, not the VCF header dictionary.
+# Fixture generation (htslib bgzip/tabix):
+# bgzip -c test/data/metadata_contigs.vcf > test/data/metadata_contigs.vcf.gz
+# tabix -p vcf test/data/metadata_contigs.vcf.gz
+# tabix -C -p vcf test/data/metadata_contigs.vcf.gz
+
+require duckhts
+
+query TITI
+SELECT seqname, length, index_type, mapped
+FROM read_hts_index('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.tbi');
+----
+c2	NULL	TBI	1
+c3	NULL	TBI	1
+c4	NULL	TBI	1
+
+query TITI
+SELECT seqname, length, index_type, mapped
+FROM read_hts_index('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.csi');
+----
+c2	NULL	CSI	1
+c3	NULL	CSI	1
+c4	NULL	CSI	1
+
+query TI rowsort
+SELECT DISTINCT seqname, tid
+FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.tbi');
+----
+c2	0
+c3	1
+c4	2
+
+query TI rowsort
+SELECT DISTINCT seqname, tid
+FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.csi');
+----
+c2	0
+c3	1
+c4	2
