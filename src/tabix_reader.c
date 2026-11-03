@@ -1946,25 +1946,19 @@ static duckdb_table_function create_tabix_tf(const char *name,
         duckdb_destroy_logical_type(&strict_bool);
     }
 
-    duckdb_logical_type header_bool = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-    duckdb_table_function_add_named_parameter(tf, "header", header_bool);
-    duckdb_destroy_logical_type(&header_bool);
+    if (bind_fn == read_tabix_bind) {
+        duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
+        duckdb_table_function_add_named_parameter(tf, "header", bool_type);
+        duckdb_table_function_add_named_parameter(tf, "auto_detect", bool_type);
+        duckdb_destroy_logical_type(&bool_type);
 
-    duckdb_logical_type list_child = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-    duckdb_logical_type list_type = duckdb_create_list_type(list_child);
-    duckdb_table_function_add_named_parameter(tf, "header_names", list_type);
-    duckdb_destroy_logical_type(&list_child);
-    duckdb_destroy_logical_type(&list_type);
-
-    duckdb_logical_type auto_bool = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
-    duckdb_table_function_add_named_parameter(tf, "auto_detect", auto_bool);
-    duckdb_destroy_logical_type(&auto_bool);
-
-    duckdb_logical_type types_child = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
-    duckdb_logical_type types_list = duckdb_create_list_type(types_child);
-    duckdb_table_function_add_named_parameter(tf, "column_types", types_list);
-    duckdb_destroy_logical_type(&types_child);
-    duckdb_destroy_logical_type(&types_list);
+        duckdb_logical_type child = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
+        duckdb_logical_type list_type = duckdb_create_list_type(child);
+        duckdb_table_function_add_named_parameter(tf, "header_names", list_type);
+        duckdb_table_function_add_named_parameter(tf, "column_types", list_type);
+        duckdb_destroy_logical_type(&child);
+        duckdb_destroy_logical_type(&list_type);
+    }
 
     duckdb_table_function_set_bind(tf, bind_fn);
     duckdb_table_function_set_init(tf, tabix_init);

@@ -1,0 +1,41 @@
+require duckhts
+
+statement error
+SELECT * FROM read_gff('test/data/gff_attrs.gff3', column_types := ['nonsense']);
+----
+Invalid named parameter "column_types"
+
+statement error
+SELECT * FROM read_gtf('test/data/gtf_attrs.gtf', column_types := ['nonsense']);
+----
+Invalid named parameter "column_types"
+
+statement error
+SELECT * FROM read_gff('test/data/gff_attrs.gff3', header := true);
+----
+Invalid named parameter "header"
+
+statement error
+SELECT * FROM read_gtf('test/data/gtf_attrs.gtf', header := true);
+----
+Invalid named parameter "header"
+
+statement error
+SELECT * FROM read_gff('test/data/gff_attrs.gff3', header_names := ['x']);
+----
+Invalid named parameter "header_names"
+
+statement error
+SELECT * FROM read_gtf('test/data/gtf_attrs.gtf', header_names := ['x']);
+----
+Invalid named parameter "header_names"
+
+statement error
+SELECT * FROM read_gff('test/data/gff_attrs.gff3', auto_detect := true);
+----
+Invalid named parameter "auto_detect"
+
+statement error
+SELECT * FROM read_gtf('test/data/gtf_attrs.gtf', auto_detect := true);
+----
+Invalid named parameter "auto_detect"
