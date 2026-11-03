@@ -6,7 +6,7 @@ mkdir -p build
 tmp=$(mktemp -d build/error-tests.XXXXXX)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 if [ "$#" -eq 0 ]; then
-    set -- registration_errors_test bigwig_errors_test
+    set -- registration_errors_test bigwig_errors_test norm_errors_test
 fi
 for name in "$@"; do
     "${CC:-cc}" -std=gnu11 -Wall -Wextra -Werror \

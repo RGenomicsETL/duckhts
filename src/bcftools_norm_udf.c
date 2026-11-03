@@ -431,7 +431,7 @@ static hts_pos_t realign_left_cached(duckhts_reference_entry_t *cache,
     return new_pos;
 }
 
-static void set_result_passthrough(norm_result_t *result,
+static int set_result_passthrough(norm_result_t *result,
                                    int64_t pos1,
                                    int64_t end_pos1,
                                    const char *ref,
@@ -444,7 +444,8 @@ static void set_result_passthrough(norm_result_t *result,
     result->pos1 = pos1;
     result->end_pos1 = end_pos1;
     result->ref = dup_cstr(ref);
-    copy_alt_array(alts, n_alt, &result->alts, &result->n_alt);
+    if (ref && !result->ref) return 0;
+    return copy_alt_array(alts, n_alt, &result->alts, &result->n_alt);
 }
 
 static void set_result_applicable(norm_result_t *result,
@@ -499,7 +500,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
 
     if (!chrom || !*chrom || !ref_in || !*ref_in || pos1 < 1) {
         original_end = (pos1 >= 1 && ref_in) ? pos1 + (int64_t)strlen(ref_in) - 1 : 0;
-        set_result_passthrough(result, pos1, original_end, ref_in, alt_in, n_alt_in, "NullInput");
+        if (!set_result_passthrough(result, pos1, original_end, ref_in, alt_in, n_alt_in, "NullInput")) goto oom;
         return 1;
     }
 
@@ -515,7 +516,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
 
     for (int i = 0; i < n_orig_alt; i++) {
         if (!orig_alt[i] || !*orig_alt[i]) {
-            set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "NullInput");
+            if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "NullInput")) goto oom;
             free(orig_ref);
             free_string_array(orig_alt, n_orig_alt);
             return 1;
@@ -573,9 +574,10 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
         free(real_to_orig);
 
         if (!real_result.applicable) {
-            set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
-                                   real_result.status ? real_result.status : "GVCFMixedPassthrough");
+            int copied = set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
+                                                real_result.status ? real_result.status : "GVCFMixedPassthrough");
             free_norm_result(&real_result);
+            if (!copied) goto oom;
             free(orig_ref);
             free_string_array(orig_alt, n_orig_alt);
             return 1;
@@ -621,19 +623,19 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
     }
 
     if (any_breakend) {
-        set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "Breakend");
+        if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "Breakend")) goto oom;
         free(orig_ref);
         free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
     if (any_spanning) {
-        set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "SpanningDeletion");
+        if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "SpanningDeletion")) goto oom;
         free(orig_ref);
         free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
     if (has_non_acgtn(orig_ref, (int)strlen(orig_ref))) {
-        set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidRefAllele");
+        if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidRefAllele")) goto oom;
         free(orig_ref);
         free_string_array(orig_alt, n_orig_alt);
         return 1;
@@ -641,14 +643,15 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
 
     ref_fetch = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + (int64_t)strlen(orig_ref) - 2);
     if (!ref_fetch) {
-        set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig");
+        if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig")) goto oom;
         free(orig_ref);
         free_string_array(orig_alt, n_orig_alt);
         return 1;
     }
     if (strcasecmp(ref_fetch, orig_ref) != 0) {
         free(ref_fetch);
-        set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "RefMismatch");
+        ref_fetch = NULL;
+        if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "RefMismatch")) goto oom;
         free(orig_ref);
         free_string_array(orig_alt, n_orig_alt);
         return 1;
@@ -680,13 +683,13 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
             }
             alt_len = strlen(alt);
             if (has_non_acgtn(alt, (int)alt_len)) {
-                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidAltAllele");
+                if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidAltAllele")) goto oom;
                 free(orig_ref);
                 free_string_array(orig_alt, n_orig_alt);
                 return 1;
             }
             if (alt_len == ref_len && strcmp(alt, orig_ref) == 0) {
-                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "DuplicateAllele");
+                if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "DuplicateAllele")) goto oom;
                 free(orig_ref);
                 free_string_array(orig_alt, n_orig_alt);
                 return 1;
@@ -716,8 +719,8 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
                 int64_t rlen = has_end_pos && end_pos_in >= pos1 ? end_pos_in - pos1 + 1 : (int64_t)strlen(orig_ref);
                 char *expanded_ref;
                 if (rlen <= 0) {
-                    set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
-                                           "SymbolicInsufficientMetadata");
+                    if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
+                                                "SymbolicInsufficientMetadata")) goto oom;
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
                     free(orig_ref);
@@ -726,7 +729,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
                 }
                 expanded_ref = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + rlen - 2);
                 if (!expanded_ref) {
-                    set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig");
+                    if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig")) goto oom;
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
                     free(orig_ref);
@@ -741,8 +744,8 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
             } else if (!strncmp(alt, "<DUP", 4)) {
                 char *dup_ref;
                 if (!has_svlen || svlen_in <= 0) {
-                    set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
-                                           "SymbolicInsufficientMetadata");
+                    if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
+                                                "SymbolicInsufficientMetadata")) goto oom;
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
                     free(orig_ref);
@@ -751,7 +754,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
                 }
                 dup_ref = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + svlen_in - 1);
                 if (!dup_ref) {
-                    set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig");
+                    if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig")) goto oom;
                     free_kstring_array(als, n_allele);
                     free_kstring_array(sym, n_allele);
                     free(orig_ref);
@@ -764,8 +767,8 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
                 }
                 free(dup_ref);
             } else {
-                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
-                                       "UnsupportedSymbolicAllele");
+                if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
+                                            "UnsupportedSymbolicAllele")) goto oom;
                 free_kstring_array(als, n_allele);
                 free_kstring_array(sym, n_allele);
                 free(orig_ref);
@@ -777,7 +780,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
         }
         symbolic_alts = 0;
         if (has_non_acgtn(alt, (int)strlen(alt))) {
-            set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidAltAllele");
+            if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "InvalidAltAllele")) goto oom;
             free_kstring_array(als, n_allele);
             free_kstring_array(sym, n_allele);
             free(orig_ref);
@@ -786,7 +789,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
         }
         if (!prepare_sequence_allele(alt, &als[i])) goto oom;
         if (als[i].l == als[0].l && strcasecmp(als[i].s, als[0].s) == 0) {
-            set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "DuplicateAllele");
+            if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "DuplicateAllele")) goto oom;
             free_kstring_array(als, n_allele);
             free_kstring_array(sym, n_allele);
             free(orig_ref);
@@ -835,6 +838,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
     return 1;
 
 oom:
+    free_norm_result(result);
     free(out_ref);
     free_string_array(out_alts, n_orig_alt);
     free_kstring_array(als, n_allele);
