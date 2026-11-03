@@ -26,7 +26,7 @@ FROM query(CASE
     WHEN upper(coalesce(getvariable('score_columns')::VARCHAR, 'PLINK')) NOT IN
          ('PLINK', 'PLINK2', 'REGENIE', 'SAIGE', 'BOLT', 'BOLT_LMM', 'METAL', 'PGS', 'SSF', 'GWAS-SSF')
         THEN error('score_reference: unsupported columns preset')
-    WHEN len(list_distinct(list_transform(getvariable('score_summaries'), p ->
+    WHEN len(list_distinct(list_transform(getvariable('score_summaries'), lambda p:
          lower(regexp_replace(regexp_extract(p, '[^/]+$'), '(\.(txt|tsv|ssf|gz|bgz))+$', '')))))
          <> len(getvariable('score_summaries'))
         THEN error('score_reference: duplicate PRS names')
@@ -46,7 +46,7 @@ summaries AS (
 -- Each scan has its own ordinal: UNION scheduling cannot decide which duplicate wins.
 summary_rows AS MATERIALIZED (
     SELECT * FROM query(array_to_string(list_transform(getvariable('score_summaries'),
-        p -> 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+        lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
              ' AS path, row_number() OVER () AS ordinal, to_json(t) AS fields FROM read_tabix(' ||
              chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
              ', header := true) t'), ' UNION ALL '))
@@ -86,13 +86,13 @@ selected_aliases AS (
 ),
 header_mapping AS (
     SELECT path, map_from_entries(list({'key': role, 'value':
-        '/' || list_first(list_filter(json_keys(fields), k -> lower(k) = lower(
-            list_last(list_filter(names, a -> list_contains(list_transform(json_keys(fields), k -> lower(k)), lower(a)))))))})) AS mapping
+        '/' || list_first(list_filter(json_keys(fields), lambda k: lower(k) = lower(
+            list_last(list_filter(names, lambda a: list_contains(list_transform(json_keys(fields), lambda k: lower(k)), lower(a)))))))})) AS mapping
     FROM summary_rows CROSS JOIN selected_aliases WHERE ordinal = 1
     GROUP BY path
 ),
 fields AS (
-    SELECT path, ordinal, map_from_entries(list_transform(map_entries(mapping), m ->
+    SELECT path, ordinal, map_from_entries(list_transform(map_entries(mapping), lambda m:
         {'key': m['key'], 'value': json_extract_string(fields, m['value'])})) AS f,
         mapping['CHR'] IS NULL OR mapping['BP'] IS NULL AS lack_position
     FROM summary_rows JOIN header_mapping USING (path)
@@ -161,9 +161,9 @@ calls AS (
             WHEN 'DS' THEN 'CASE WHEN typeof(c.format.DS) LIKE ''%[]'' THEN c.format.DS::FLOAT[] ELSE [c.format.DS::FLOAT] END'
             ELSE error('score_reference: supported use values are GT and DS') END ||
         ' AS dosage FROM (SELECT *, unnest(calls) AS c, ' ||
-        'list_max(list_transform(calls, c -> len(c.alleles))) AS gt_width, ' ||
+        'list_max(list_transform(calls, lambda c: len(c.alleles))) AS gt_width, ' ||
         CASE coalesce(getvariable('score_use'), 'GT') WHEN 'DS' THEN
-            'list_max(list_transform(calls, c -> CASE WHEN typeof(c.format.DS) LIKE ''%[]'' THEN len(c.format.DS::FLOAT[]) ELSE 1 END))'
+            'list_max(list_transform(calls, lambda c: CASE WHEN typeof(c.format.DS) LIKE ''%[]'' THEN len(c.format.DS::FLOAT[]) ELSE 1 END))'
             ELSE 'NULL::BIGINT' END || ' AS ds_width FROM read_geno(' ||
         chr(39) || replace(getvariable('score_path'), chr(39), chr(39) || chr(39)) || chr(39) ||
         ', scan_mode := ''sequential'', include_filter := true, samples := ' ||
@@ -211,9 +211,9 @@ file_intervals AS (
                 ELSE values[2]::BIGINT + CASE WHEN is_bed THEN 1 ELSE 0 END END AS lo,
            try_cast(coalesce(values[3], values[2]) AS BIGINT) AS hi
     FROM query(coalesce(nullif(array_to_string(list_transform(
-        list_filter([getvariable('score_regions_file')::VARCHAR, getvariable('score_targets_file')::VARCHAR], p -> p IS NOT NULL),
-        p -> 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
-             ' AS path, row_number() OVER () AS data_row, list_transform(json_keys(to_json(t)), k -> json_extract_string(to_json(t), ''/'' || k)) AS values FROM read_tabix(' ||
+        list_filter([getvariable('score_regions_file')::VARCHAR, getvariable('score_targets_file')::VARCHAR], lambda p: p IS NOT NULL),
+        lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ' AS path, row_number() OVER () AS data_row, list_transform(json_keys(to_json(t)), lambda k: json_extract_string(to_json(t), ''/'' || k)) AS values FROM read_tabix(' ||
              chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) || ', header := false) t'),
         ' UNION ALL '), ''), 'SELECT NULL::VARCHAR AS path, NULL::BIGINT AS data_row, []::VARCHAR[] AS values WHERE false')) AS f
     JOIN selection USING (path),
@@ -243,7 +243,7 @@ $score$ || CASE WHEN coalesce(getvariable('score_regions')::VARCHAR, '') = ''
                        AND c.POS + CASE WHEN i.mode = 0 THEN 0
                            WHEN EXISTS (SELECT 1 FROM read_hts_header(getvariable('score_path'))
                                         WHERE record_type = 'INFO' AND id = 'END')
-                                OR list_any_value(list_filter(c.ALT, a -> regexp_matches(a, '[<>\[\]]'))) IS NOT NULL
+                                OR list_any_value(list_filter(c.ALT, lambda a: regexp_matches(a, '[<>\[\]]'))) IS NOT NULL
                            THEN error('score_reference: END/symbolic span overlap is unsupported: ' || getvariable('score_path'))
                            ELSE len(c.REF) - 1 END >= i.lo) = false)
     )
@@ -258,10 +258,10 @@ matched AS (
                     getvariable('score_path') || ':' || c.CHROM || ':' || c.POS)
                 ELSE true END AS available,
            CASE WHEN mode = 'GT' THEN alleles[1] IS NULL OR (len(alleles) >= 2 AND alleles[2] IS NULL)
-                ELSE len(list_filter(dosage, x -> x IS NOT NULL)) <> len(ALT) END AS missing,
-           CASE WHEN mode = 'GT' THEN len(list_filter(alleles[1:2], x -> x = allele))::FLOAT
+                ELSE len(list_filter(dosage, lambda x: x IS NOT NULL)) <> len(ALT) END AS missing,
+           CASE WHEN mode = 'GT' THEN len(list_filter(alleles[1:2], lambda x: x = allele))::FLOAT
                 WHEN allele > 0 THEN dosage[allele]
-                ELSE list_reduce(list_prepend(2::FLOAT, dosage), (a, b) -> (a - b)::FLOAT) END AS dose
+                ELSE list_reduce(list_prepend(2::FLOAT, dosage), lambda a, b: (a - b)::FLOAT) END AS dose
     FROM (SELECT *, unnest(['I:' || ID, 'P:' || CHROM || ':' || POS]) AS marker_key FROM selected_calls) c
     JOIN markers m USING (marker_key)
     CROSS JOIN options
@@ -290,12 +290,12 @@ results AS (
 SELECT SAMPLE,
 $score$ || array_to_string(list_transform(
     flatten(list_transform(
-        list_transform(getvariable('score_summaries'), p -> regexp_replace(regexp_extract(p, '[^/]+$'),
+        list_transform(getvariable('score_summaries'), lambda p: regexp_replace(regexp_extract(p, '[^/]+$'),
             '(\.(txt|tsv|ssf|gz|bgz))+$', '')),
-        p -> list_transform(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0]), q ->
+        lambda p: list_transform(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0]), lambda q:
             {'metric': p || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END,
              'count_metric': p || '_CNT' || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END}))),
-    m -> 'max(score) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
+    lambda m: 'max(score) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
          ') AS "' || replace(m['metric'], '"', '""') || '"' ||
          CASE WHEN coalesce(getvariable('score_counts'), false) THEN
              ', max(n) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
