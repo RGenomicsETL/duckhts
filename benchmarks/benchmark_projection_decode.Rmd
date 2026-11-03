@@ -268,20 +268,36 @@ print(knitr::kable(meta, format = "pipe"))
 
 ## Scaling
 
-Candidate median seconds per scale and the time exponent per doubling
-(`log2(t(2s) / t(s))`); a ladder with a failed cell has no exponent.
+Candidate median seconds per scale. Region ladders do not double the records exactly
+(the quarter, half and whole chromosome are cut by base pairs), so the exponent is taken
+against the records each scan returned, `log(t2 / t1) / log(n2 / n1)`, from the
+correctness fingerprints (reads counted, for bin counts). mosdepth's ladder doubles depth through the 1x/2x/4x BAMs, so
+its exponent uses n2 / n1 = 2. A ladder with a failed cell has no exponent.
 
 ```{r scaling, results='asis'}
 cand <- cell[cell$engine == "candidate" & cell$workload %in% c("vcf_site", "cram_count", "cram_pos",
                                                                "cram_qname", "cram_bin_counts",
                                                                "mosdepth_median"), ]
+checks <- utils::read.csv("benchmarks/data/projection_decode_checks.csv")
+# The first fingerprint field is the scan's record count; bin counts lead with the number
+# of bins and give the reads counted second.
+field <- ifelse(startsWith(checks$key, "cram_bin_counts"), 2L, 1L)
+records <- setNames(suppressWarnings(as.numeric(mapply(function(x, i) strsplit(x, ",", fixed = TRUE)[[1L]][i],
+                                                        checks$baseline, field))), checks$key)
 scaling <- do.call(rbind, lapply(split(cand, list(cand$workload, cand$threads), drop = TRUE), function(g) {
   g <- g[order(match(g$scale, c("1x", "2x", "4x"))), ]
   t <- g$seconds
+  n <- records[paste(g$workload, g$scale)]
+  depth_ladder <- g$workload[[1L]] == "mosdepth_median" || anyNA(n)
+  if (depth_ladder) n <- 2^(seq_along(t) - 1L)
   data.frame(workload = g$workload[[1L]], threads = g$threads[[1L]],
-             scales = paste(g$scale, collapse = "/"), seconds = paste(t, collapse = " / "),
+             scales = paste(g$scale, collapse = "/"),
+             records = if (depth_ladder) "depth 1x / 2x / 4x" else
+               paste(format(n, big.mark = ",", scientific = FALSE, trim = TRUE), collapse = " / "),
+             seconds = paste(t, collapse = " / "),
              peak_rss_mib = paste(g$peak_rss_mib, collapse = " / "),
-             exponents = paste(round(log2(t[-1L] / t[-length(t)]), 2), collapse = ", "))
+             exponents = paste(round(log(t[-1L] / t[-length(t)]) / log(n[-1L] / n[-length(n)]), 2),
+                               collapse = ", "))
 }))
 scaling <- scaling[order(match(scaling$workload, workloads$workload), scaling$threads), ]
 print(knitr::kable(scaling, format = "pipe", row.names = FALSE))

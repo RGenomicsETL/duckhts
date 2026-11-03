@@ -1088,7 +1088,10 @@ static int bam_cram_required_fields(const bam_bind_data_t *bind,
     for (idx_t i = 0; i < column_count; i++) {
         idx_t col_id = column_ids[i];
         if (col_id == BAM_COL_QNAME) {
-            fields |= SAM_QNAME;
+            /* Names discarded at encoding are generated per pair from the mate
+             * links, which htslib resolves only when a mate field is requested
+             * (cram_decode.c:2101-2110); without them mates get different names. */
+            fields |= SAM_QNAME | SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
         } else if (col_id == BAM_COL_MAPQ) {
             fields |= SAM_MAPQ;
         } else if (col_id == BAM_COL_RNEXT) {
