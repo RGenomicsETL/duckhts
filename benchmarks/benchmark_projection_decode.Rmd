@@ -34,8 +34,8 @@ All inputs resolve through the `duckhtsbench` registry; rendering does not downl
 | Input | Registry id | Shape |
 |---|---|---|
 | VCF | `ancestry_1000g_chr22` | 1000 Genomes phase 3 chr22, 1,103,547 records, 2,504 samples, bgzipped text VCF with a tabix index |
-| CRAM | `insert_size_hg00403_chr20_cram_2x` with `liftover_grch38_fasta` | 30x HG00403 chr20 repeated twice, 33.6 M reads, CRAM 3 against GRCh38 |
-| BAM | `insert_size_hg00403_chr20_bam` | 30x HG00403 chr20, one populated reference |
+| CRAM | `insert_size_hg00403_chr20_cram_2x`, `_cram_4x`, with `liftover_grch38_fasta` | 30x HG00403 chr20 repeated twice and four times, CRAM 3 against GRCh38 |
+| BAM | `insert_size_hg00403_chr20_bam`, `_bam_2x`, `_bam_4x` | 30x HG00403 chr20 and its 2x and 4x repeats, one populated reference |
 
 ## Method
 
@@ -48,10 +48,23 @@ All inputs resolve through the `duckhtsbench` registry; rendering does not downl
   for the whole process. Three processes per engine, workload and thread count.
 - Each query consumes its output through an exact fingerprint (count plus summed
   hashes), so DuckDB cannot prune the work under test.
+- **Scale ladders.** Each changed path is measured at 1×, 2× and 4× of its growth
+  dimension with everything else fixed: VCF site scans and CRAM scans by records, through
+  region queries over a quarter, half and all of chr22 or chr20 (on the 4x CRAM); mosdepth
+  by depth, through the 1x/2x/4x BAMs. `bam_bin_counts` scans whole files and the registry
+  has only the 2x and 4x CRAMs, so it has two points. The full-file VCF site and INFO scans
+  and a tidy FORMAT region are kept as single points. The time exponent per doubling,
+  `log2(t(2s) / t(s))`, is reported for the candidate; above 1.25 it would need
+  investigation for these linear scans.
+- **Memory budget, set before measuring:** 512 MiB for VCF scans (one record and its
+  decoded fields live at a time), 1 GiB for CRAM scans and bin counts (decoder slices,
+  reference and bins), and 3 GiB for mosdepth (a whole-contig int32 array per processing
+  worker, 2 × 258 MB for chr20, plus output buffers and the median histogram). A process
+  above its budget fails its cell.
 - **Correctness before timing:** for every workload, the baseline's and the candidate's
   fingerprints at one thread must be identical; for mosdepth, the MD5 of every output
   file must be identical. A timed run whose result differs from that fingerprint fails
-  its cell. Limits set before measuring: 900 s per process and 20 GiB peak RSS.
+  its cell. Each process is limited to 900 s.
 
 ```{r driver}
 suppressPackageStartupMessages(library(duckhtsbench))
@@ -63,39 +76,58 @@ baseline <- normalizePath(Sys.getenv(
   duckhts_bench_cache_path("benchmarks/projection-decode/baseline/duckhts.duckdb_extension")))
 engines <- c(baseline = baseline, candidate = candidate)
 wall_limit_s <- 900
-rss_ceiling_bytes <- 20 * 1024^3
 
 vcf <- duckhts_bench_artifact_path("ancestry_1000g_chr22")
-cram <- duckhts_bench_artifact_path("insert_size_hg00403_chr20_cram_2x")
+cram_2x <- duckhts_bench_artifact_path("insert_size_hg00403_chr20_cram_2x")
+cram_4x <- duckhts_bench_artifact_path("insert_size_hg00403_chr20_cram_4x")
 reference <- duckhts_bench_artifact_path("liftover_grch38_fasta")
-bam <- duckhts_bench_artifact_path("insert_size_hg00403_chr20_bam")
+bams <- c("1x" = duckhts_bench_artifact_path("insert_size_hg00403_chr20_bam"),
+          "2x" = duckhts_bench_artifact_path("insert_size_hg00403_chr20_bam_2x"),
+          "4x" = duckhts_bench_artifact_path("insert_size_hg00403_chr20_bam_4x"))
 
 sql_string <- function(x) paste0("'", gsub("'", "''", x, fixed = TRUE), "'")
 v <- sql_string(vcf)
-cr <- sprintf("%s, reference := %s", sql_string(cram), sql_string(reference))
+cram_args <- function(path) sprintf("%s, reference := %s", sql_string(path), sql_string(reference))
 
-workloads <- data.frame(
-  workload = c("vcf_site", "vcf_info", "vcf_tidy_region",
-               "cram_count", "cram_pos", "cram_qname", "cram_bin_counts",
-               "mosdepth_median"),
-  change = c(rep("VCF parsing", 3), rep("CRAM fields", 4), "mosdepth medians"),
-  sql = c(
-    sprintf("SELECT count(*), sum(POS), sum(hash(POS)) FROM read_bcf(%s);", v),
-    sprintf("SELECT count(*), count(INFO_AF), sum(hash(INFO_AF)) FROM read_bcf(%s);", v),
-    sprintf(paste("SELECT count(*), count(DISTINCT POS), sum(hash(POS, SAMPLE_ID, FORMAT_GT))",
-                  "FROM read_bcf(%s, region := '22:20000000-20500000', tidy_format := true);"), v),
-    sprintf("SELECT count(*) FROM read_bam(%s);", cr),
-    sprintf("SELECT count(*), sum(POS), sum(hash(POS)) FROM read_bam(%s);", cr),
-    sprintf("SELECT count(*), sum(hash(QNAME)) FROM read_bam(%s);", cr),
-    sprintf("SELECT count(*), sum(count_total), sum(hash(chrom, start, count_total)) FROM bam_bin_counts(%s, 100000, reference := %s);",
-            sql_string(cram), sql_string(reference)),
-    NA_character_),
-  stringsAsFactors = FALSE
-)
+# Scale ladders hold everything else fixed. VCF and CRAM scans grow with records through
+# region queries over a quarter, half and all of the chromosome; mosdepth grows with depth
+# through the 1x/2x/4x BAMs; bin counts have only the registered 2x and 4x CRAMs.
+vcf_regions <- c("1x" = "22:1-24850000", "2x" = "22:1-33650000", "4x" = "22:1-51304566")
+cram_regions <- c("1x" = "chr20:1-16111041", "2x" = "chr20:1-32222083", "4x" = "chr20")
+ceiling_mib <- c(vcf = 512, cram = 1024, bin_counts = 1024, mosdepth = 3072)
+
+ladder <- function(workload, change, scales, sql_for, budget) {
+  data.frame(workload = workload, change = change, scale = names(scales),
+             sql = vapply(scales, sql_for, character(1)), ceiling_mib = ceiling_mib[[budget]],
+             stringsAsFactors = FALSE, row.names = NULL)
+}
+workloads <- rbind(
+  ladder("vcf_site", "VCF parsing", vcf_regions, function(r) sprintf(
+    "SELECT count(*), sum(POS), sum(hash(POS)) FROM read_bcf(%s, region := %s);", v, sql_string(r)), "vcf"),
+  ladder("vcf_site_file", "VCF parsing", c("full" = "full"), function(r) sprintf(
+    "SELECT count(*), sum(POS), sum(hash(POS)) FROM read_bcf(%s);", v), "vcf"),
+  ladder("vcf_info", "VCF parsing", c("full" = "full"), function(r) sprintf(
+    "SELECT count(*), count(INFO_AF), sum(hash(INFO_AF)) FROM read_bcf(%s);", v), "vcf"),
+  ladder("vcf_tidy_region", "VCF parsing", c("0.5 Mb" = "22:20000000-20500000"), function(r) sprintf(paste(
+    "SELECT count(*), count(DISTINCT POS), sum(hash(POS, SAMPLE_ID, FORMAT_GT))",
+    "FROM read_bcf(%s, region := %s, tidy_format := true);"), v, sql_string(r)), "vcf"),
+  ladder("cram_count", "CRAM fields", cram_regions, function(r) sprintf(
+    "SELECT count(*) FROM read_bam(%s, region := %s);", cram_args(cram_4x), sql_string(r)), "cram"),
+  ladder("cram_pos", "CRAM fields", cram_regions, function(r) sprintf(
+    "SELECT count(*), sum(POS), sum(hash(POS)) FROM read_bam(%s, region := %s);",
+    cram_args(cram_4x), sql_string(r)), "cram"),
+  ladder("cram_qname", "CRAM fields", cram_regions, function(r) sprintf(
+    "SELECT count(*), sum(hash(QNAME)) FROM read_bam(%s, region := %s);",
+    cram_args(cram_4x), sql_string(r)), "cram"),
+  ladder("cram_bin_counts", "CRAM fields", c("2x" = cram_2x, "4x" = cram_4x), function(path) sprintf(
+    "SELECT count(*), sum(count_total), sum(hash(chrom, start, count_total)) FROM bam_bin_counts(%s, 100000, reference := %s);",
+    sql_string(path), sql_string(reference)), "bin_counts"),
+  ladder("mosdepth_median", "mosdepth medians", bams, function(path) path, "mosdepth"))
+workloads$key <- paste(workloads$workload, workloads$scale)
 
 # mosdepth writes files: each process gets its own prefix, and the result is the
 # MD5 of every output file, so identical bytes are the correctness check.
-mosdepth_sql <- function(prefix) {
+mosdepth_sql <- function(prefix, bam) {
   sprintf(paste("SELECT success FROM duckhts_mosdepth(%s, %s, by := '500', use_median := TRUE,",
                 "no_per_base := TRUE, threads := 1, overwrite := TRUE);"),
           sql_string(prefix), sql_string(bam))
@@ -137,41 +169,41 @@ run_process <- function(extension, threads, sql) {
     result = if (length(results)) utils::tail(results, 1L) else NA_character_)
 }
 
-run_workload <- function(engine, threads, workload) {
-  if (workload != "mosdepth_median") {
-    return(run_process(engines[[engine]], threads, workloads$sql[workloads$workload == workload]))
-  }
+run_workload <- function(engine, threads, key) {
+  w <- workloads[workloads$key == key, ]
+  if (w$workload != "mosdepth_median") return(run_process(engines[[engine]], threads, w$sql))
   dir <- tempfile("mosdepth_")
   dir.create(dir)
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   prefix <- file.path(dir, "out")
-  got <- run_process(engines[[engine]], threads, mosdepth_sql(prefix))
+  got <- run_process(engines[[engine]], threads, mosdepth_sql(prefix, w$sql))
   got$result <- if (got$ok) mosdepth_files(prefix) else NA_character_
   got
 }
 ```
 
 ```{r measure, eval=params$measure}
-stopifnot(file.exists(c(vcf, cram, reference, bam)), all(file.exists(engines)))
+stopifnot(file.exists(c(vcf, cram_2x, cram_4x, reference, bams)), all(file.exists(engines)))
 dir.create("benchmarks/data", showWarnings = FALSE)
 
-checks <- do.call(rbind, lapply(workloads$workload, function(w) {
-  before <- run_workload("baseline", 1L, w)
-  after <- run_workload("candidate", 1L, w)
-  data.frame(workload = w, baseline = before$result, candidate = after$result,
+checks <- do.call(rbind, lapply(workloads$key, function(k) {
+  before <- run_workload("baseline", 1L, k)
+  after <- run_workload("candidate", 1L, k)
+  data.frame(key = k, baseline = before$result, candidate = after$result,
              equal = before$ok && after$ok && identical(before$result, after$result))
 }))
 utils::write.csv(checks, "benchmarks/data/projection_decode_checks.csv", row.names = FALSE)
 if (!all(checks$equal)) stop("baseline and candidate results differ; not timing")
 
 rows <- list()
-for (w in workloads$workload) for (threads in params$threads) for (rep in seq_len(params$reps)) {
+for (k in workloads$key) for (threads in params$threads) for (rep in seq_len(params$reps)) {
+  w <- workloads[workloads$key == k, ]
   for (engine in names(engines)) {
-    got <- run_workload(engine, threads, w)
+    got <- run_workload(engine, threads, k)
     rows[[length(rows) + 1L]] <- data.frame(
-      workload = w, engine = engine, threads = threads, rep = rep,
-      ok = got$ok && identical(got$result, checks$baseline[checks$workload == w]) &&
-        is.finite(got$rss_bytes) && got$rss_bytes <= rss_ceiling_bytes,
+      workload = w$workload, scale = w$scale, engine = engine, threads = threads, rep = rep,
+      ok = got$ok && identical(got$result, checks$baseline[checks$key == k]) &&
+        is.finite(got$rss_bytes) && got$rss_bytes <= w$ceiling_mib * 2^20,
       seconds = got$seconds, rss_bytes = got$rss_bytes, cpu_seconds = got$cpu_seconds,
       result = got$result)
   }
@@ -198,7 +230,8 @@ utils::write.csv(meta, "benchmarks/data/projection_decode_metadata.csv", row.nam
 
 ```{r checks}
 checks <- utils::read.csv("benchmarks/data/projection_decode_checks.csv")
-knitr::kable(checks[, c("workload", "equal")], format = "pipe")
+checks$records <- sub(",.*", "", checks$baseline)
+knitr::kable(checks[, c("key", "records", "equal")], format = "pipe")
 ```
 
 ## Results
@@ -210,7 +243,7 @@ over-ceiling or mismatching process is marked failed and has no median or speedu
 ```{r results, results='asis'}
 raw <- utils::read.csv("benchmarks/data/projection_decode.csv")
 meta <- utils::read.csv("benchmarks/data/projection_decode_metadata.csv")
-keys <- c("workload", "engine", "threads")
+keys <- c("workload", "scale", "engine", "threads")
 cells <- split(raw, raw[keys], drop = TRUE)
 cell <- do.call(rbind, lapply(cells, function(rows) {
   passed <- nrow(rows) == params$reps && all(rows$ok)
@@ -223,14 +256,35 @@ cell <- do.call(rbind, lapply(cells, function(rows) {
     cpu_seconds = if (passed) round(stats::median(rows$cpu_seconds), 1) else NA_real_,
     row.names = NULL)
 }))
-wide <- reshape(cell, idvar = c("workload", "threads"), timevar = "engine", direction = "wide")
+wide <- reshape(cell, idvar = c("workload", "scale", "threads"), timevar = "engine", direction = "wide")
 both_pass <- !is.na(wide$seconds.baseline) & !is.na(wide$seconds.candidate)
 wide$speedup <- ifelse(both_pass, round(wide$seconds.baseline / wide$seconds.candidate, 2), NA_real_)
-wide <- wide[order(match(wide$workload, workloads$workload), wide$threads), ]
+wide <- wide[order(match(paste(wide$workload, wide$scale), workloads$key), wide$threads), ]
 print(knitr::kable(wide, format = "pipe", row.names = FALSE))
 failed <- raw[!raw$ok, ]
 if (nrow(failed)) print(knitr::kable(failed, format = "pipe", caption = "Failed processes"))
 print(knitr::kable(meta, format = "pipe"))
+```
+
+## Scaling
+
+Candidate median seconds per scale and the time exponent per doubling
+(`log2(t(2s) / t(s))`); a ladder with a failed cell has no exponent.
+
+```{r scaling, results='asis'}
+cand <- cell[cell$engine == "candidate" & cell$workload %in% c("vcf_site", "cram_count", "cram_pos",
+                                                               "cram_qname", "cram_bin_counts",
+                                                               "mosdepth_median"), ]
+scaling <- do.call(rbind, lapply(split(cand, list(cand$workload, cand$threads), drop = TRUE), function(g) {
+  g <- g[order(match(g$scale, c("1x", "2x", "4x"))), ]
+  t <- g$seconds
+  data.frame(workload = g$workload[[1L]], threads = g$threads[[1L]],
+             scales = paste(g$scale, collapse = "/"), seconds = paste(t, collapse = " / "),
+             peak_rss_mib = paste(g$peak_rss_mib, collapse = " / "),
+             exponents = paste(round(log2(t[-1L] / t[-length(t)]), 2), collapse = ", "))
+}))
+scaling <- scaling[order(match(scaling$workload, workloads$workload), scaling$threads), ]
+print(knitr::kable(scaling, format = "pipe", row.names = FALSE))
 ```
 
 `read_bam` and `bam_bin_counts` read one populated reference here, so their CRAM cells
