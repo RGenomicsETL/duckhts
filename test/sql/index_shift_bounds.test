@@ -1,0 +1,44 @@
+require duckhts
+
+# Reject shifts before htslib can overflow or loop. Output paths are disposable.
+statement error
+SELECT * FROM bam_index('test/data/range.bam', min_shift := 40,
+  index_path := '__WORKING_DIRECTORY__/test/sql/shift.bam.csi', threads := 1);
+----
+min_shift must be between 0 and 30
+
+statement error
+SELECT * FROM bam_index('test/data/range.bam', min_shift := 100,
+  index_path := '__WORKING_DIRECTORY__/test/sql/shift.bam.csi', threads := 1);
+----
+min_shift must be between 0 and 30
+
+statement error
+SELECT * FROM bcf_index('test/data/formatcols.vcf.gz', min_shift := 40,
+  index_path := '__WORKING_DIRECTORY__/test/sql/shift.vcf.csi', threads := 1);
+----
+min_shift must be between 0 and 30
+
+statement error
+SELECT * FROM bcf_index('test/data/formatcols.vcf.gz', min_shift := 100,
+  index_path := '__WORKING_DIRECTORY__/test/sql/shift.vcf.csi', threads := 1);
+----
+min_shift must be between 0 and 30
+
+statement error
+SELECT * FROM tabix_index('test/data/formatcols.vcf.gz', min_shift := 100,
+  index_path := '__WORKING_DIRECTORY__/test/sql/shift.tabix.csi', threads := 1);
+----
+min_shift must be between 0 and 30
+
+query I
+SELECT success FROM bam_index('test/data/range.bam', min_shift := 30,
+  index_path := '__WORKING_DIRECTORY__/test/sql/shift.bam.csi', threads := 1);
+----
+true
+
+query I
+SELECT success FROM bcf_index('test/data/formatcols.vcf.gz', min_shift := 30,
+  index_path := '__WORKING_DIRECTORY__/test/sql/shift.vcf.csi', threads := 1);
+----
+true

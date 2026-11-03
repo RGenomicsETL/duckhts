@@ -1353,6 +1353,7 @@
       "r_wrapper": "rduckhts_bam_index",
       "description": "Build a BAM or CRAM index and report the written index path and format.",
       "details": {
+        "Limits": "min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.",
         "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
       },
       "examples": [
@@ -1368,6 +1369,7 @@
       "r_wrapper": "rduckhts_bcf_index",
       "description": "Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.",
       "details": {
+        "Limits": "min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.",
         "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
       },
       "examples": [
@@ -1383,6 +1385,7 @@
       "r_wrapper": "rduckhts_tabix_index",
       "description": "Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns.",
       "details": {
+        "Limits": "min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.",
         "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
       },
       "examples": [

@@ -2690,6 +2690,10 @@ Returns:
 table
 ```
 
+### Limits
+
+min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.
+
 ### Execution
 
 The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
@@ -2716,6 +2720,10 @@ Returns:
 table
 ```
 
+### Limits
+
+min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.
+
 ### Execution
 
 The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
@@ -2741,6 +2749,10 @@ Returns:
 ```
 table
 ```
+
+### Limits
+
+min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.
 
 ### Execution
 
