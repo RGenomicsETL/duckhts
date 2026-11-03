@@ -193,7 +193,12 @@ rduckhts_bcf <- function(
 #' @param index_path Optional explicit path to index file (.bai/.csi/.crai)
 #' @param reference Optional reference file path for CRAM files
 #' @param standard_tags Logical. If TRUE, include typed standard SAMtags columns. Default FALSE.
-#' @param auxiliary_tags Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags. Default FALSE.
+#' @param auxiliary_tags Logical, or a character vector of two-character tag
+#'   names. \code{TRUE} adds an \code{AUXILIARY_TAGS} map of the non-standard
+#'   tags; tag names such as \code{c("UR", "UB")} add one \code{VARCHAR} column
+#'   per tag instead, formatted like the map values and \code{NULL} when a
+#'   record lacks the tag. A named tag must not be a \code{standard_tags}
+#'   column. Default \code{FALSE}.
 #' @param sequence_encoding Character. Sequence encoding for the SEQ column:
 #'   \code{"string"} (default) returns decoded bases as \code{VARCHAR};
 #'   \code{"nt16"} returns raw htslib nt16 4-bit codes as \code{UTINYINT[]}.
@@ -257,7 +262,7 @@ rduckhts_bam <- function(
     params$standard_tags <- if (isTRUE(standard_tags)) "true" else "false"
   }
   if (!is.null(auxiliary_tags)) {
-    params$auxiliary_tags <- if (isTRUE(auxiliary_tags)) "true" else "false"
+    params$auxiliary_tags <- .auxiliary_tags_sql(con, auxiliary_tags)
   }
   if (!is.null(sequence_encoding)) {
     params$sequence_encoding <- sql_quote_string(con, sequence_encoding)
@@ -2813,8 +2818,27 @@ rduckhts_score <- function(
 # Multi-file reading helpers (internal)
 # --------------------------------------------------------------------------
 
+# Render auxiliary_tags for read_bam: TRUE/FALSE selects the AUXILIARY_TAGS
+# map; a character vector of two-character tag names selects one VARCHAR
+# column per tag. The extension validates the names themselves.
+.auxiliary_tags_sql <- function(con, value) {
+  if (is.logical(value) && length(value) == 1L && !is.na(value)) {
+    return(if (value) "true" else "false")
+  }
+  if (is.character(value) && length(value) >= 1L && length(value) <= 64L &&
+      !anyNA(value)) {
+    items <- vapply(value, function(item) sql_quote_string(con, item), character(1))
+    return(paste0("[", paste(items, collapse = ", "), "]"))
+  }
+  stop("auxiliary_tags must be TRUE, FALSE or a character vector of 1 to 64 tag names",
+       call. = FALSE)
+}
+
 .format_hts_param <- function(con, name, value) {
   param_name <- sql_quote_identifier(con, name)
+  if (identical(name, "auxiliary_tags")) {
+    return(sprintf("%s := %s", param_name, .auxiliary_tags_sql(con, value)))
+  }
   if (identical(name, "decompression_threads")) {
     value <- .validate_nonnegative_integer_param(value, name)
     return(sprintf("%s := %d", param_name, value))
@@ -2990,7 +3014,8 @@ rduckhts_score <- function(
 #' @param index_path Optional index file path.
 #' @param reference Optional reference FASTA path (for CRAM).
 #' @param standard_tags Logical; include standard SAM tag columns.
-#' @param auxiliary_tags Logical; include auxiliary tag map column.
+#' @param auxiliary_tags Logical, or a character vector of tag names; see
+#'   [rduckhts_bam()].
 #' @param sequence_encoding Optional sequence encoding (e.g. \code{"nt16"}).
 #' @param quality_representation Optional quality representation.
 #' @param cigar_representation Optional CIGAR representation; use

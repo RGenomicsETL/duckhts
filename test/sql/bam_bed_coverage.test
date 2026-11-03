@@ -86,3 +86,49 @@ SELECT * FROM duckhts_bam_bed_coverage(
 );
 ----
 duckhts_bam_bed_coverage: fragment_mode is not implemented yet
+
+# Coverage is computed per execution, not at bind: a prepared statement returns
+# the same rows each time it executes. The values are the rows asserted first above.
+statement ok
+PREPARE cov AS
+SELECT count(*), sum(numreads_post)
+FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed');
+
+query II
+EXECUTE cov;
+----
+3	4
+
+query II
+EXECUTE cov;
+----
+3	4
+
+# The BED file is read when the query executes: a prepared statement sees a
+# rewritten BED file. Values are the cluster and zero rows asserted first above.
+statement ok
+COPY (SELECT '11' AS chrom, 1000 AS start, 1200 AS "end", 'cluster' AS name)
+TO '__WORKING_DIRECTORY__/test_bed_coverage_reread.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE);
+
+statement ok
+PREPARE cov_reread AS
+SELECT count(*), sum(numreads_post)
+FROM duckhts_bam_bed_coverage(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',
+  '__WORKING_DIRECTORY__/test_bed_coverage_reread.bed');
+
+query II
+EXECUTE cov_reread;
+----
+1	4
+
+statement ok
+COPY (SELECT * FROM (VALUES ('11', 1000, 1200, 'cluster'), ('11', 20000, 20100, 'zero')) t(chrom, start, "end", name))
+TO '__WORKING_DIRECTORY__/test_bed_coverage_reread.bed' (FORMAT CSV, DELIMITER '\t', HEADER FALSE);
+
+query II
+EXECUTE cov_reread;
+----
+2	4

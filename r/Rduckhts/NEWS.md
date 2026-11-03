@@ -1,5 +1,20 @@
 # Rduckhts (development version)
 
+- `rduckhts_bam()` and `rduckhts_bam_multi()` accept tag names in `auxiliary_tags`, such as
+  `c("UR", "UB")`, and then return one text column per tag instead of the
+  `AUXILIARY_TAGS` map; a single name is still sent as a list. `TRUE` and `FALSE` keep
+  their meaning. Reading a few tags no longer builds a map for every record.
+- A BAM whose reads sit on one large reference, such as a single-chromosome BAM, now
+  scans on several threads: the bundled extension cuts such a reference into
+  byte-balanced pieces from its index. The records returned do not change.
+- `rduckhts_bam_bin_counts()` and `bam_bin_counts()` in SQL scan when the query executes,
+  not when it is bound. With duckdb 1.5, a SQL `PREPARE` statement executed twice with
+  `EXECUTE` returned the bins the first time and no rows the second; it now returns the
+  same bins each time. Queries that pass the path as a DBI parameter bind again at every
+  `dbBind()` and were not affected. The scan runs on DuckDB's worker threads, so
+  `SET threads` bounds it, instead of up to 16 threads of its own.
+- `rduckhts_bam_bed_coverage()` reads the BED file and alignments when the query executes,
+  so a prepared query sees the files as they are at each execution.
 - `rduckhts_functions()` and the bundled function reference: `regionkey`,
   `duckhts_ancestry_proportions`, `bcftools_norm_row` and `bcftools_munge_row` no longer
   show `name := default` arguments, which DuckDB ignores on scalar functions. The

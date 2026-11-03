@@ -1,0 +1,151 @@
+# name: test/sql/bam_named_tags.test
+# description: read_bam auxiliary_tags := [...] returns one VARCHAR column per named tag
+# group: [duckhts]
+
+require duckhts
+
+# Each value is the SAM text after TYPE: for every AUX type, from the fixture's
+# own records; a record without the tag gives NULL, an empty Z tag ''.
+query TTTTTTTTTT
+SELECT QNAME, XZ, XH, XA, XI, XU, XF, X1, X6, X7
+FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_materialize.sam',
+              auxiliary_tags := ['XZ', 'XH', 'XA', 'XI', 'XU', 'XF', 'X1', 'X6', 'X7'])
+ORDER BY QNAME;
+----
+r1	previous	0A1F	q	-2147483648	4294967295	1.23457	c,-128,127	I,0,4294967295	f,0,1.25,1e+30
+r2	(empty)	NULL	NULL	NULL	NULL	NULL	NULL	NULL	f,-1.5,2.25
+r3	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL
+
+# The named columns equal the AUXILIARY_TAGS map values, an independent code
+# path, for every tag of every record, on BAM, SAM and CRAM fixtures.
+query T
+WITH checks AS (
+  SELECT 'materialize' AS fixture, count(*) AS records,
+         count(*) FILTER (WHERE m.t['XZ'] IS DISTINCT FROM n.XZ OR m.t['XH'] IS DISTINCT FROM n.XH
+                             OR m.t['XA'] IS DISTINCT FROM n.XA OR m.t['XI'] IS DISTINCT FROM n.XI
+                             OR m.t['XU'] IS DISTINCT FROM n.XU OR m.t['XF'] IS DISTINCT FROM n.XF
+                             OR m.t['X1'] IS DISTINCT FROM n.X1 OR m.t['X2'] IS DISTINCT FROM n.X2
+                             OR m.t['X3'] IS DISTINCT FROM n.X3 OR m.t['X4'] IS DISTINCT FROM n.X4
+                             OR m.t['X5'] IS DISTINCT FROM n.X5 OR m.t['X6'] IS DISTINCT FROM n.X6
+                             OR m.t['X7'] IS DISTINCT FROM n.X7) AS differing
+  FROM (SELECT QNAME, AUXILIARY_TAGS AS t
+        FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_materialize.sam', auxiliary_tags := true)) m
+  JOIN (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_materialize.sam',
+                               auxiliary_tags := ['XZ', 'XH', 'XA', 'XI', 'XU', 'XF', 'X1', 'X2',
+                                                  'X3', 'X4', 'X5', 'X6', 'X7'])) n
+  USING (QNAME)
+  UNION ALL
+  SELECT 'nanopore', count(*),
+         count(*) FILTER (WHERE m.t['cm'] IS DISTINCT FROM n.cm OR m.t['dv'] IS DISTINCT FROM n.dv
+                             OR m.t['tp'] IS DISTINCT FROM n.tp OR m.t['SA'] IS DISTINCT FROM n.SA
+                             OR m.t['s1'] IS DISTINCT FROM n.s1)
+  FROM (SELECT FILE_OFFSET, AUXILIARY_TAGS AS t
+        FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := true)) m
+  JOIN (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam',
+                               auxiliary_tags := ['cm', 'dv', 'tp', 'SA', 's1'])) n
+  USING (FILE_OFFSET)
+  UNION ALL
+  SELECT 'range-cram', count(*),
+         count(*) FILTER (WHERE m.t['X0'] IS DISTINCT FROM n.X0 OR m.t['XT'] IS DISTINCT FROM n.XT
+                             OR m.t['XA'] IS DISTINCT FROM n.XA)
+  FROM (SELECT QNAME, FLAG, POS, AUXILIARY_TAGS AS t
+        FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram',
+                      reference := '__WORKING_DIRECTORY__/test/data/ce.fa', auxiliary_tags := true)) m
+  JOIN (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/range.cram',
+                               reference := '__WORKING_DIRECTORY__/test/data/ce.fa',
+                               auxiliary_tags := ['X0', 'XT', 'XA'])) n
+  USING (QNAME, FLAG, POS)
+)
+SELECT string_agg(fixture || ':' || CASE WHEN records > 0 AND differing = 0 THEN 'ok' ELSE 'bad' END,
+                  ',' ORDER BY fixture)
+FROM checks;
+----
+materialize:ok,nanopore:ok,range-cram:ok
+
+# The tag columns follow the standard tag columns, and replace the map.
+query TT
+SELECT column_name, column_type
+FROM (DESCRIBE SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam',
+                                      standard_tags := true, auxiliary_tags := ['s1', 'dv']))
+WHERE column_name IN ('UQ', 's1', 'dv', 'AUXILIARY_TAGS')
+ORDER BY column_name;
+----
+UQ	BIGINT
+dv	VARCHAR
+s1	VARCHAR
+
+# A projection of one tag column reads it alone and agrees with the map.
+query I
+SELECT (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['tp'])
+        WHERE tp = 'P') =
+       (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := true)
+        WHERE AUXILIARY_TAGS['tp'] = 'P')
+   AND (SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['tp'])
+        WHERE tp = 'P') > 0;
+----
+true
+
+# The forms the BOOLEAN parameter accepted through DuckDB's cast still work.
+query III
+SELECT
+  (SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := 'true')) WHERE column_name = 'AUXILIARY_TAGS'),
+  (SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := 1)) WHERE column_name = 'AUXILIARY_TAGS'),
+  (SELECT count(*) FROM (DESCRIBE SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := 'F')) WHERE column_name = 'AUXILIARY_TAGS');
+----
+1	1	0
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['cm', 'cm']);
+----
+auxiliary_tags names cm and cm, the same column (column names ignore case)
+
+# SAM tag names are case-sensitive, DuckDB column names are not.
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['xf', 'XF']);
+----
+auxiliary_tags names xf and XF, the same column (column names ignore case)
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', standard_tags := true, auxiliary_tags := ['NM']);
+----
+auxiliary_tags names NM, which matches the standard_tags column NM
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', standard_tags := true, auxiliary_tags := ['cm']);
+----
+auxiliary_tags names cm, which matches the standard_tags column CM
+
+# Without standard_tags, a standard tag can be named, as text.
+query I
+SELECT count(*) FILTER (WHERE m.t['NM'] IS DISTINCT FROM n.NM) = 0 AND count(*) > 0
+FROM (SELECT FILE_OFFSET, AUXILIARY_TAGS AS t
+      FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := true)) m
+JOIN (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['NM'])) n
+USING (FILE_OFFSET);
+----
+true
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['c']);
+----
+auxiliary_tags names must be two characters, [A-Za-z][A-Za-z0-9]
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['1c']);
+----
+auxiliary_tags names must be two characters, [A-Za-z][A-Za-z0-9]
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := [NULL]::VARCHAR[]);
+----
+auxiliary_tags names must be two characters, [A-Za-z][A-Za-z0-9]
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := []::VARCHAR[]);
+----
+auxiliary_tags must name between 1 and 64 tags
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := 'cm');
+----
+auxiliary_tags must be BOOLEAN or a list of tag names

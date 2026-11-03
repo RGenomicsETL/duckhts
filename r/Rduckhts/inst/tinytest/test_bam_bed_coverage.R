@@ -89,6 +89,19 @@ test_bam_bed_coverage <- function() {
     rduckhts_bam_bed_coverage(con, mixed_bam, mixed_bed, fragment_mode = TRUE),
     pattern = "fragment_mode is not implemented yet"
   )
+
+  # The BED file is read per execution: a prepared statement sees it rewritten.
+  bed <- tempfile(fileext = ".bed")
+  on.exit(unlink(bed), add = TRUE)
+  writeLines("11\t1000\t1200\tcluster", bed)
+  DBI::dbExecute(con, sprintf(
+    "PREPARE cov AS SELECT count(*) AS n, sum(numreads_post) AS reads FROM duckhts_bam_bed_coverage(%s, %s)",
+    DBI::dbQuoteString(con, mixed_bam), DBI::dbQuoteString(con, bed)))
+  expect_equal(DBI::dbGetQuery(con, "EXECUTE cov")$n, 1)
+  writeLines(c("11\t1000\t1200\tcluster", "11\t20000\t20100\tzero"), bed)
+  rewritten <- DBI::dbGetQuery(con, "EXECUTE cov")
+  expect_equal(rewritten$n, 2)
+  expect_equal(rewritten$reads, 4)
 }
 
 test_bam_bed_coverage()

@@ -1,0 +1,284 @@
+---
+title: "read_bam: byte-balanced scan pieces and named tag columns"
+output:
+  github_document:
+    html_preview: false
+    pandoc_args: ["--wrap=preserve", "--columns=400"]
+params:
+  measure: true
+  reps: 3
+  threads: [1, 4]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", echo = FALSE, message = FALSE)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+```
+
+This report measures two `read_bam` changes against the previous reader on real
+alignments:
+
+- **Scan pieces.** An indexed full-file BGZF BAM scan used to claim one reference
+  per DuckDB thread, so a file whose data sits on one reference scanned on one
+  thread. A reference with more than 16 MiB of indexed data is now cut into
+  byte-balanced pieces; a record belongs to the piece that holds its start
+  (`design/better_scans.md`, `src/bam_partition.c`).
+- **Named tag columns.** `auxiliary_tags := ['XS', 'XA']` returns one text column
+  per tag instead of building the `AUXILIARY_TAGS` map for every record.
+
+`bam_bin_counts` does not use scan pieces; it still claims one reference per thread.
+This change moved its scan from bind to execution on DuckDB worker threads, so its
+rows measure that thread policy (see the note after the results).
+
+## Inputs
+
+All inputs resolve through the `duckhtsbench` registry; rendering does not download.
+
+| Input | Registry id | Shape |
+|---|---|---|
+| exome | `bam_split_hg00403_exome_bam` | 1000 Genomes phase 3 exome of HG00403 (GRCh37 with decoys), all chromosomes |
+| exome unmapped | `bam_split_hg00403_unmapped_bam` | the same sample's reads without coordinates only |
+| chr20 1x, 2x, 4x | `insert_size_hg00403_chr20_bam`, `_2x`, `_4x` | 30x HG00403 chr20, a full GRCh38 header with one populated reference; 2x and 4x repeat the records |
+| ONT | `ont_ecoli_k12_bam` | 27,377 MinION reads on one 4.6 Mb reference |
+
+Stage them once, with network access only in this step:
+
+``` sh
+Rscript -e 'pkgload::load_all("r/duckhtsbench"); for (id in duckhts_bench_stage_plan("bam-split-scan")$id) duckhts_bench_fetch(id)'
+Rscript -e 'duckhtsbench::duckhts_bench_stage_ont_ecoli()'
+```
+
+The chr20 BAMs come from the `insert-size` workload's staging functions.
+
+## Method
+
+- Engines: **baseline**, the extension built from the source before this change
+  (`BAM_SPLIT_BASELINE_EXTENSION`), and **candidate**, the current build
+  (`DUCKHTS_EXTENSION`, default `build/release/duckhts.duckdb_extension`).
+- Every timed query runs in a fresh DuckDB CLI process (`DUCKDB`, default `duckdb`)
+  with `SET threads`, `SET preserve_insertion_order = false` and a 16 GiB
+  memory limit. The time is the CLI `.timer` wall time of the measured statement
+  only; peak RSS and CPU seconds (user plus system, all threads, including htslib
+  decompression threads) are GNU `time` for the whole process.
+- Three fresh processes per engine, input, workload and thread count; the table
+  shows the median and range.
+- Declared before measuring: a 900 s wall limit per process and a 20 GiB peak-RSS
+  ceiling. A breach is a failed cell, not a reason to raise the limit.
+- Workloads:
+  - **scan**: `count(*)`, `sum(POS)` and `sum(hash(QNAME))` over the file.
+  - **ctas**: `CREATE TEMP TABLE` of six core columns (not on the exome, whose
+    rows would not fit the memory limit without spilling).
+  - **tags map** and **tags named**: a fingerprint of two non-standard tags read
+    from the map, then as named columns (candidate only).
+  - **bin counts**: `bam_bin_counts(path, 100000)`, 100 kb bins.
+- Correctness before timing: for each input and engine, a four-thread scan's
+  record fingerprint (count, distinct and summed `FILE_OFFSET`, summed hash of
+  name, flag, reference, position and CIGAR) must equal the candidate's
+  sequential scan (`scan_mode := 'sequential'`, one thread), an independent
+  single-stream path. The named-tag fingerprint must equal the map fingerprint.
+
+```{r driver}
+suppressPackageStartupMessages(library(duckhtsbench))
+
+duckdb_bin <- Sys.getenv("DUCKDB", "duckdb")
+candidate <- normalizePath(Sys.getenv("DUCKHTS_EXTENSION", "build/release/duckhts.duckdb_extension"))
+baseline <- normalizePath(Sys.getenv(
+  "BAM_SPLIT_BASELINE_EXTENSION",
+  duckhts_bench_cache_path("benchmarks/bam-split-scan/baseline/duckhts.duckdb_extension")))
+engines <- c(baseline = baseline, candidate = candidate)
+wall_limit_s <- 900
+rss_ceiling_bytes <- 20 * 1024^3
+
+inputs <- data.frame(
+  input = c("exome", "exome unmapped", "chr20 1x", "chr20 2x", "chr20 4x", "ONT"),
+  id = c("bam_split_hg00403_exome_bam", "bam_split_hg00403_unmapped_bam",
+         "insert_size_hg00403_chr20_bam", "insert_size_hg00403_chr20_bam_2x",
+         "insert_size_hg00403_chr20_bam_4x", "ont_ecoli_k12_bam"),
+  tags = c("XT,X0", "", "XS,XA", "XS,XA", "XS,XA", "de,tp"),
+  ctas = c(FALSE, TRUE, TRUE, TRUE, TRUE, TRUE),
+  stringsAsFactors = FALSE
+)
+inputs$path <- vapply(inputs$id, duckhts_bench_artifact_path, character(1))
+
+sql_string <- function(x) paste0("'", gsub("'", "''", x, fixed = TRUE), "'")
+
+workload_sql <- function(workload, path, tags) {
+  p <- sql_string(path)
+  t <- strsplit(tags, ",", fixed = TRUE)[[1L]]
+  switch(workload,
+    scan = sprintf("SELECT count(*), sum(POS), sum(hash(QNAME)) FROM read_bam(%s);", p),
+    ctas = sprintf(paste(
+      "CREATE TEMP TABLE t AS SELECT QNAME, FLAG, RNAME, POS, MAPQ, CIGAR FROM read_bam(%s);",
+      "SELECT count(*) FROM t;"), p),
+    tags_map = sprintf(
+      "SELECT count(*), sum(hash(AUXILIARY_TAGS[%s], AUXILIARY_TAGS[%s])) FROM read_bam(%s, auxiliary_tags := true);",
+      sql_string(t[[1L]]), sql_string(t[[2L]]), p),
+    tags_named = sprintf(
+      "SELECT count(*), sum(hash(\"%s\", \"%s\")) FROM read_bam(%s, auxiliary_tags := [%s, %s]);",
+      t[[1L]], t[[2L]], p, sql_string(t[[1L]]), sql_string(t[[2L]])),
+    bin_counts = sprintf(
+      "SELECT count(*), sum(count_total) FROM bam_bin_counts(%s, 100000);", p),
+    fingerprint = sprintf(paste(
+      "SELECT count(*), count(DISTINCT FILE_OFFSET), sum(FILE_OFFSET),",
+      "sum(hash(QNAME, FLAG, RNAME, POS, CIGAR)) FROM read_bam(%s);"), p),
+    fingerprint_sequential = sprintf(paste(
+      "SELECT count(*), count(DISTINCT FILE_OFFSET), sum(FILE_OFFSET),",
+      "sum(hash(QNAME, FLAG, RNAME, POS, CIGAR)) FROM read_bam(%s, scan_mode := 'sequential');"), p),
+    stop("unknown workload ", workload))
+}
+
+# One fresh CLI process. Returns the measured statement's wall seconds, the
+# whole-process peak RSS and CPU seconds, and the last result row.
+run_process <- function(extension, threads, sql) {
+  script <- tempfile(fileext = ".sql")
+  timing <- tempfile(fileext = ".time")
+  on.exit(unlink(c(script, timing)), add = TRUE)
+  writeLines(c(
+    "SET allow_extensions_metadata_mismatch = true;",
+    sprintf("LOAD %s;", sql_string(extension)),
+    sprintf("SET threads = %d;", threads),
+    "SET preserve_insertion_order = false;",
+    "SET memory_limit = '16GiB';",
+    ".timer on",
+    sql), script)
+  out <- suppressWarnings(system2(
+    "timeout", c(wall_limit_s, "/usr/bin/time", "-f", shQuote("%M %U %S"), "-o", timing,
+                 duckdb_bin, "-unsigned", "-csv", "-noheader", "-bail"),
+    stdin = script, stdout = TRUE, stderr = TRUE))
+  status <- attr(out, "status")
+  times <- as.numeric(sub("^Run Time \\(s\\): real ([0-9.]+).*$", "\\1",
+                          grep("^Run Time", out, value = TRUE)))
+  results <- grep("^Run Time|^$", out, value = TRUE, invert = TRUE)
+  timing_lines <- if (file.exists(timing)) readLines(timing, warn = FALSE) else character()
+  usage <- suppressWarnings(as.numeric(strsplit(utils::tail(c("", timing_lines), 1L), " ")[[1L]]))
+  # A process killed before it prints a result, or without a GNU time record,
+  # still yields one failed row with NA measurements rather than empty values.
+  list(
+    ok = (is.null(status) || status == 0L) && length(times) > 0L,
+    seconds = if (length(times)) times[[1L]] else NA_real_, # the measured statement
+    rss_bytes = if (length(usage) == 3L && all(is.finite(usage))) usage[[1L]] * 1024 else NA_real_,
+    cpu_seconds = if (length(usage) == 3L && all(is.finite(usage))) usage[[2L]] + usage[[3L]] else NA_real_,
+    result = if (length(results)) utils::tail(results, 1L) else NA_character_,
+    output = paste(out, collapse = "\n"))
+}
+```
+
+```{r measure, eval=params$measure}
+stopifnot(all(file.exists(inputs$path)), all(file.exists(engines)))
+dir.create("benchmarks/data", showWarnings = FALSE)
+
+# Correctness: every engine's four-thread scan equals the sequential oracle.
+checks <- list()
+for (i in seq_len(nrow(inputs))) {
+  oracle <- run_process(candidate, 1L, workload_sql("fingerprint_sequential", inputs$path[[i]], ""))
+  stopifnot(oracle$ok)
+  for (engine in names(engines)) {
+    got <- run_process(engines[[engine]], 4L, workload_sql("fingerprint", inputs$path[[i]], ""))
+    checks[[length(checks) + 1L]] <- data.frame(
+      input = inputs$input[[i]], engine = engine, oracle = oracle$result, scan = got$result,
+      equal = got$ok && identical(got$result, oracle$result))
+  }
+  if (nzchar(inputs$tags[[i]])) {
+    by_map <- run_process(candidate, 4L, workload_sql("tags_map", inputs$path[[i]], inputs$tags[[i]]))
+    by_name <- run_process(candidate, 4L, workload_sql("tags_named", inputs$path[[i]], inputs$tags[[i]]))
+    checks[[length(checks) + 1L]] <- data.frame(
+      input = inputs$input[[i]], engine = "candidate tags", oracle = by_map$result,
+      scan = by_name$result, equal = by_map$ok && by_name$ok && identical(by_map$result, by_name$result))
+  }
+}
+checks <- do.call(rbind, checks)
+utils::write.csv(checks, "benchmarks/data/bam_split_scan_checks.csv", row.names = FALSE)
+if (!all(checks$equal)) stop("a scan differs from the sequential oracle; not timing")
+
+rows <- list()
+for (i in seq_len(nrow(inputs))) {
+  workloads <- c("scan", if (inputs$ctas[[i]]) "ctas",
+                 if (nzchar(inputs$tags[[i]])) c("tags_map", "tags_named"), "bin_counts")
+  for (workload in workloads) for (threads in params$threads) for (rep in seq_len(params$reps)) {
+    for (engine in names(engines)) {
+      if (workload == "tags_named" && engine == "baseline") next
+      sql <- workload_sql(workload, inputs$path[[i]], inputs$tags[[i]])
+      got <- run_process(engines[[engine]], threads, sql)
+      rows[[length(rows) + 1L]] <- data.frame(
+        input = inputs$input[[i]], workload = workload, engine = engine,
+        threads = threads, rep = rep, ok = got$ok && is.finite(got$rss_bytes) &&
+          got$rss_bytes <= rss_ceiling_bytes,
+        seconds = got$seconds, rss_bytes = got$rss_bytes, cpu_seconds = got$cpu_seconds,
+        result = got$result)
+    }
+  }
+}
+raw <- do.call(rbind, rows)
+utils::write.csv(raw, "benchmarks/data/bam_split_scan.csv", row.names = FALSE)
+
+meta <- data.frame(
+  key = c("source_revision", "candidate_sha256", "baseline_sha256", "baseline_source_revision",
+          "duckdb", "nproc", "cpu", "rendered_utc"),
+  value = c(
+    system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
+    sub(" .*", "", system2("sha256sum", candidate, stdout = TRUE)),
+    sub(" .*", "", system2("sha256sum", baseline, stdout = TRUE)),
+    paste(readLines(file.path(dirname(baseline), "source-revision.txt"), warn = FALSE), collapse = ""),
+    system2(duckdb_bin, "--version", stdout = TRUE),
+    system2("nproc", stdout = TRUE),
+    sub("^model name\\s*:\\s*", "", grep("^model name", readLines("/proc/cpuinfo"), value = TRUE)[[1L]]),
+    format(Sys.time(), tz = "UTC", usetz = TRUE)))
+utils::write.csv(meta, "benchmarks/data/bam_split_scan_metadata.csv", row.names = FALSE)
+```
+
+## Correctness
+
+```{r checks}
+checks <- utils::read.csv("benchmarks/data/bam_split_scan_checks.csv")
+knitr::kable(checks[, c("input", "engine", "equal")], format = "pipe")
+```
+
+## Results
+
+Median of three fresh processes, with the range; seconds are the measured
+statement only, and peak RSS is the largest of the three. A cell with any failed,
+timed-out or over-ceiling process is marked failed and has no median or speedup.
+
+```{r results, results='asis'}
+raw <- utils::read.csv("benchmarks/data/bam_split_scan.csv")
+meta <- utils::read.csv("benchmarks/data/bam_split_scan_metadata.csv")
+keys <- c("input", "workload", "engine", "threads")
+# A cell passes only when every declared repetition ran and passed; one failed,
+# timed-out or over-ceiling process fails the whole cell and suppresses its
+# median and its comparison. Raw failures stay listed below.
+cells <- split(raw, raw[keys], drop = TRUE)
+cell <- do.call(rbind, lapply(cells, function(rows) {
+  passed <- nrow(rows) == params$reps && all(rows$ok)
+  data.frame(
+    rows[1L, keys],
+    status = if (passed) "PASS" else sprintf("FAIL (%d/%d ok)", sum(rows$ok), params$reps),
+    seconds = if (passed) round(stats::median(rows$seconds), 2) else NA_real_,
+    range = if (passed) sprintf("%.2f-%.2f", min(rows$seconds), max(rows$seconds)) else NA_character_,
+    peak_rss_mib = if (passed) round(max(rows$rss_bytes) / 2^20) else NA_real_,
+    cpu_seconds = if (passed) round(stats::median(rows$cpu_seconds), 1) else NA_real_,
+    row.names = NULL)
+}))
+wide <- reshape(cell, idvar = c("input", "workload", "threads"), timevar = "engine",
+                direction = "wide")
+both_pass <- !is.na(wide$seconds.baseline) & !is.na(wide$seconds.candidate)
+wide$speedup <- ifelse(both_pass, round(wide$seconds.baseline / wide$seconds.candidate, 2), NA_real_)
+order_inputs <- c("exome", "exome unmapped", "chr20 1x", "chr20 2x", "chr20 4x", "ONT")
+wide <- wide[order(match(wide$input, order_inputs), wide$workload, wide$threads), ]
+print(knitr::kable(wide, format = "pipe", row.names = FALSE))
+failed <- raw[!raw$ok, ]
+if (nrow(failed)) print(knitr::kable(failed, format = "pipe", caption = "Failed processes"))
+print(knitr::kable(meta, format = "pipe"))
+```
+
+The chr20 rows are the 1x/2x/4x scaling ladder on one populated reference.
+`tags_named` has no baseline cell because the baseline cannot name tags; compare
+it with the candidate's `tags_map` row.
+
+The `bam_bin_counts` rows compare different thread policies, not the same work at
+the same concurrency. The baseline ran its scan at bind with up to 16 threads of its
+own whatever `SET threads` said, so its CPU seconds far exceed its wall time even
+in the one-thread cells. The candidate runs on DuckDB worker threads and follows the
+setting. On the exome, with 86 references, the baseline's one- and four-thread cells
+are therefore faster in wall time than the candidate's; on chr20, with one populated
+reference, both run one reader and match. The wall-time comparison at equal
+concurrency is a thread count of 16 or more, which these cells do not include.

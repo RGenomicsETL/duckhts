@@ -546,6 +546,17 @@ if(NOT DUCKDB_WASM_EXTENSION)
         target_link_libraries(duckhts_somalier_native_test PRIVATE m)
     endif()
 
+    add_executable(duckhts_bam_partition_test EXCLUDE_FROM_ALL
+        test/scripts/bam_partition_test.c src/bam_partition.c)
+    target_compile_features(duckhts_bam_partition_test PRIVATE c_std_11)
+    target_include_directories(duckhts_bam_partition_test PRIVATE
+        src/include ${HTSLIB_SRC_DIR})
+    target_link_libraries(duckhts_bam_partition_test PRIVATE ${HTSLIB_LINK_LIBS})
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(duckhts_bam_partition_test PRIVATE
+            -Wall -Wextra -Wpedantic -Werror)
+    endif()
+
     add_executable(duckhts_bam_site_counts_test EXCLUDE_FROM_ALL
         test/scripts/bam_site_counts_test.c src/bam_site_counts.c)
     target_compile_features(duckhts_bam_site_counts_test PRIVATE c_std_11)

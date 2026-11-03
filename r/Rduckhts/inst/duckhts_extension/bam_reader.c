@@ -23,6 +23,7 @@
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
 
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -42,11 +43,18 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckdb_list.h"
 #include "include/duckdb_map.h"
 #include "include/bam_format.h"
+#include "include/bam_partition.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
 
 #define DUCKHTS_DEFAULT_BAM_DECOMPRESSION_THREADS 2
+/* Upper bound on auxiliary_tags := [...] names; bounds the bind data. */
+#define BAM_MAX_NAMED_TAGS 64
+/* A BAM reference with more indexed compressed bytes than this is split into
+ * pieces of about this size, at most BAM_SPLIT_MAX_PIECES per reference. */
+#define BAM_SPLIT_BYTES ((int64_t)16 << 20)
+#define BAM_SPLIT_MAX_PIECES 256
 
 /* ================================================================
  * Helpers
@@ -206,6 +214,16 @@ typedef struct {
     int std_col_start;
     int std_col_count;
     int aux_col_idx;
+    /* auxiliary_tags := ['UR', ...]: one VARCHAR column per named tag,
+     * starting at named_tag_col_start, instead of the AUXILIARY_TAGS map. */
+    int n_named_tags;
+    char named_tags[BAM_MAX_NAMED_TAGS][3];
+    int named_tag_col_start;
+    /* Coordinate pieces of a parallel full-file scan (include/bam_partition.h).
+     * A BGZF BAM reference with more indexed data than BAM_SPLIT_BYTES is cut
+     * into byte-balanced pieces; every other reference is one piece. The reads
+     * without coordinates follow as one extra partition. */
+    duckhts_bam_partitions parts;
 } bam_bind_data_t;
 
 /* ================================================================
@@ -213,8 +231,8 @@ typedef struct {
  * ================================================================ */
 
 typedef struct {
-    idx_t current_partition; /* named contigs, then one no-coordinate tail */
-    int n_contigs;
+    idx_t current_partition; /* coordinate pieces, then one no-coordinate tail */
+    int n_parts;
     int has_region;
 } bam_global_init_data_t;
 
@@ -238,6 +256,9 @@ typedef struct {
     int done;
     int is_parallel;
     int needs_next_contig;
+    /* First position of the claimed piece; a record that starts before it
+     * belongs to the previous piece of the same reference and is skipped. */
+    int64_t part_beg;
     int count_only;
     int need_seq_buffers;
     uint64_t count_remaining;
@@ -274,6 +295,7 @@ static void destroy_bam_bind(void *data) {
     if (b->reference) duckdb_free(b->reference);
     if (b->region) duckdb_free(b->region);
     free(b->regions); /* one region-list allocation, including strings */
+    duckhts_bam_partitions_free(&b->parts);
     duckdb_free(b);
 }
 
@@ -375,6 +397,102 @@ static int bam_parse_scan_mode(const char *mode, int *scan_sequential) {
         return 1;
     }
     return 0;
+}
+
+/* The standard tag whose column a named tag column would duplicate: DuckDB
+ * column names ignore case, while SAM tag names do not (cm is not CM). */
+static const char *bam_std_tag_matching_column(const char *name) {
+    for (int i = 0; BAM_STD_TAGS[i].tag; i++) {
+        if (strcasecmp(BAM_STD_TAGS[i].tag, name) == 0) return BAM_STD_TAGS[i].tag;
+    }
+    return NULL;
+}
+
+/* Parse auxiliary_tags: BOOLEAN selects the AUXILIARY_TAGS map; a list of
+ * two-character SAM tag names selects one VARCHAR column per tag. Returns 1 on
+ * success, 0 with `error` set. Names must match [A-Za-z][A-Za-z0-9], be unique,
+ * number at most BAM_MAX_NAMED_TAGS, and not repeat a standard_tags column. */
+static int bam_parse_auxiliary_tags(duckdb_value value, bam_bind_data_t *bind,
+                                    char *error, size_t error_size) {
+    duckdb_logical_type type = duckdb_get_value_type(value);
+    duckdb_type type_id = duckdb_get_type_id(type);
+    idx_t n;
+    int ok = 1;
+
+    if (type_id == DUCKDB_TYPE_BOOLEAN) {
+        bind->auxiliary_tags = duckdb_get_bool(value) ? 1 : 0;
+        return 1;
+    }
+    /* Before the list form, the parameter was BOOLEAN and DuckDB cast an
+     * integer or a 'true'/'false' string to it; keep accepting both. */
+    switch (type_id) {
+        case DUCKDB_TYPE_TINYINT: case DUCKDB_TYPE_SMALLINT: case DUCKDB_TYPE_INTEGER:
+        case DUCKDB_TYPE_BIGINT: case DUCKDB_TYPE_UTINYINT: case DUCKDB_TYPE_USMALLINT:
+        case DUCKDB_TYPE_UINTEGER: case DUCKDB_TYPE_UBIGINT:
+            bind->auxiliary_tags = duckdb_get_int64(value) != 0 ? 1 : 0;
+            return 1;
+        case DUCKDB_TYPE_VARCHAR: {
+            char *text = duckdb_get_varchar(value);
+            int known = 1;
+            if (text && (strcasecmp(text, "true") == 0 || strcasecmp(text, "t") == 0 ||
+                         strcmp(text, "1") == 0)) {
+                bind->auxiliary_tags = 1;
+            } else if (text && (strcasecmp(text, "false") == 0 || strcasecmp(text, "f") == 0 ||
+                                strcmp(text, "0") == 0)) {
+                bind->auxiliary_tags = 0;
+            } else {
+                known = 0;
+            }
+            if (text) duckdb_free(text);
+            if (known) return 1;
+            break;
+        }
+        default:
+            break;
+    }
+    if (type_id != DUCKDB_TYPE_LIST) {
+        snprintf(error, error_size,
+                 "read_bam: auxiliary_tags must be BOOLEAN or a list of tag names");
+        return 0;
+    }
+    n = duckdb_get_list_size(value);
+    if (n == 0 || n > BAM_MAX_NAMED_TAGS) {
+        snprintf(error, error_size,
+                 "read_bam: auxiliary_tags must name between 1 and %d tags", BAM_MAX_NAMED_TAGS);
+        return 0;
+    }
+    for (idx_t i = 0; ok && i < n; i++) {
+        duckdb_value child = duckdb_get_list_child(value, i);
+        char *name = child && !duckdb_is_null_value(child) ? duckdb_get_varchar(child) : NULL;
+
+        if (!name || strlen(name) != 2 || !isalpha((unsigned char)name[0]) ||
+            !isalnum((unsigned char)name[1])) {
+            snprintf(error, error_size,
+                     "read_bam: auxiliary_tags names must be two characters, [A-Za-z][A-Za-z0-9]");
+            ok = 0;
+        } else if (bind->standard_tags && bam_std_tag_matching_column(name)) {
+            snprintf(error, error_size,
+                     "read_bam: auxiliary_tags names %s, which matches the standard_tags column %s "
+                     "(column names ignore case)", name, bam_std_tag_matching_column(name));
+            ok = 0;
+        } else {
+            for (int k = 0; ok && k < bind->n_named_tags; k++) {
+                if (strcasecmp(bind->named_tags[k], name) == 0) {
+                    snprintf(error, error_size,
+                             "read_bam: auxiliary_tags names %s and %s, the same column "
+                             "(column names ignore case)", bind->named_tags[k], name);
+                    ok = 0;
+                }
+            }
+            if (ok) {
+                memcpy(bind->named_tags[bind->n_named_tags], name, 3);
+                bind->n_named_tags++;
+            }
+        }
+        if (name) duckdb_free(name);
+        if (child) duckdb_destroy_value(&child);
+    }
+    return ok;
 }
 
 /* A CRAM index is a different, smaller object behind the same pointer type
@@ -619,7 +737,15 @@ static void bam_read_bind(duckdb_bind_info info) {
 
     duckdb_value aux_val = duckdb_bind_get_named_parameter(info, "auxiliary_tags");
     if (aux_val && !duckdb_is_null_value(aux_val)) {
-        bind->auxiliary_tags = duckdb_get_bool(aux_val) ? 1 : 0;
+        char aux_error[160];
+        if (!bam_parse_auxiliary_tags(aux_val, bind, aux_error, sizeof(aux_error))) {
+            duckdb_destroy_value(&aux_val);
+            duckdb_bind_set_error(info, aux_error);
+            sam_hdr_destroy(hdr);
+            sam_close(fp);
+            destroy_bam_bind(bind);
+            return;
+        }
     }
     if (aux_val) duckdb_destroy_value(&aux_val);
 
@@ -699,6 +825,19 @@ static void bam_read_bind(duckdb_bind_info info) {
                     bam_index_row_estimate(idx, &row_estimate)) {
                     duckdb_bind_set_cardinality(info, (idx_t)row_estimate, false);
                 }
+                /* A CRAM index offset is a container address, not a BGZF one,
+                 * so only a BGZF BAM splits within a reference. */
+                if (bind->index_splits_by_reference &&
+                    !duckhts_bam_partitions_build(
+                        idx, hdr, hts_get_format(fp)->format == bam ? BAM_SPLIT_BYTES : 0,
+                        BAM_SPLIT_MAX_PIECES, 0, &bind->parts)) {
+                    hts_idx_destroy(idx);
+                    duckdb_bind_set_error(info, "read_bam: out of memory partitioning the scan");
+                    sam_hdr_destroy(hdr);
+                    sam_close(fp);
+                    destroy_bam_bind(bind);
+                    return;
+                }
             }
             hts_idx_destroy(idx);
         }
@@ -766,6 +905,11 @@ static void bam_read_bind(duckdb_bind_info info) {
         bind->std_col_count = count;
     }
 
+    bind->named_tag_col_start = BAM_COL_CORE_COUNT + bind->std_col_count;
+    for (int i = 0; i < bind->n_named_tags; i++) {
+        duckdb_bind_add_result_column(info, bind->named_tags[i], varchar_type);
+    }
+
     if (bind->auxiliary_tags) {
         duckdb_logical_type key_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
         duckdb_logical_type val_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
@@ -807,16 +951,16 @@ static void bam_read_global_init(duckdb_init_info info) {
      * Only when indexed and no user-specified region.
      */
     if (column_count == 0 && bind->index_row_count_valid && !global->has_region) {
-        global->n_contigs = 0;
+        global->n_parts = 0;
         duckdb_init_set_max_threads(info, 1);
-    } else if (bind->has_index && bind->index_splits_by_reference && bind->n_contigs > 1 &&
+    } else if (bind->has_index && bind->index_splits_by_reference && bind->parts.n > 1 &&
                !global->has_region) {
-        global->n_contigs = bind->n_contigs;
-        idx_t max_threads = (idx_t)bind->n_contigs;
+        global->n_parts = bind->parts.n;
+        idx_t max_threads = (idx_t)bind->parts.n;
         if (max_threads > 16) max_threads = 16;
         duckdb_init_set_max_threads(info, max_threads);
     } else {
-        global->n_contigs = 0;
+        global->n_parts = 0;
         duckdb_init_set_max_threads(info, 1);
     }
 
@@ -960,6 +1104,11 @@ static int bam_cram_required_fields(const bam_bind_data_t *bind,
         } else if (bind->auxiliary_tags && col_id == (idx_t)bind->aux_col_idx) {
             need_tags = 1;
             need_sequence = 1;
+        } else if (col_id >= (idx_t)bind->named_tag_col_start &&
+                   col_id < (idx_t)(bind->named_tag_col_start + bind->n_named_tags)) {
+            const char *tag = bind->named_tags[col_id - (idx_t)bind->named_tag_col_start];
+            need_tags = 1;
+            if (strcmp(tag, "MD") == 0 || strcmp(tag, "NM") == 0) need_sequence = 1;
         }
     }
 
@@ -1006,7 +1155,7 @@ static void bam_read_local_init(duckdb_init_info info) {
     }
 
     int is_parallel = (!bind->scan_sequential && bind->has_index &&
-                       bind->index_splits_by_reference && bind->n_contigs > 1 &&
+                       bind->index_splits_by_reference && bind->parts.n > 1 &&
                        bind->n_regions == 0);
     local->is_parallel = is_parallel;
     local->needs_next_contig = is_parallel;
@@ -1115,8 +1264,9 @@ static void bam_read_local_init(duckdb_init_info info) {
  * ================================================================ */
 
 static int claim_next_contig(bam_local_init_data_t *local,
-                             bam_global_init_data_t *global) {
-    if (!local->is_parallel || !global || global->n_contigs == 0)
+                             bam_global_init_data_t *global,
+                             const bam_bind_data_t *bind) {
+    if (!local->is_parallel || !global || global->n_parts == 0)
         return 0;
 
     /* Destroy previous iterator */
@@ -1126,13 +1276,17 @@ static int claim_next_contig(bam_local_init_data_t *local,
     }
 
     idx_t next = __sync_fetch_and_add(&global->current_partition, 1);
-    if (next > (idx_t)global->n_contigs) return 0;
+    if (next > (idx_t)global->n_parts) return 0;
 
-    int tid = next == (idx_t)global->n_contigs ? HTS_IDX_NOCOOR : (int)next;
+    int tail = next == (idx_t)global->n_parts;
+    int tid = tail ? HTS_IDX_NOCOOR : bind->parts.tid[next];
+    int64_t beg = tail ? 0 : bind->parts.beg[next];
+    int64_t end = tail ? HTS_POS_MAX : bind->parts.end[next];
+    local->part_beg = beg;
     /* Do not skip the tail based on n_no_coor: older BAI/CSI files may omit
      * that optional count, and CRAI does not supply it. */
     errno = 0;
-    local->itr = sam_itr_queryi(local->idx, tid, 0, HTS_POS_MAX);
+    local->itr = sam_itr_queryi(local->idx, tid, beg, end);
     if (!local->itr) {
         /* Without a mapped chunk or optional count, HTSlib cannot distinguish
          * an empty BAM from an all-unplaced BAM. No named-contig iterator can
@@ -1180,7 +1334,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
     /* For parallel scans, claim first/next contig if needed */
     if (local->needs_next_contig) {
-        int claimed = claim_next_contig(local, global);
+        int claimed = claim_next_contig(local, global, bind);
         if (claimed <= 0) {
             if (claimed < 0)
                 duckdb_function_set_error(info, "read_bam: failed to create full-file iterator");
@@ -1222,7 +1376,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             if (local->is_parallel && ret == -1) {
                 /* Try next contig and keep filling this chunk if we can. */
                 local->needs_next_contig = 1;
-                int claimed = claim_next_contig(local, global);
+                int claimed = claim_next_contig(local, global, bind);
                 if (claimed < 0) {
                     duckdb_function_set_error(info, "read_bam: failed to create full-file iterator");
                     local->done = 1;
@@ -1243,6 +1397,8 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
         int seq_len = 0;
 
         if (local->unplaced_only && b->core.tid >= 0) continue;
+        /* A read that starts before its piece belongs to the previous piece. */
+        if (!duckhts_bam_partition_owns(b, local->part_beg)) continue;
 
         if (local->need_seq_buffers) {
             seq_len = b->core.l_qseq;
@@ -1507,6 +1663,23 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 set_null(vec, row_count);
                                 break;
                         }
+                    } else if (col_id >= (idx_t)bind->named_tag_col_start &&
+                               col_id < (idx_t)(bind->named_tag_col_start + bind->n_named_tags)) {
+                        /* One named tag, formatted as its AUXILIARY_TAGS map value. */
+                        const char *tag = bind->named_tags[col_id - (idx_t)bind->named_tag_col_start];
+                        uint8_t *aux = bam_aux_get(b, tag);
+                        size_t capacity, length;
+                        if (!aux) {
+                            set_null(vec, row_count);
+                            break;
+                        }
+                        if (!duckhts_bam_aux_capacity(aux, b->data + b->l_data, &capacity))
+                            goto format_error;
+                        if (!bam_reserve_text(&local->aux_buf, &local->aux_buf_cap, capacity))
+                            goto text_oom;
+                        if (!duckhts_bam_aux_format(aux, local->aux_buf, local->aux_buf_cap, &length))
+                            goto format_error;
+                        duckdb_vector_assign_string_element_len(vec, row_count, local->aux_buf, length);
                     } else if (bind->auxiliary_tags &&
                                (int)col_id == bind->aux_col_idx) {
                         uint8_t *aux = bam_aux_first(b);
@@ -1602,8 +1775,11 @@ void register_read_bam_function(duckdb_connection connection) {
 
     duckdb_logical_type bool_type = duckdb_create_logical_type(DUCKDB_TYPE_BOOLEAN);
     duckdb_table_function_add_named_parameter(tf, "standard_tags", bool_type);
-    duckdb_table_function_add_named_parameter(tf, "auxiliary_tags", bool_type);
     duckdb_destroy_logical_type(&bool_type);
+    /* BOOLEAN for the AUXILIARY_TAGS map, or a list of tag names. */
+    duckdb_logical_type any_type = duckdb_create_logical_type(DUCKDB_TYPE_ANY);
+    duckdb_table_function_add_named_parameter(tf, "auxiliary_tags", any_type);
+    duckdb_destroy_logical_type(&any_type);
 
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_table_function_add_named_parameter(tf, "decompression_threads", bigint_type);

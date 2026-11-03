@@ -2,6 +2,58 @@
 
 # duckhts (development version)
 
+- `read_bam(..., auxiliary_tags := ['UR', 'UB'])` returns one VARCHAR column per named
+  tag, after the standard tag columns, instead of the `AUXILIARY_TAGS` map. Each value is
+  formatted exactly like the map value and is NULL when a record lacks the tag; no map is
+  built per record. `auxiliary_tags` still accepts BOOLEAN, and the strings and integers
+  DuckDB used to cast to it. Names must be two characters, `[A-Za-z][A-Za-z0-9]`, at most
+  64, unique ignoring case, and with `standard_tags := TRUE` not a standard tag column
+  ignoring case, because DuckDB column names ignore case and SAM tag names do not (`cm`
+  and `CM`). On 4,000,000 10x PBMC reads the named columns equal the map lookups for every
+  record. `test/sql/bam_named_tags.test` checks every SAM AUX type against the map and the
+  SAM text, a CRAM, and each rejection.
+- An indexed full-file scan of a BGZF BAM now cuts a reference with more than 16 MiB of
+  indexed data into up to 256 byte-balanced pieces, placing each boundary by bisection
+  on the BAI/CSI offsets, so a
+  file whose data sits on one reference, such as a single-chromosome or coordinate-prefix
+  BAM, scans on several DuckDB threads. A record belongs to the piece that holds its start
+  position and is returned once. CRAM and the reads without coordinates keep their
+  previous paths. The shared native helper `src/bam_partition.c` is tested by
+  `test/scripts/bam_partition_test.c` on generated BAMs with BAI and CSI, spliced reads
+  across piece boundaries, placed-unmapped and unplaced reads, and reads confined to the
+  first 0.4% of a 500 Mb reference, where no piece may hold a quarter of the reads;
+  dropping the ownership rule, leaving a gap between pieces, or sampling boundaries over
+  the declared reference length fails it. Planning reads only the index: 0.029 s at bind
+  for the 86-reference exome BAM. On the 4,000,000-read PBMC BAM the split
+  scan returns exactly the records of a sequential scan, `FILE_OFFSET` included. DuckDB
+  runs the pieces in parallel when the plan allows it: an aggregate, or `CREATE TABLE AS`
+  with `preserve_insertion_order = false`. `design/better_scans.md` replaces the planned
+  weighted contig claiming with this contract.
+- The `bam-split-scan` benchmark workload stages the 1000 Genomes phase 3 exome BAM of
+  HG00403 and its unmapped-read BAM, with indexes, through the `duckhtsbench` registry
+  with supplier sizes and MD5 checksums. `benchmarks/benchmark_bam_split_scan.Rmd` is the
+  driver; its rendered report follows the measurement.
+- `bam_bin_counts` scanned the whole BAM/CRAM while the query was bound, kept its rows
+  and emit cursor in the bind data, and ran up to 16 threads of its own. On DuckDB 1.5,
+  which keeps a bound plan, a prepared statement returned its bins at the first execution
+  and no rows after it; `EXPLAIN` scanned the file (1.85 s on a 30x chr20 BAM, now
+  0.001 s); and the scan ignored `SET threads`. The scan now runs when the query
+  executes, on DuckDB worker threads that claim one reference each, heaviest first; the
+  thread that finishes the last claim stitches the streaming duplicate state across
+  references and emits the rows. Bins are byte-identical to the previous implementation
+  on the 30x HG00403 chr20 BAM and the ONT E. coli BAM for `rmdup` none, flag and
+  streaming with `stats := 'gc,mq'` and unmapped reads, at 1 and 4 threads.
+  `test/sql/bin_counts.test` executes a prepared statement twice.
+- `duckhts_bam_bed_coverage` read the BED file and computed all coverage while the query
+  was bound. On DuckDB 1.5 a prepared statement kept the regions and coverage of
+  `PREPARE`, so a rewritten BED file was not seen. The BED file and alignments are now
+  read when the query executes; input errors are execution errors.
+  `test/sql/bam_bed_coverage.test` rewrites the BED file between two executions.
+- `duckhts_cgranges_overlaps` runs its query and keeps its cursor per execution instead
+  of in the bind data. The index it reads is still the one pinned at bind; a finalized
+  index cannot change, so results are unchanged.
+- `STYLE.md` states the rule these broke: bind data is immutable once bind returns, and
+  reading the input, computing results and emit cursors belong to init or scan state.
 - Function catalog: four scalar signatures documented `name := default` arguments that
   do not exist. DuckDB ignores a `name :=` label on a scalar argument and binds the value
   by position, so the documented defaults and argument order were wrong. `regionkey` and

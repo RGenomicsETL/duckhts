@@ -142,6 +142,17 @@ test_bin_counts <- function() {
   expect_error(
     rduckhts_bam_bin_counts(con, mixed_bam, 5000, stats = "gc,wat")
   )
+
+  # The scan runs per execution: a prepared statement returns the same bins
+  # each time (duckdb 1.5 keeps the bound plan across executions).
+  DBI::dbExecute(con, sprintf(
+    "PREPARE bins AS SELECT count(*) AS n, sum(count_total) AS reads FROM bam_bin_counts(%s, 5000, rmdup := 'none')",
+    DBI::dbQuoteString(con, mixed_bam)))
+  first <- DBI::dbGetQuery(con, "EXECUTE bins")
+  second <- DBI::dbGetQuery(con, "EXECUTE bins")
+  expect_equal(first$n, 10)
+  expect_equal(first$reads, 10)
+  expect_equal(second, first)
 }
 
 test_bin_counts()

@@ -156,7 +156,7 @@ endif
 test: test_debug
 test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
-test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog test-database-lifetime
+test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-bam-partition test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog test-database-lifetime
 test_release: test-reference-cache test-sql-lambda-syntax test-count-mixture-model
 
 .PHONY: test-count-mixture-model
@@ -287,6 +287,14 @@ test-somalier-native-asan:
 
 test-somalier-native-ubsan:
 	$(call run_somalier_native_test,-O1 -fsanitize=undefined -fno-omit-frame-pointer,UBSAN_OPTIONS=print_stacktrace=1)
+
+.PHONY: test-bam-partition
+test-bam-partition:
+	@if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
+		cmake --build cmake_build/release --target duckhts_bam_partition_test; \
+	fi
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		./cmake_build/release/duckhts_bam_partition_test "$$tmp"
 
 .PHONY: test-bam-site-counts
 test-bam-site-counts:
