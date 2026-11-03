@@ -184,12 +184,13 @@ test_bcftools_norm <- function() {
 
   out_spanning <- rduckhts_bcftools_norm(con, "norm_spanning", fasta_path)
   expect_equal(nrow(out_spanning), 1)
-  expect_equal(out_spanning$pos_normed[1], 1)
-  expect_equal(out_spanning$end_pos_normed[1], 1)
-  expect_equal(out_spanning$ref_normed[1], "G")
-  expect_equal(as.character(out_spanning$alt_normed[[1]]), c("*", "GT"))
-  expect_true(out_spanning$normed[1])
-  expect_equal(out_spanning$norm_status[1], "Normalized")
+  # bcftools 1.23 leaves a record whose ALTs mix `*` with a real allele unchanged.
+  expect_equal(out_spanning$pos_normed[1], 2)
+  expect_equal(out_spanning$end_pos_normed[1], 2)
+  expect_equal(out_spanning$ref_normed[1], "T")
+  expect_equal(as.character(out_spanning$alt_normed[[1]]), c("*", "TT"))
+  expect_true(is.na(out_spanning$normed[1]))
+  expect_equal(out_spanning$norm_status[1], "SpanningDeletion")
 
   out_gvcf <- rduckhts_bcftools_norm(
     con,

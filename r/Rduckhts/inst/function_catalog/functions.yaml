@@ -361,7 +361,7 @@
       "name": "duckhts_gff_convert_parquet_sql",
       "kind": "scalar_macro",
       "category": "Converters",
-      "signature": "duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
+      "signature": "duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
       "returns": "VARCHAR",
       "r_wrapper": "rduckhts_gff_convert_parquet",
       "description": "Build COPY SQL for read_gff() output with Parquet metadata, GFF/tabix header text and selected columns, filters or partitions.",

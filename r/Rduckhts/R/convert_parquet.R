@@ -423,10 +423,6 @@ rduckhts_bam_convert_parquet <- function(
 #'
 #' @inheritParams rduckhts_bcf_convert_parquet
 #' @param path Path or URI to the input GFF3 file.
-#' @param header Logical; pass `header := true/false` to `read_gff(...)`.
-#' @param header_names Optional character vector of column names.
-#' @param auto_detect Logical; request type auto-detection.
-#' @param column_types Optional character vector of DuckDB column types.
 #' @param attributes_map Logical; expose GFF attributes as `MAP(VARCHAR, VARCHAR)`.
 #' @param attributes_list Logical; expose attributes as `MAP(VARCHAR, VARCHAR[])`.
 #' @param attributes_pairs Logical; expose attributes as key/value/index structs.
@@ -441,10 +437,6 @@ rduckhts_gff_convert_parquet <- function(
   columns = NULL,
   region = NULL,
   index_path = NULL,
-  header = NULL,
-  header_names = NULL,
-  auto_detect = NULL,
-  column_types = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
@@ -484,12 +476,6 @@ rduckhts_gff_convert_parquet <- function(
   if (!is.logical(strict) || length(strict) != 1L || is.na(strict)) {
     stop("strict must be TRUE or FALSE", call. = FALSE)
   }
-  if (!is.null(header) && (!is.logical(header) || length(header) != 1L || is.na(header))) {
-    stop("header must be TRUE or FALSE", call. = FALSE)
-  }
-  if (!is.null(auto_detect) && (!is.logical(auto_detect) || length(auto_detect) != 1L || is.na(auto_detect))) {
-    stop("auto_detect must be TRUE or FALSE", call. = FALSE)
-  }
   params <- convert_parquet_common_params(
     con,
     columns,
@@ -509,11 +495,6 @@ rduckhts_gff_convert_parquet <- function(
   if (!is.null(index_path)) {
     params$index_path <- sql_quote_string(con, index_path)
   }
-  if (!is.null(header)) params$header <- if (header) "true" else "false"
-  params$header_names <- sql_varchar_list_literal(con, header_names, "header_names")
-  if (!is.null(auto_detect)) params$auto_detect <- if (auto_detect) "true" else "false"
-  if (!is.null(column_types)) column_types <- normalize_tabix_types(column_types)
-  params$column_types <- sql_varchar_list_literal(con, column_types, "column_types")
   params$attributes_map <- if (attributes_map) "true" else "false"
   params$attributes_list <- if (attributes_list) "true" else "false"
   params$attributes_pairs <- if (attributes_pairs) "true" else "false"
@@ -535,6 +516,9 @@ rduckhts_gff_convert_parquet <- function(
 #' @inheritParams rduckhts_gff_convert_parquet
 #' @param path Path or URI to the input tabix-indexed text file.
 #' @param header Logical; pass `header := true/false` to `read_tabix(...)`.
+#' @param header_names Optional character vector of column names.
+#' @param auto_detect Logical; request type auto-detection.
+#' @param column_types Optional character vector of DuckDB column types.
 #'
 #' @return Invisibly returns `output`.
 #' @export

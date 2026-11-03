@@ -1085,7 +1085,6 @@ rduckhts_bam_mate_overlap_counts <- function(
 #' @param bed_path Path to the input BED file
 #' @param reference Optional reference FASTA path for CRAM input when required
 #' @param index_path Optional explicit BAM/CRAM index path
-#' @param bed_index_path Optional explicit BED index path (reserved for future use)
 #' @param mapq Minimum mapping quality threshold for post-filter summaries
 #' @param min_baseq Minimum base quality threshold for post-filter base-level summaries
 #' @param min_read_len Minimum read length threshold for post-filter summaries
@@ -1096,9 +1095,7 @@ rduckhts_bam_mate_overlap_counts <- function(
 #' @param max_depth Maximum per-position depth cap. Set `0` to remove the cap.
 #' @param decompression_threads Integer. Number of htslib decompression worker
 #'   threads to use for BAM/CRAM input. `0` disables htslib worker threads.
-#' @param fragment_mode Logical. Reserved for future fragment-level semantics.
 #' @param strand_outputs Logical. Emit forward/reverse post-filter summary columns.
-#' @param processing_threads Reserved for future parallel interval processing.
 #'
 #' @return A data frame with one row per BED interval and pre/post regional summaries
 #'
@@ -1109,7 +1106,6 @@ rduckhts_bam_bed_coverage <- function(
   bed_path,
   reference = NULL,
   index_path = NULL,
-  bed_index_path = NULL,
   mapq = 0,
   min_baseq = 0,
   min_read_len = 0,
@@ -1118,9 +1114,7 @@ rduckhts_bam_bed_coverage <- function(
   min_depth = 1,
   max_depth = 1000000,
   decompression_threads = 0,
-  fragment_mode = FALSE,
-  strand_outputs = TRUE,
-  processing_threads = 0
+  strand_outputs = TRUE
 ) {
   params <- list(
     mapq = mapq,
@@ -1134,18 +1128,13 @@ rduckhts_bam_bed_coverage <- function(
       decompression_threads,
       "decompression_threads"
     ),
-    fragment_mode = if (isTRUE(fragment_mode)) "true" else "false",
-    strand_outputs = if (isTRUE(strand_outputs)) "true" else "false",
-    processing_threads = processing_threads
+    strand_outputs = if (isTRUE(strand_outputs)) "true" else "false"
   )
   if (!is.null(reference)) {
     params$reference <- sql_quote_string(con, reference)
   }
   if (!is.null(index_path)) {
     params$index_path <- sql_quote_string(con, index_path)
-  }
-  if (!is.null(bed_index_path)) {
-    params$bed_index_path <- sql_quote_string(con, bed_index_path)
   }
   param_str <- build_param_str(params)
   query <- sprintf(
@@ -1556,10 +1545,6 @@ rduckhts_detect_quality_encoding <- function(con, path, max_records = 10000) {
 #' @param path Path to the GFF3 file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
 #' @param index_path Optional explicit path to index file (.tbi/.csi)
-#' @param header Logical. If TRUE, use first non-meta line as column names
-#' @param header_names Character vector to override column names
-#' @param auto_detect Logical. If TRUE, infer basic numeric column types
-#' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
 #' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
 #'   behavior) or \code{"sequential"} to force full-file streaming/counting
 #'   instead of index-backed count paths. Sequential mode is incompatible with
@@ -1582,10 +1567,6 @@ rduckhts_gff <- function(
   path,
   region = NULL,
   index_path = NULL,
-  header = NULL,
-  header_names = NULL,
-  auto_detect = NULL,
-  column_types = NULL,
   scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
@@ -1601,40 +1582,6 @@ rduckhts_gff <- function(
   }
   if (!is.null(index_path)) {
     params$index_path <- sql_quote_string(con, index_path)
-  }
-  if (!is.null(header)) {
-    params$header <- if (isTRUE(header)) "true" else "false"
-  }
-  if (!is.null(auto_detect)) {
-    params$auto_detect <- if (isTRUE(auto_detect)) "true" else "false"
-  }
-  if (!is.null(header_names)) {
-    if (!is.character(header_names)) {
-      stop("header_names must be a character vector")
-    }
-    quoted_names <- vapply(
-      header_names,
-      function(name) sql_quote_string(con, name),
-      character(1)
-    )
-    params$header_names <- sprintf(
-      "[%s]",
-      paste(quoted_names, collapse = ", ")
-    )
-  }
-  if (!is.null(column_types)) {
-    if (!is.character(column_types)) {
-      stop("column_types must be a character vector")
-    }
-    quoted_types <- vapply(
-      normalize_tabix_types(column_types),
-      function(type) sql_quote_string(con, type),
-      character(1)
-    )
-    params$column_types <- sprintf(
-      "[%s]",
-      paste(quoted_types, collapse = ", ")
-    )
   }
   if (!is.null(scan_mode)) {
     params$scan_mode <- sql_quote_string(
@@ -1682,10 +1629,6 @@ rduckhts_gff <- function(
 #' @param path Path to the GTF file
 #' @param region Optional genomic region (e.g., "chr1:1000-2000")
 #' @param index_path Optional explicit path to index file (.tbi/.csi)
-#' @param header Logical. If TRUE, use first non-meta line as column names
-#' @param header_names Character vector to override column names
-#' @param auto_detect Logical. If TRUE, infer basic numeric column types
-#' @param column_types Character vector of column types (e.g. "BIGINT", "VARCHAR")
 #' @param scan_mode Optional scan mode. Use \code{"auto"} (default extension
 #'   behavior) or \code{"sequential"} to force full-file streaming/counting
 #'   instead of index-backed count paths. Sequential mode is incompatible with
@@ -1707,10 +1650,6 @@ rduckhts_gtf <- function(
   path,
   region = NULL,
   index_path = NULL,
-  header = NULL,
-  header_names = NULL,
-  auto_detect = NULL,
-  column_types = NULL,
   scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
@@ -1725,40 +1664,6 @@ rduckhts_gtf <- function(
   }
   if (!is.null(index_path)) {
     params$index_path <- sql_quote_string(con, index_path)
-  }
-  if (!is.null(header)) {
-    params$header <- if (isTRUE(header)) "true" else "false"
-  }
-  if (!is.null(auto_detect)) {
-    params$auto_detect <- if (isTRUE(auto_detect)) "true" else "false"
-  }
-  if (!is.null(header_names)) {
-    if (!is.character(header_names)) {
-      stop("header_names must be a character vector")
-    }
-    quoted_names <- vapply(
-      header_names,
-      function(name) sql_quote_string(con, name),
-      character(1)
-    )
-    params$header_names <- sprintf(
-      "[%s]",
-      paste(quoted_names, collapse = ", ")
-    )
-  }
-  if (!is.null(column_types)) {
-    if (!is.character(column_types)) {
-      stop("column_types must be a character vector")
-    }
-    quoted_types <- vapply(
-      normalize_tabix_types(column_types),
-      function(type) sql_quote_string(con, type),
-      character(1)
-    )
-    params$column_types <- sprintf(
-      "[%s]",
-      paste(quoted_types, collapse = ", ")
-    )
   }
   if (!is.null(scan_mode)) {
     params$scan_mode <- sql_quote_string(

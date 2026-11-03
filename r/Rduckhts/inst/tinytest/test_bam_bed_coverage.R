@@ -85,9 +85,11 @@ test_bam_bed_coverage <- function() {
     pattern = "decompression_threads must be a single whole number"
   )
 
+  # The unimplemented fragment_mode, processing_threads and bed_index_path
+  # arguments were removed from the wrapper and the SQL function.
   expect_error(
     rduckhts_bam_bed_coverage(con, mixed_bam, mixed_bed, fragment_mode = TRUE),
-    pattern = "fragment_mode is not implemented yet"
+    pattern = "unused argument"
   )
 
   # The BED file is read per execution: a prepared statement sees it rewritten.
