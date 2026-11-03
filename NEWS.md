@@ -2,6 +2,32 @@
 
 # duckhts (development version)
 
+- `read_bcf` parses only the VCF fields that selected columns read, by setting htslib's
+  `max_unpack` from the projection. A site-only scan of the 2,504-sample 1000 Genomes
+  chr22 VCF parses no genotypes; results are unchanged. A text VCF field that no selected
+  column reads is not checked, so its syntax and decode errors are not reported; read,
+  decompression and allocation failures always error.
+- CRAM decoding is limited to the fields each function uses in `read_bam` (now also read
+  names, MAPQ and mate fields only when selected), `bam_bin_counts`,
+  `duckhts_bam_bed_coverage` and `read_pileup`. One helper, `duckhts_cram_require_fields`,
+  sets them, keeps the mate fields CRAM 1.x needs for flag reconstruction, and replaces
+  the hand-written calls in insert-size counts and idxstats; idxstats now reports a
+  failure to configure CRAM.
+- `duckhts_mosdepth(use_median := TRUE)` clears and scans only the depth counters a window
+  used instead of all 65,536 per window; output files are byte-identical.
+- Errors that were lost or reported as success:
+  - `read_tabix`, `read_bed`, the `fasta_nuc` BED input and alignment-backed `read_fastq`/
+    `read_fasta` treated an htslib read failure as end of file and returned a shorter
+    result. They now fail with the path, line and htslib status, whatever `read_bed`'s
+    `error_policy`, which covers only short lines.
+  - `fasta_nuc` treated an allocation failure while reading a BED interval as the end of
+    the BED file.
+  - A failed macro-digest step during `LOAD` replaced DuckDB's error with a generic one and
+    did not free the result.
+  - A failing bigWig scan could return the rows of a partly filled chunk with its error.
+  - `bcftools_norm_row` could return a passthrough result after failing to copy REF or ALT.
+  - Messages from the reference cache, `read_bam`, `read_tabix` and the sequence readers now
+    name the function and path, and keep long mate names instead of truncating them.
 - `read_bcf(..., duplicate_names := 'suffix')` reads VCF/BCF files whose INFO keys,
   FORMAT keys or sample IDs differ only in case, such as `DP` and `dp` or samples `s1`
   and `S1`. VCF 4.3 and 4.5 allow them, while DuckDB column names ignore case. The first

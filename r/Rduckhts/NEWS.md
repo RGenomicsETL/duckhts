@@ -1,5 +1,11 @@
 # Rduckhts (development version)
 
+- The bundled extension reads VCF/BCF sites without parsing genotypes when no FORMAT or
+  sample column is selected, and decodes only the CRAM fields each function uses.
+  `duckhts_mosdepth(use_median = TRUE)` no longer clears 512 KiB of counters per window.
+- Read errors in tabix, BED, FASTA/FASTQ and `fasta_nuc` inputs now stop with an error
+  naming the file instead of returning a shorter result, and more error messages name the
+  function and file.
 - `rduckhts_bcf(..., duplicate_names = "suffix")` reads VCF/BCF files whose INFO keys,
   FORMAT keys or sample names differ only in case (`DP` and `dp`, `s1` and `S1`), which
   VCF allows and DuckDB column names cannot hold; later names get `__2`, `__3`. The
