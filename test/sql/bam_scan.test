@@ -4,6 +4,12 @@
 
 require duckhts
 
+# File-open diagnostics identify both the reader and the requested path.
+statement error
+SELECT * FROM read_bam('test/data/bam_open_error_missing.bam');
+----
+read_bam: failed to open SAM/BAM/CRAM file: test/data/bam_open_error_missing.bam
+
 # Missing SM, absent/unknown RG, and cache transitions are distinct from OOM.
 query TTT
 SELECT QNAME, READ_GROUP_ID, SAMPLE_ID

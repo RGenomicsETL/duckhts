@@ -669,7 +669,7 @@ static void bam_read_bind(duckdb_bind_info info) {
     samFile *fp = sam_open(file_path, "r");
     if (!fp) {
         char err[512];
-        snprintf(err, sizeof(err), "Failed to open SAM/BAM/CRAM file: %s", file_path);
+        snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s", file_path);
         duckdb_bind_set_error(info, err);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
@@ -1177,7 +1177,9 @@ static void bam_read_local_init(duckdb_init_info info) {
     /* Each thread opens its own file handle (required for parallel seeks) */
     local->fp = sam_open(bind->file_path, "r");
     if (!local->fp) {
-        duckdb_init_set_error(info, "Failed to open SAM/BAM/CRAM file");
+        char err[512];
+        snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s", bind->file_path);
+        duckdb_init_set_error(info, err);
         destroy_bam_local(local);
         return;
     }
