@@ -1401,6 +1401,11 @@ static void bcf_read_local_init(duckdb_init_info info) {
         return;
     }
 
+    /* VCF parsing precedes bcf_unpack: limit both stages to projected fields.
+     * Zero means parse everything to HTSlib, so count/POS-only scans use STR.
+     * SAMPLE_ID and tidy row counts come from the selected header samples. */
+    local->rec->max_unpack = local->unpack_mask ? local->unpack_mask : BCF_UN_STR;
+
     // Set up region query if user specified a region (non-parallel case)
     if (!is_parallel && bind->has_selector) {
         char region_error[256];
