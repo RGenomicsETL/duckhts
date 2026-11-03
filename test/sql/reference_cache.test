@@ -4,6 +4,34 @@
 
 require duckhts
 
+# Load failures identify the FASTA and both selected index paths.
+statement error
+SELECT bcftools_norm_row('chrCache', 1, 'A', ['T'],
+  'test/data/missing_reference_cache.fa', NULL, NULL, NULL, NULL)
+----
+bcftools_norm_row: failed to load FASTA index: FASTA 'test/data/missing_reference_cache.fa'; FAI 'test/data/missing_reference_cache.fa.fai'; GZI 'test/data/missing_reference_cache.fa.gzi'
+
+statement error
+SELECT bcftools_norm_row('chrCache', 1, 'A', ['T'],
+  'test/data/reference_cache.fa', NULL, NULL,
+  'test/data/missing_cache_index/index.fai', 'test/data/missing_cache_index/index.gzi')
+----
+bcftools_norm_row: failed to load FASTA index: FASTA 'test/data/reference_cache.fa'; FAI 'test/data/missing_cache_index/index.fai'; GZI 'test/data/missing_cache_index/index.gzi'
+
+statement error
+SELECT bcftools_norm_row('chr1', 1, 'A', ['T'],
+  'test/data/bam_mismatch.long.fa.gz', NULL, NULL, NULL,
+  'test/data/reference_cache.fa')
+----
+bcftools_norm_row: failed to load FASTA index: FASTA 'test/data/bam_mismatch.long.fa.gz'; FAI 'test/data/bam_mismatch.long.fa.gz.fai'; GZI 'test/data/reference_cache.fa'
+
+# Long names are explicitly abbreviated, without dropping an index label.
+statement error
+SELECT bcftools_norm_row('chrCache', 1, 'A', ['T'],
+  repeat('f', 300), NULL, NULL, repeat('i', 300), repeat('g', 300))
+----
+<REGEX>:.*bcftools_norm_row: failed to load FASTA index: FASTA 'f{256}\.\.\.\[truncated\]'; FAI 'i{256}\.\.\.\[truncated\]'; GZI 'g{256}\.\.\.\[truncated\]'.*
+
 statement ok
 SELECT * FROM bgzip('__WORKING_DIRECTORY__/test/data/reference_cache.fa',
   output_path := '__WORKING_DIRECTORY__/test_reference_cache.fa.gz', keep := true, overwrite := true)

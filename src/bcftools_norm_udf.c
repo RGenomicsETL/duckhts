@@ -138,9 +138,9 @@ static duckhts_reference_entry_t *get_norm_cache_entry(const char *fasta_path,
     duckhts_reference_entry_t *entry =
         duckhts_reference_cache_get(fasta_path, fai_path, gzi_path, 1, &cause);
     if (!entry) {
-        char message[256];
-        snprintf(message, sizeof(message), "bcftools_norm_row: %s", cause);
-        *err = dup_cstr(message);
+        size_t message_size = sizeof("bcftools_norm_row: ") + strlen(cause);
+        *err = malloc(message_size);
+        if (*err) snprintf(*err, message_size, "bcftools_norm_row: %s", cause);
     }
     return entry;
 }
