@@ -1030,9 +1030,8 @@ static int ensure_output_available(const char *path, int overwrite, char *err, s
     return 0;
 }
 
-static int build_bed_csi(const char *path, int overwrite, duckhts_output_owner_t *owned,
+static int build_bed_csi(const char *path, const char *csi, int overwrite, duckhts_output_owner_t *owned,
                          char *err, size_t errlen) {
-    char *csi = NULL;
     char *stage = NULL;
     FILE *input = NULL;
     FILE *output = NULL;
@@ -1042,8 +1041,6 @@ static int build_bed_csi(const char *path, int overwrite, duckhts_output_owner_t
     size_t n;
 
     if (!path) return 0;
-    csi = append_csi_suffix(path);
-    if (!csi) goto no_memory;
     stage = duckdb_malloc(strlen(csi) + sizeof(".XXXXXX"));
     if (!stage) goto no_memory;
     sprintf(stage, "%s.XXXXXX", csi);
@@ -1088,7 +1085,6 @@ cleanup:
         remove(stage);
         duckdb_free(stage);
     }
-    if (csi) duckdb_free(csi);
     return rc;
 }
 
@@ -1795,15 +1791,6 @@ typedef struct {
     duckhts_output_owner_t per_base_csi, regions_csi, quantized_csi, thresholds_csi;
 } mosdepth_output_ownership_t;
 
-static void cleanup_owned_csi(const char *path, duckhts_output_owner_t owned) {
-    char *csi;
-    if (!path || !owned.opened) return;
-    csi = append_csi_suffix(path);
-    if (!csi) return;
-    duckhts_output_cleanup(csi, owned);
-    duckdb_free(csi);
-}
-
 static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen) {
     samFile *fp = NULL;
     sam_hdr_t *hdr = NULL;
@@ -2296,28 +2283,44 @@ cleanup:
     dist_destroy(&total_global_dist);
     dist_destroy(&total_region_dist);
 
-    if (rc == 0) {
-        if (bind->per_base_path && build_bed_csi(bind->per_base_path, bind->overwrite,
-                                                  &owned.per_base_csi, err, errlen) != 0) rc = -1;
-        if (rc == 0 && bind->regions_path && build_bed_csi(bind->regions_path, bind->overwrite,
-                                                            &owned.regions_csi, err, errlen) != 0) rc = -1;
-        if (rc == 0 && bind->quantized_path && build_bed_csi(bind->quantized_path, bind->overwrite,
-                                                              &owned.quantized_csi, err, errlen) != 0) rc = -1;
-        if (rc == 0 && bind->thresholds_path && build_bed_csi(bind->thresholds_path, bind->overwrite,
-                                                                &owned.thresholds_csi, err, errlen) != 0) rc = -1;
+    struct {
+        const char *path;
+        duckhts_output_owner_t *file;
+        duckhts_output_owner_t *index;
+        char *csi;
+    } outputs[] = {
+        {bind->summary_path, &owned.summary, NULL, NULL},
+        {bind->global_dist_path, &owned.global_dist, NULL, NULL},
+        {bind->region_dist_path, &owned.region_dist, NULL, NULL},
+        {bind->per_base_path, &owned.per_base, &owned.per_base_csi, NULL},
+        {bind->regions_path, &owned.regions, &owned.regions_csi, NULL},
+        {bind->quantized_path, &owned.quantized, &owned.quantized_csi, NULL},
+        {bind->thresholds_path, &owned.thresholds, &owned.thresholds_csi, NULL}
+    };
+    size_t n_outputs = sizeof(outputs) / sizeof(outputs[0]);
+    for (size_t i = 0; rc == 0 && i < n_outputs; i++) {
+        if (!outputs[i].path || !outputs[i].index) continue;
+        outputs[i].csi = append_csi_suffix(outputs[i].path);
+        if (!outputs[i].csi) {
+            snprintf(err, errlen, "duckhts_mosdepth: out of memory");
+            rc = -1;
+        } else if (build_bed_csi(duckhts_output_path(outputs[i].path, outputs[i].file),
+                                 outputs[i].csi, bind->overwrite, outputs[i].index, err, errlen) != 0) {
+            rc = -1;
+        }
     }
-    if (rc != 0) {
-        duckhts_output_cleanup(bind->summary_path, owned.summary);
-        duckhts_output_cleanup(bind->global_dist_path, owned.global_dist);
-        duckhts_output_cleanup(bind->region_dist_path, owned.region_dist);
-        duckhts_output_cleanup(bind->per_base_path, owned.per_base);
-        duckhts_output_cleanup(bind->regions_path, owned.regions);
-        duckhts_output_cleanup(bind->quantized_path, owned.quantized);
-        duckhts_output_cleanup(bind->thresholds_path, owned.thresholds);
-        cleanup_owned_csi(bind->per_base_path, owned.per_base_csi);
-        cleanup_owned_csi(bind->regions_path, owned.regions_csi);
-        cleanup_owned_csi(bind->quantized_path, owned.quantized_csi);
-        cleanup_owned_csi(bind->thresholds_path, owned.thresholds_csi);
+    /* Publish only after every writer and index builder has succeeded. */
+    for (size_t i = 0; i < n_outputs; i++) {
+        if (duckhts_output_finish(outputs[i].path, outputs[i].file, rc == 0) != 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: failed to publish '%s': %s", outputs[i].path, strerror(errno));
+            rc = -1;
+        }
+        if (outputs[i].index &&
+            duckhts_output_finish(outputs[i].csi, outputs[i].index, rc == 0) != 0) {
+            snprintf(err, errlen, "duckhts_mosdepth: failed to publish CSI index: %s", strerror(errno));
+            rc = -1;
+        }
+        duckdb_free(outputs[i].csi);
     }
     return rc;
 }

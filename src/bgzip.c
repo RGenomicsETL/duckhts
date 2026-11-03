@@ -75,6 +75,35 @@ static int stat_file_size(const char *path, int64_t *size_out) {
     return 0;
 }
 
+static int bgzip_same_file(const char *input, const char *output) {
+    if (strcmp(input, output) == 0) return 1;
+#ifdef _WIN32
+    BY_HANDLE_FILE_INFORMATION input_info;
+    BY_HANDLE_FILE_INFORMATION output_info;
+    HANDLE input_handle = CreateFileA(input, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (input_handle == INVALID_HANDLE_VALUE) return 0;
+    HANDLE output_handle = CreateFileA(output, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    int same = output_handle != INVALID_HANDLE_VALUE &&
+        GetFileInformationByHandle(input_handle, &input_info) &&
+        GetFileInformationByHandle(output_handle, &output_info) &&
+        input_info.dwVolumeSerialNumber == output_info.dwVolumeSerialNumber &&
+        input_info.nFileIndexHigh == output_info.nFileIndexHigh &&
+        input_info.nFileIndexLow == output_info.nFileIndexLow;
+    if (output_handle != INVALID_HANDLE_VALUE) CloseHandle(output_handle);
+    CloseHandle(input_handle);
+    return same;
+#else
+    struct stat input_stat;
+    struct stat output_stat;
+    return stat(input, &input_stat) == 0 && stat(output, &output_stat) == 0 &&
+        input_stat.st_dev == output_stat.st_dev && input_stat.st_ino == output_stat.st_ino;
+#endif
+}
+
 static void destroy_bgzip_bind(void *data) {
     bgzip_bind_t *bind = (bgzip_bind_t *)data;
     if (!bind) return;
@@ -197,11 +226,7 @@ static void bgzip_init(duckdb_init_info info) {
         }
     }
 
-    struct stat input_stat;
-    struct stat output_stat;
-    if (strcmp(input_path, output_path) == 0 ||
-        (stat(input_path, &input_stat) == 0 && stat(output_path, &output_stat) == 0 &&
-         input_stat.st_dev == output_stat.st_dev && input_stat.st_ino == output_stat.st_ino)) {
+    if (bgzip_same_file(input_path, output_path)) {
         duckdb_init_set_error(info, "bgzip/bgunzip: input and output refer to the same file");
         return;
     }
@@ -313,9 +338,13 @@ static void bgzip_init(duckdb_init_info info) {
             goto output_error;
         }
         bgzf_fp = NULL;
-        if (stat_file_size(output_path, &bytes_out) != 0) bytes_out = 0;
+        if (stat_file_size(duckhts_output_path(output_path, &owned), &bytes_out) != 0) bytes_out = 0;
     }
 
+    if (duckhts_output_finish(output_path, &owned, 1) != 0) {
+        duckdb_init_set_error(info, "bgzip/bgunzip: failed to publish output file");
+        return;
+    }
     if (!bind->keep) {
         unlink(input_path);
     }
@@ -326,7 +355,7 @@ static void bgzip_init(duckdb_init_info info) {
 output_error:
     if (plain_fp) fclose(plain_fp);
     if (bgzf_fp) bgzf_close(bgzf_fp);
-    duckhts_output_cleanup(output_path, owned);
+    duckhts_output_cleanup(output_path, &owned);
 }
 
 static void bgzip_bind(duckdb_bind_info info) {

@@ -282,7 +282,10 @@ cleanup:
     }
     if (header) sam_hdr_destroy(header);
     if (fp) sam_close(fp);
-    if (rc != 0) duckhts_output_cleanup(bind->output_path, owned);
+    if (duckhts_output_finish(bind->output_path, &owned, rc == 0) != 0) {
+        snprintf(err, errlen, "duckhts_samtools_idxstats: failed to publish output: %s", strerror(errno));
+        rc = -1;
+    }
     return rc;
 }
 

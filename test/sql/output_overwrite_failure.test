@@ -1,0 +1,64 @@
+# name: test/sql/output_overwrite_failure.test
+# description: Failed overwrite leaves complete existing mosdepth outputs intact
+# group: [duckhts]
+# Fixture: python3 test/scripts/prepare_coverage_decode_fixture.py
+
+require duckhts
+
+statement ok
+COPY (SELECT 'summary sentinel') TO '__WORKING_DIRECTORY__/test_overwrite.mosdepth.summary.txt' (FORMAT CSV, HEADER FALSE);
+
+statement ok
+COPY (SELECT 'distribution sentinel') TO '__WORKING_DIRECTORY__/test_overwrite.mosdepth.global.dist.txt' (FORMAT CSV, HEADER FALSE);
+
+statement ok
+COPY (SELECT 'coverage sentinel') TO '__WORKING_DIRECTORY__/test_overwrite.per-base.bed.gz' (FORMAT CSV, HEADER FALSE, COMPRESSION UNCOMPRESSED);
+
+statement ok
+COPY (SELECT 'index sentinel') TO '__WORKING_DIRECTORY__/test_overwrite.per-base.bed.gz.csi' (FORMAT CSV, HEADER FALSE);
+
+statement error
+SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/test_overwrite', '__WORKING_DIRECTORY__/test/data/coverage_decode_error.bam', processing_threads := 1, overwrite := TRUE);
+----
+failed while scanning 'bad'
+
+query I
+SELECT content = 'summary sentinel' || chr(10) FROM read_text('__WORKING_DIRECTORY__/test_overwrite.mosdepth.summary.txt');
+----
+1
+
+query I
+SELECT content = 'distribution sentinel' || chr(10) FROM read_text('__WORKING_DIRECTORY__/test_overwrite.mosdepth.global.dist.txt');
+----
+1
+
+query I
+SELECT content = 'coverage sentinel' || chr(10) FROM read_text('__WORKING_DIRECTORY__/test_overwrite.per-base.bed.gz');
+----
+1
+
+query I
+SELECT content = 'index sentinel' || chr(10) FROM read_text('__WORKING_DIRECTORY__/test_overwrite.per-base.bed.gz.csi');
+----
+1
+
+statement ok
+COPY (SELECT line FROM (VALUES (0, '@HD' || chr(9) || 'VN:1.6'), (1, '@SQ' || chr(9) || 'SN:good' || chr(9) || 'LN:100'), (2, 'broken')) AS sam(n, line) ORDER BY n) TO '__WORKING_DIRECTORY__/test_overwrite.sam' (FORMAT CSV, HEADER FALSE);
+
+statement ok
+COPY (SELECT 'idxstats sentinel') TO '__WORKING_DIRECTORY__/test_overwrite.idxstats' (FORMAT CSV, HEADER FALSE);
+
+statement error
+SELECT * FROM duckhts_samtools_idxstats('__WORKING_DIRECTORY__/test_overwrite.sam', output := '__WORKING_DIRECTORY__/test_overwrite.idxstats', overwrite := TRUE);
+----
+failed while scanning input
+
+query I
+SELECT content = 'idxstats sentinel' || chr(10) FROM read_text('__WORKING_DIRECTORY__/test_overwrite.idxstats');
+----
+1
+
+query I
+SELECT count(*) FROM glob('__WORKING_DIRECTORY__/test_overwrite*.duckhts-*.tmp');
+----
+0
