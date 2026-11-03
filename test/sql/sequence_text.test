@@ -1,0 +1,29 @@
+require duckhts
+
+statement ok
+COPY (SELECT '>s1' UNION ALL SELECT 'ACGTacgtNNnnRYAC' UNION ALL SELECT '>s2' UNION ALL SELECT 'acgt' UNION ALL SELECT 'nN') TO '__WORKING_DIRECTORY__/test/sql/sequence_text.fa' (FORMAT CSV, HEADER false, QUOTE '');
+
+query TT
+SELECT name, sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/sequence_text.fa');
+----
+s1	ACGTacgtNNnnRYAC
+s2	acgtnN
+
+statement ok
+SELECT * FROM fasta_index('__WORKING_DIRECTORY__/test/sql/sequence_text.fa');
+
+query T
+SELECT sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/sequence_text.fa', region := 's1');
+----
+ACGTacgtNNnnRYAC
+
+query I
+SELECT count(*) FROM (
+    (SELECT name, sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/sequence_text.fa', sequence_encoding := 'nt16')
+     EXCEPT ALL SELECT name, sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/sequence_text.fa', region := 's1,s2', sequence_encoding := 'nt16'))
+    UNION ALL
+    (SELECT name, sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/sequence_text.fa', region := 's1,s2', sequence_encoding := 'nt16')
+     EXCEPT ALL SELECT name, sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/sequence_text.fa', sequence_encoding := 'nt16'))
+);
+----
+0

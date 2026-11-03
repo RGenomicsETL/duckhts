@@ -1,0 +1,41 @@
+require duckhts
+
+statement ok
+COPY (SELECT '@r1' UNION ALL SELECT 'AC.TACGT' UNION ALL SELECT '+' UNION ALL SELECT '!!!!!!!!') TO '__WORKING_DIRECTORY__/test/sql/dot.fastq' (FORMAT CSV, HEADER false, QUOTE '');
+
+query TT
+SELECT sequence, quality FROM read_fastq('__WORKING_DIRECTORY__/test/sql/dot.fastq');
+----
+ACNTACGT	!!!!!!!!
+
+statement ok
+COPY (SELECT '>p1' UNION ALL SELECT 'MKVLAAGIVGLLLA') TO '__WORKING_DIRECTORY__/test/sql/protein.fa' (FORMAT CSV, HEADER false, QUOTE '');
+
+query TT
+SELECT name, sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/protein.fa');
+----
+p1	MKVLAAGIVGLLLA
+
+statement ok
+SELECT * FROM fasta_index('__WORKING_DIRECTORY__/test/sql/protein.fa');
+
+query T
+SELECT sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/protein.fa', region := 'p1');
+----
+MKVLAAGIVGLLLA
+
+statement ok
+COPY (SELECT '@bad' UNION ALL SELECT 'AC.T' UNION ALL SELECT '+' UNION ALL SELECT '!') TO '__WORKING_DIRECTORY__/test/sql/malformed.fastq' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement error
+SELECT sequence FROM read_fastq('__WORKING_DIRECTORY__/test/sql/malformed.fastq');
+----
+truncated FASTQ quality block
+
+statement ok
+COPY (SELECT 'not a FASTA header') TO '__WORKING_DIRECTORY__/test/sql/malformed.fa' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement error
+SELECT sequence FROM read_fasta('__WORKING_DIRECTORY__/test/sql/malformed.fa');
+----
+failed while parsing FASTA record
