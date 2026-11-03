@@ -12,6 +12,8 @@
 #include <string.h>
 #include <math.h>
 #include <limits.h>
+#include <float.h>
+#include <errno.h>
 #include <regex.h>
 
 typedef struct {
@@ -429,8 +431,9 @@ int vep_parse_int(const char* str, int32_t* result) {
         return 0;
     }
     char* endptr;
+    errno = 0;
     long val = strtol(str, &endptr, 10);
-    if (endptr == str || *endptr != '\0') {
+    if (endptr == str || *endptr != '\0' || errno == ERANGE || val < INT32_MIN || val > INT32_MAX) {
         *result = INT32_MIN;
         return -1;
     }
@@ -444,8 +447,10 @@ int vep_parse_float(const char* str, float* result) {
         return 0;
     }
     char* endptr;
+    errno = 0;
     double val = strtod(str, &endptr);
-    if (endptr == str || *endptr != '\0') {
+    if (endptr == str || *endptr != '\0' || errno == ERANGE || !isfinite(val) ||
+        val < -FLT_MAX || val > FLT_MAX) {
         *result = NAN;
         return -1;
     }
@@ -494,8 +499,13 @@ static vep_transcript_t* parse_single_transcript(const vep_schema_t* schema,
             transcript->values[field_idx].str_value = vep_strdup(token);
             transcript->values[field_idx].is_missing = 0;
             const vep_field_t* field = &schema->fields[field_idx];
-            if (field->type == VEP_TYPE_INTEGER) vep_parse_int(token, &transcript->values[field_idx].int_value);
-            else if (field->type == VEP_TYPE_FLOAT) vep_parse_float(token, &transcript->values[field_idx].float_value);
+            if (field->type == VEP_TYPE_INTEGER) {
+                transcript->values[field_idx].is_missing =
+                    vep_parse_int(token, &transcript->values[field_idx].int_value) != 1;
+            } else if (field->type == VEP_TYPE_FLOAT) {
+                transcript->values[field_idx].is_missing =
+                    vep_parse_float(token, &transcript->values[field_idx].float_value) != 1;
+            }
         }
         field_idx++;
         if (!next_pipe) break;

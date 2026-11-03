@@ -4,6 +4,18 @@
 
 require duckhts
 
+# Numeric annotation fields require a complete, finite, in-range value.
+query ITTT
+SELECT POS, VEP_DISTANCE, VEP_AF, VEP_STRAND
+FROM read_bcf('test/data/csq/numeric_values.vcf') ORDER BY POS;
+----
+1	[NULL]	[NULL]	[NULL]
+2	[-2147483648]	[0.25]	[2147483647]
+3	[NULL]	[NULL]	[NULL]
+4	[NULL]	[NULL]	[NULL]
+5	[NULL]	[NULL]	[NULL]
+6	[12]	[NULL]	[-1]
+
 # --- Ensembl variation releases use Format= rather than VEP's usual Format: ---
 query IT
 SELECT count(*), string_agg(column_name, ',' ORDER BY column_name)
