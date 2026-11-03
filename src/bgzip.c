@@ -197,6 +197,15 @@ static void bgzip_init(duckdb_init_info info) {
         }
     }
 
+    struct stat input_stat;
+    struct stat output_stat;
+    if (strcmp(input_path, output_path) == 0 ||
+        (stat(input_path, &input_stat) == 0 && stat(output_path, &output_stat) == 0 &&
+         input_stat.st_dev == output_stat.st_dev && input_stat.st_ino == output_stat.st_ino)) {
+        duckdb_init_set_error(info, "bgzip/bgunzip: input and output refer to the same file");
+        return;
+    }
+
     if (decompress) {
         bgzf_fp = bgzf_open(input_path, "r");
         if (!bgzf_fp) {

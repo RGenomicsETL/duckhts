@@ -1,0 +1,41 @@
+# name: test/sql/bgzip_identity.test
+# description: Compression rejects input/output file aliases without deleting input
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+COPY (SELECT 'hello' AS text) TO '__WORKING_DIRECTORY__/test_identity.txt' (FORMAT CSV, HEADER FALSE);
+
+statement error
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test_identity.txt', output_path := '__WORKING_DIRECTORY__/test_identity.txt', overwrite := TRUE, keep := FALSE);
+----
+same file
+
+query I
+SELECT content = 'hello' || chr(10) FROM read_text('__WORKING_DIRECTORY__/test_identity.txt');
+----
+1
+
+statement error
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test_identity.txt', output_path := '__WORKING_DIRECTORY__/./test_identity.txt', overwrite := TRUE, keep := FALSE);
+----
+same file
+
+statement ok
+SELECT * FROM bgzip('__WORKING_DIRECTORY__/test_identity.txt', output_path := '__WORKING_DIRECTORY__/test_identity.gz');
+
+statement error
+SELECT * FROM bgunzip('__WORKING_DIRECTORY__/test_identity.gz', output_path := '__WORKING_DIRECTORY__/./test_identity.gz', overwrite := TRUE, keep := FALSE);
+----
+same file
+
+query I
+SELECT success FROM bgunzip('__WORKING_DIRECTORY__/test_identity.gz', output_path := '__WORKING_DIRECTORY__/test_identity.out');
+----
+1
+
+query I
+SELECT content = 'hello' || chr(10) FROM read_text('__WORKING_DIRECTORY__/test_identity.out');
+----
+1
