@@ -1,5 +1,7 @@
 # Rduckhts (development version)
 
+- Region queries on tabix-indexed VCFs no longer scan every sample column to locate each
+  record (backport of htslib d24ed09).
 - The bundled extension reads VCF/BCF sites without parsing genotypes when no FORMAT or
   sample column is selected, and decodes only the CRAM fields each function uses.
   `duckhts_mosdepth(use_median = TRUE)` no longer clears 512 KiB of counters per window.

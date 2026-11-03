@@ -7,8 +7,13 @@
   chr22 VCF parses no genotypes; results are unchanged. A text VCF field that no selected
   column reads is not checked, so its syntax and decode errors are not reported; read,
   decompression and allocation failures always error.
+- The vendored htslib 1.24 carries a backport of htslib d24ed09 (2026-10-27): tabix
+  stops parsing a record once the columns that locate it have been seen, instead of
+  scanning every sample column of a VCF line. With the projection change above, a
+  site-only region scan of the 2,504-sample chr22 VCF spent 65% of its time there.
 - CRAM decoding is limited to the fields each function uses in `read_bam` (now also read
-  names, MAPQ and mate fields only when selected), `bam_bin_counts`,
+  names only when selected, MAPQ and mate fields only when selected or needed to link
+  mates for generated read names), `bam_bin_counts`,
   `duckhts_bam_bed_coverage` and `read_pileup`. One helper, `duckhts_cram_require_fields`,
   sets them, keeps the mate fields CRAM 1.x needs for flag reconstruction, and replaces
   the hand-written calls in insert-size counts and idxstats; idxstats now reports a
