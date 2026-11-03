@@ -1,0 +1,6 @@
+##fileformat=VCFv4.2
+##contig=<ID=HLA-A*01:01,length=1000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1
+HLA-A*01:01	100	rs1	A	T	.	PASS	.	GT	0/1
+HLA-A*01:01	200	rs2	G	C	.	PASS	.	GT	1/1

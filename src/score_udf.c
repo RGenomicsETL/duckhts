@@ -1346,67 +1346,29 @@ static int score_record_passes_filter_list(const bcf_hdr_t *hdr, bcf1_t *rec, co
     return pass;
 }
 
-static int score_parse_region_token(const char *tok, char *chrom, size_t chrom_sz, int64_t *beg, int64_t *end) {
-    const char *c = strchr(tok, ':');
-    const char *d = c ? strchr(c + 1, '-') : NULL;
-    if (!tok || !*tok) return -1;
-    if (!c) {
-        snprintf(chrom, chrom_sz, "%s", tok);
-        *beg = 1;
-        *end = INT64_MAX / 2;
-        return 0;
-    }
-    {
-        size_t n = (size_t)(c - tok);
-        if (n >= chrom_sz) return -1;
-        memcpy(chrom, tok, n);
-        chrom[n] = '\0';
-    }
-    if (!d) {
-        *beg = atoll(c + 1);
-        *end = *beg;
-        return 0;
-    }
-    *beg = atoll(c + 1);
-    *end = atoll(d + 1);
-    if (*beg < 1) *beg = 1;
-    if (*end < *beg) *end = *beg;
-    return 0;
+static int score_region_name2id(void *hdr, const char *name) {
+    return bcf_hdr_name2id((bcf_hdr_t *)hdr, name);
 }
 
 static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const char *regions, int overlap_mode) {
-    char *tmp, *tok;
-    const char *rname;
-    int64_t rec_beg, rec_end;
+    const char *cursor = regions;
+    int match = 0;
+    hts_pos_t rec_end = rec->pos + (rec->rlen > 0 ? rec->rlen : 1);
 
     if (!regions || !regions[0]) return 1;
-    rname = bcf_hdr_id2name(hdr, rec->rid);
-    rec_beg = (int64_t)rec->pos + 1;
-    rec_end = rec_beg + (int64_t)(rec->rlen > 0 ? rec->rlen - 1 : 0);
-
-    tmp = score_dup(regions);
-    if (!tmp) return 0;
-    tok = strtok(tmp, ",");
-    while (tok) {
-        char chr[256];
-        int64_t beg = 1, end = INT64_MAX / 2;
-        if (score_parse_region_token(tok, chr, sizeof(chr), &beg, &end) == 0 && strcmp(chr, rname) == 0) {
-            if (overlap_mode == 0) {
-                if (rec_beg >= beg && rec_beg <= end) {
-                    duckdb_free(tmp);
-                    return 1;
-                }
-            } else {
-                if (!(rec_end < beg || rec_beg > end)) {
-                    duckdb_free(tmp);
-                    return 1;
-                }
-            }
+    while (*cursor) {
+        int tid;
+        hts_pos_t beg, end;
+        /* Use HTSlib's bcftools-style coordinates and braced contig quoting,
+         * including names containing colons or commas. */
+        cursor = hts_parse_region(cursor, &tid, &beg, &end, score_region_name2id,
+                                  (void *)hdr, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD);
+        if (!cursor) return -1;
+        if (tid == rec->rid && rec->pos < end && (overlap_mode == 0 ? rec->pos >= beg : rec_end > beg)) {
+            match = 1;
         }
-        tok = strtok(NULL, ",");
     }
-    duckdb_free(tmp);
-    return 0;
+    return match;
 }
 
 static int score_append_token(char **out, size_t *len, size_t *cap, const char *tok) {
@@ -1434,25 +1396,40 @@ static int score_append_token(char **out, size_t *len, size_t *cap, const char *
     return 0;
 }
 
-static int score_parse_region_line(const char *line, char *token, size_t token_sz) {
+static int score_parse_region_line(const char *line, int is_bed, char *token, size_t token_sz) {
     char buf[2048];
     char *fields[8];
     int n_fields;
-    if (!line) return -1;
+    if (!line || strlen(line) >= sizeof(buf)) return -1;
     snprintf(buf, sizeof(buf), "%s", line);
     n_fields = score_split_fields(buf, '\t', fields, 8);
     if (n_fields <= 0) return -1;
     if (n_fields == 1) {
+        if (is_bed || strlen(fields[0]) >= token_sz) return -1;
         snprintf(token, token_sz, "%s", fields[0]);
         return 0;
     }
     {
         const char *chr = fields[0];
-        int64_t beg = atoll(fields[1]);
-        int64_t end = (n_fields >= 3) ? atoll(fields[2]) : beg;
-        if (beg < 1) beg = 1;
-        if (end < beg) end = beg;
-        snprintf(token, token_sz, "%s:%lld-%lld", chr, (long long)beg, (long long)end);
+        char *tail;
+        int written;
+        errno = 0;
+        int64_t beg = strtoll(fields[1], &tail, 10);
+        if (errno == ERANGE || tail == fields[1] || *tail) return -1;
+        int64_t end = beg;
+        if (is_bed && n_fields < 3) return -1;
+        if (n_fields >= 3) {
+            errno = 0;
+            end = strtoll(fields[2], &tail, 10);
+            if (errno == ERANGE || tail == fields[2] || *tail) return -1;
+        }
+        if (is_bed) {
+            if (beg < 0 || beg == INT64_MAX) return -1;
+            beg++;
+        }
+        if (beg < 1 || end < beg) return -1;
+        written = snprintf(token, token_sz, "{%s}:%lld-%lld", chr, (long long)beg, (long long)end);
+        if (written < 0 || (size_t)written >= token_sz) return -1;
     }
     return 0;
 }
@@ -1464,20 +1441,27 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
     size_t len = 0;
     size_t cap = 0;
     int have = 0;
+    int ret;
+    size_t path_len;
+    int is_bed;
 
     if (!path || !path[0]) return NULL;
+    path_len = strlen(path);
+    is_bed = (path_len >= 4 && strcasecmp(path + path_len - 4, ".bed") == 0) ||
+             (path_len >= 7 && strcasecmp(path + path_len - 7, ".bed.gz") == 0);
     fp = hts_open(path, "r");
     if (!fp) {
         snprintf(err, err_sz, "bcftools_score: failed to open region/target file: %s", path);
         return NULL;
     }
 
-    while (hts_getline(fp, '\n', &str) >= 0) {
+    while ((ret = hts_getline(fp, '\n', &str)) >= 0) {
         char token[512];
         char *s = str.s;
         while (*s && isspace((unsigned char)*s)) s++;
         if (!*s || *s == '#') continue;
-        if (score_parse_region_line(s, token, sizeof(token)) != 0) {
+        int parsed = score_parse_region_line(s, is_bed, token, sizeof(token));
+        if (parsed < 0) {
             if (str.s) free(str.s);
             hts_close(fp);
             if (out) duckdb_free(out);
@@ -1497,6 +1481,11 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
     if (str.s) free(str.s);
     hts_close(fp);
 
+    if (ret < -1) {
+        if (out) duckdb_free(out);
+        snprintf(err, err_sz, "bcftools_score: failed to read region/target file: %s", path);
+        return NULL;
+    }
     if (!have) {
         if (out) duckdb_free(out);
         return score_dup("");
@@ -2408,8 +2397,15 @@ static void score_init(duckdb_init_info info) {
             bcf_unpack(rec, BCF_UN_ALL);
 
             if (!score_record_passes_filter_list(hdr, rec, bind->apply_filters)) continue;
-            if (!score_record_in_region_list(hdr, rec, bind->regions, bind->regions_overlap >= 0 ? bind->regions_overlap : 1)) continue;
-            if (!score_record_in_region_list(hdr, rec, bind->targets, bind->targets_overlap >= 0 ? bind->targets_overlap : 0)) continue;
+            int in_regions = score_record_in_region_list(hdr, rec, bind->regions,
+                                                         bind->regions_overlap >= 0 ? bind->regions_overlap : 1);
+            int in_targets = score_record_in_region_list(hdr, rec, bind->targets,
+                                                         bind->targets_overlap >= 0 ? bind->targets_overlap : 0);
+            if (in_regions < 0 || in_targets < 0) {
+                snprintf(err, sizeof(err), "bcftools_score: invalid region/target expression");
+                goto score_record_error;
+            }
+            if (!in_regions || !in_targets) continue;
             {
                 int expr_keep = score_record_matches_exprs(rec, &src, err, sizeof(err));
                 if (expr_keep < 0) {
