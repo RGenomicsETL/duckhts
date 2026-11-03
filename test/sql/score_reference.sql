@@ -1,0 +1,308 @@
+-- Test-only relational reference for DuckHTS bcftools_score (src/score_udf.c).
+-- Upstream score algorithm: Giulio Genovese, bcftools +score 1.24 (MIT).
+-- Required variables: score_path VARCHAR, score_summaries VARCHAR[].
+-- Optional variables (native defaults unless stated): score_use (default 'GT'; 'GT' or 'DS'),
+-- score_columns (default 'PLINK'), score_use_variant_id, score_q_score_thr DOUBLE[],
+-- score_counts, score_samples, score_regions, score_targets, score_regions_file,
+-- score_targets_file, score_regions_overlap, score_targets_overlap, score_apply_filters.
+-- score_bounds adds <metric>_BOUND columns for the float32 summation error bound.
+-- TSV summaries only; no include/exclude, GWAS-VCF, summary-list files or auto tag selection.
+-- END/symbolic reference spans are rejected for overlap modes 1/2.
+-- Custom column files, force_samples, log output, and caller-supplied PRS names are not supported.
+-- read_tabix, rather than read_csv, preserves errors from truncated compressed input.
+-- Counts are exact. Scores sum float32 products in double precision. For n terms,
+-- |native - SQL| <= (gamma(n, 2^-24) + gamma(n, 2^-53)) * A / (1-gamma(n, 2^-53)),
+-- where A is SQL sum(abs(term)) and gamma(n,u) = n*u/(1-n*u).
+-- The denominator accounts for rounding in A. This assumes finite normal arithmetic
+-- and n*2^-24 < 1; n rather than n-1 also leaves slack for bound evaluation.
+-- query() binds a projection generated solely from the input PRS names/thresholds.
+FROM query(CASE
+    WHEN getvariable('score_regions') IS NOT NULL AND getvariable('score_regions_file') IS NOT NULL
+        THEN error('score_reference: regions and regions_file cannot be used together')
+    WHEN getvariable('score_targets') IS NOT NULL AND getvariable('score_targets_file') IS NOT NULL
+        THEN error('score_reference: targets and targets_file cannot be used together')
+    WHEN getvariable('score_include') IS NOT NULL OR getvariable('score_exclude') IS NOT NULL
+        THEN error('score_reference: include/exclude expressions are unsupported')
+    WHEN upper(coalesce(getvariable('score_columns')::VARCHAR, 'PLINK')) NOT IN
+         ('PLINK', 'PLINK2', 'REGENIE', 'SAIGE', 'BOLT', 'BOLT_LMM', 'METAL', 'PGS', 'SSF', 'GWAS-SSF')
+        THEN error('score_reference: unsupported columns preset')
+    WHEN len(list_distinct(list_transform(getvariable('score_summaries'), p ->
+         lower(regexp_replace(regexp_extract(p, '[^/]+$'), '(\.(txt|tsv|ssf|gz|bgz))+$', '')))))
+         <> len(getvariable('score_summaries'))
+        THEN error('score_reference: duplicate PRS names')
+    ELSE $score$
+WITH
+options AS NOT MATERIALIZED (
+    SELECT coalesce(getvariable('score_use'), 'GT') AS mode,
+           replace(replace(upper(coalesce(getvariable('score_columns')::VARCHAR, 'PLINK')),
+               'GWAS-SSF', 'SSF'), 'BOLT_LMM', 'BOLT') AS preset,
+           coalesce(getvariable('score_use_variant_id'), false) AS by_id
+),
+summaries AS (
+    SELECT path, regexp_replace(regexp_extract(path, '[^/]+$'),
+               '(\.(txt|tsv|ssf|gz|bgz))+$', '') AS prs
+    FROM unnest(getvariable('score_summaries')) AS files(path)
+),
+-- Each scan has its own ordinal: UNION scheduling cannot decide which duplicate wins.
+summary_rows AS MATERIALIZED (
+    SELECT * FROM query(array_to_string(list_transform(getvariable('score_summaries'),
+        p -> 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ' AS path, row_number() OVER () AS ordinal, to_json(t) AS fields FROM read_tabix(' ||
+             chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ', header := true) t'), ' UNION ALL '))
+),
+-- Alias order follows the pinned native presets.
+aliases(preset, role, names) AS (
+    VALUES
+        ('PLINK', 'CHR', ['CHR']), ('PLINK', 'BP', ['BP']),
+        ('PLINK', 'SNP', ['SNP']), ('PLINK', 'A1', ['A1']),
+        ('PLINK', 'BETA', ['BETA']), ('PLINK', 'OR', ['OR']), ('PLINK', 'P', ['P']),
+        ('PLINK2', 'LP', ['LOG10_P']),
+        ('PLINK2', 'CHR', ['CHROM']), ('PLINK2', 'BP', ['POS']),
+        ('PLINK2', 'SNP', ['ID']), ('PLINK2', 'A1', ['A1']),
+        ('PLINK2', 'BETA', ['BETA']), ('PLINK2', 'OR', ['OR']), ('PLINK2', 'P', ['P']),
+        ('REGENIE', 'CHR', ['CHROM']), ('REGENIE', 'BP', ['GENPOS']),
+        ('REGENIE', 'SNP', ['ID']), ('REGENIE', 'A1', ['ALLELE1']),
+        ('REGENIE', 'BETA', ['BETA']), ('REGENIE', 'LP', ['LOG10P']),
+        ('SAIGE', 'CHR', ['CHR']), ('SAIGE', 'BP', ['POS']),
+        ('SAIGE', 'SNP', ['SNPID', 'markerID']), ('SAIGE', 'A1', ['Allele2']),
+        ('SAIGE', 'BETA', ['BETA']), ('SAIGE', 'P', ['p.value']),
+        ('BOLT', 'CHR', ['CHR']), ('BOLT', 'BP', ['BP']),
+        ('BOLT', 'SNP', ['SNP']), ('BOLT', 'A1', ['ALLELE1']),
+        ('BOLT', 'BETA', ['BETA']), ('BOLT', 'P', ['P_LINREG', 'P_BOLT_LMM_INF', 'P_BOLT_LMM']),
+        ('METAL', 'CHR', ['Chromosome']), ('METAL', 'BP', ['Position']),
+        ('METAL', 'SNP', ['MarkerName']), ('METAL', 'A1', ['Allele1']),
+        ('METAL', 'BETA', ['Effect']), ('METAL', 'P', ['P-value']), ('METAL', 'LP', ['log(P)']),
+        ('SSF', 'CHR', ['chromosome']), ('SSF', 'BP', ['base_pair_location']),
+        ('SSF', 'SNP', ['variant_id', 'rsid', 'rs_id']), ('SSF', 'A1', ['effect_allele']),
+        ('SSF', 'BETA', ['beta']), ('SSF', 'OR', ['odds_ratio', 'hazard_ratio']), ('SSF', 'P', ['p_value']),
+        ('PGS', 'OR', ['OR', 'HR']),
+        ('PGS', 'CHR', ['chr_name']), ('PGS', 'BP', ['chr_position']),
+        ('PGS', 'SNP', ['rsID']), ('PGS', 'A1', ['effect_allele']),
+        ('PGS', 'BETA', ['effect_weight'])
+),
+selected_aliases AS (
+    SELECT role, names FROM aliases, options WHERE aliases.preset = options.preset
+),
+header_mapping AS (
+    SELECT path, map_from_entries(list({'key': role, 'value':
+        '/' || list_first(list_filter(json_keys(fields), k -> lower(k) = lower(
+            list_last(list_filter(names, a -> list_contains(list_transform(json_keys(fields), k -> lower(k)), lower(a)))))))})) AS mapping
+    FROM summary_rows CROSS JOIN selected_aliases WHERE ordinal = 1
+    GROUP BY path
+),
+fields AS (
+    SELECT path, ordinal, map_from_entries(list_transform(map_entries(mapping), m ->
+        {'key': m['key'], 'value': json_extract_string(fields, m['value'])})) AS f,
+        mapping['CHR'] IS NULL OR mapping['BP'] IS NULL AS lack_position
+    FROM summary_rows JOIN header_mapping USING (path)
+    WHERE CASE WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
+               THEN error('score_reference: missing effect allele/weight columns in summary header: ' || path)
+               WHEN (coalesce(getvariable('score_use_variant_id'), false) OR lack_position) AND mapping['SNP'] IS NULL
+               THEN error('score_reference: missing marker name column in summary header: ' || path)
+               ELSE true END
+),
+parsed_markers AS (
+    SELECT path, ordinal, f['CHR'] AS chrom, try_cast(f['BP'] AS BIGINT) AS pos,
+           f['SNP'] AS id, upper(f['A1']) AS effect,
+           coalesce(nullif(try_cast(f['BETA'] AS FLOAT), 'NaN'::FLOAT),
+               CASE WHEN try_cast(f['OR'] AS FLOAT) > 0 THEN ln(try_cast(f['OR'] AS FLOAT))::FLOAT END) AS beta,
+           CASE WHEN f['LP'] IS NOT NULL THEN try_cast(f['LP'] AS FLOAT)
+                WHEN try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT) > 0
+                THEN (-log10(try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT))::FLOAT -
+                      coalesce(try_cast(nullif(split_part(lower(f['P']), 'e', 2), '') AS FLOAT), 0))::FLOAT
+                ELSE NULL END AS lp,
+           by_id OR lack_position AS match_id
+    FROM fields CROSS JOIN options
+),
+contigs AS MATERIALIZED (
+    SELECT id FROM read_hts_header(getvariable('score_path')) WHERE record_type = 'contig'
+),
+chromosome_aliases(name, candidates) AS (
+    VALUES ('23', ['X', 'chrX']), ('25', ['X', 'chrX']), ('XY', ['X', 'chrX']),
+           ('XX', ['X', 'chrX']), ('PAR1', ['X', 'chrX']), ('PAR2', ['X', 'chrX']),
+           ('24', ['Y', 'chrY']), ('26', ['MT', 'chrM']), ('MT', ['MT', 'chrM']), ('chrM', ['MT', 'chrM'])
+),
+markers AS (
+    SELECT m.*, CASE WHEN match_id THEN 'I:' || m.id ELSE
+        'P:' || coalesce(exact.id, stripped.id, prefixed.id, special.id, fallback.id) || ':' || pos END AS marker_key
+    FROM parsed_markers m
+    LEFT JOIN contigs exact ON m.chrom = exact.id
+    LEFT JOIN contigs stripped ON regexp_replace(m.chrom, '^chr', '') = stripped.id
+    LEFT JOIN contigs prefixed ON len(m.chrom) <= 2 AND 'chr' || m.chrom = prefixed.id
+    LEFT JOIN chromosome_aliases a ON m.chrom = a.name
+    LEFT JOIN contigs special ON a.candidates[1] = special.id
+    LEFT JOIN contigs fallback ON a.candidates[2] = fallback.id
+    WHERE beta IS NOT NULL AND NOT isnan(beta) AND effect IS NOT NULL
+      AND CASE WHEN match_id THEN m.id IS NOT NULL ELSE pos IS NOT NULL END
+    QUALIFY row_number() OVER (PARTITION BY path, marker_key ORDER BY ordinal) = 1
+),
+thresholds AS (
+    SELECT threshold,
+           CASE WHEN getvariable('score_q_score_thr') IS NULL THEN ''
+                ELSE '_p' || printf('%g', threshold) END AS suffix,
+           CASE WHEN threshold <= 0 OR threshold > 1 THEN error('score_reference: invalid q_score_thr')
+                ELSE -log10(CASE WHEN threshold::FLOAT = 0 THEN threshold ELSE threshold::FLOAT::DOUBLE END) END AS lp
+    FROM unnest(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0])) AS q(threshold)
+),
+samples AS (
+    SELECT s.* FROM read_bcf_samples(getvariable('score_path'), samples := getvariable('score_samples')) s
+    WHERE CASE WHEN EXISTS (SELECT 1 FROM read_hts_header(getvariable('score_path'))
+                            WHERE record_type = 'FORMAT' AND id = coalesce(getvariable('score_use'), 'GT'))
+               THEN true ELSE error('score_reference: required FORMAT/' || coalesce(getvariable('score_use'), 'GT') ||
+                                    ' is absent from header: ' || getvariable('score_path')) END
+),
+-- GT and DS use a common normalized call layout without decoding unrelated FORMAT tags.
+calls AS (
+    SELECT * FROM query(
+        'SELECT record_index, CHROM, POS, ID, REF, ALT, FILTER, gt_width, ds_width, c.sample_index, c.alleles, ' ||
+        CASE coalesce(getvariable('score_use'), 'GT')
+            WHEN 'GT' THEN 'NULL::FLOAT[]'
+            WHEN 'DS' THEN 'CASE WHEN typeof(c.format.DS) LIKE ''%[]'' THEN c.format.DS::FLOAT[] ELSE [c.format.DS::FLOAT] END'
+            ELSE error('score_reference: supported use values are GT and DS') END ||
+        ' AS dosage FROM (SELECT *, unnest(calls) AS c, ' ||
+        'list_max(list_transform(calls, c -> len(c.alleles))) AS gt_width, ' ||
+        CASE coalesce(getvariable('score_use'), 'GT') WHEN 'DS' THEN
+            'list_max(list_transform(calls, c -> CASE WHEN typeof(c.format.DS) LIKE ''%[]'' THEN len(c.format.DS::FLOAT[]) ELSE 1 END))'
+            ELSE 'NULL::BIGINT' END || ' AS ds_width FROM read_geno(' ||
+        chr(39) || replace(getvariable('score_path'), chr(39), chr(39) || chr(39)) || chr(39) ||
+        ', scan_mode := ''sequential'', include_filter := true, samples := ' ||
+        CASE WHEN getvariable('score_samples') IS NULL THEN 'NULL' ELSE
+            chr(39) || replace(getvariable('score_samples')::VARCHAR, chr(39), chr(39) || chr(39)) || chr(39) END ||
+        ', format_fields := ' || CASE WHEN coalesce(getvariable('score_use'), 'GT') = 'DS'
+            THEN '[''DS'']' ELSE '[]' END || '))')
+),
+filtered_calls AS (
+    SELECT * FROM calls
+    WHERE coalesce(getvariable('score_apply_filters')::VARCHAR, '') = ''
+       OR len(list_intersect(coalesce(FILTER, ['.']), string_split(getvariable('score_apply_filters')::VARCHAR, ','))) > 0
+),
+selection(kind, spec, path, mode) AS (
+    VALUES ('regions', getvariable('score_regions')::VARCHAR, getvariable('score_regions_file')::VARCHAR,
+            coalesce(getvariable('score_regions_overlap'), 1)),
+           ('targets', getvariable('score_targets')::VARCHAR, getvariable('score_targets_file')::VARCHAR,
+            coalesce(getvariable('score_targets_overlap'), 0))
+),
+interval_items AS (
+    SELECT selection.*, item, coalesce(contigs.id, regexp_extract(item, '^(\{[^}]+\}|[^:]+)', 1)) AS contig
+    FROM selection CROSS JOIN unnest(regexp_extract_all(spec, '(\{[^}]*\}[^,]*|[^,]+)')) AS items(item)
+    LEFT JOIN contigs ON item = contigs.id
+    WHERE coalesce(spec, '') <> ''
+),
+text_intervals AS (
+    SELECT kind, mode, contig,
+           ltrim(substr(item, len(contig) + 1), ':') AS span,
+           trim(contig, '{}') AS chrom,
+           CASE WHEN span = '' THEN 1 ELSE try_cast(split_part(span, '-', 1) AS BIGINT) END AS lo,
+           CASE WHEN span = '' THEN 9223372036854775807
+                WHEN ends_with(span, '-') THEN 9223372036854775807
+                WHEN contains(span, '-') THEN try_cast(split_part(span, '-', 2) AS BIGINT)
+                ELSE lo END AS hi
+    FROM interval_items
+),
+file_intervals AS (
+    SELECT kind, mode, values[1] AS chrom,
+           CASE WHEN coalesce(values[1], '') = '' OR try_cast(values[2] AS BIGINT) IS NULL
+                     OR try_cast(coalesce(values[3], values[2]) AS BIGINT) IS NULL
+                     OR try_cast(values[2] AS BIGINT) < CASE WHEN is_bed THEN 0 ELSE 1 END
+                     OR try_cast(coalesce(values[3], values[2]) AS BIGINT) <
+                        try_cast(values[2] AS BIGINT) + CASE WHEN is_bed THEN 1 ELSE 0 END
+                THEN error('score_reference: invalid interval in ' || path || ' at data row ' || data_row)
+                ELSE values[2]::BIGINT + CASE WHEN is_bed THEN 1 ELSE 0 END END AS lo,
+           try_cast(coalesce(values[3], values[2]) AS BIGINT) AS hi
+    FROM query(coalesce(nullif(array_to_string(list_transform(
+        list_filter([getvariable('score_regions_file')::VARCHAR, getvariable('score_targets_file')::VARCHAR], p -> p IS NOT NULL),
+        p -> 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ' AS path, row_number() OVER () AS data_row, list_transform(json_keys(to_json(t)), k -> json_extract_string(to_json(t), ''/'' || k)) AS values FROM read_tabix(' ||
+             chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) || ', header := false) t'),
+        ' UNION ALL '), ''), 'SELECT NULL::VARCHAR AS path, NULL::BIGINT AS data_row, []::VARCHAR[] AS values WHERE false')) AS f
+    JOIN selection USING (path),
+    LATERAL (SELECT regexp_matches(path, '\.bed(\.(gz|bgz))?$') AS is_bed)
+),
+intervals AS (
+    SELECT kind, mode, chrom,
+           CASE WHEN lo IS NULL OR hi IS NULL OR lo < 1 OR hi < lo OR contains(contig, '{') AND NOT contains(contig, '}')
+                THEN error('score_reference: invalid region/target expression') ELSE lo END AS lo, hi
+    FROM text_intervals
+    UNION ALL
+    SELECT * FROM file_intervals
+),
+selected_calls AS (
+    SELECT c.* FROM filtered_calls c
+    WHERE
+$score$ || CASE WHEN coalesce(getvariable('score_regions')::VARCHAR, '') = ''
+                    AND coalesce(getvariable('score_targets')::VARCHAR, '') = ''
+                    AND getvariable('score_regions_file') IS NULL AND getvariable('score_targets_file') IS NULL
+               THEN 'true' ELSE $selection$
+       NOT EXISTS (
+        SELECT 1 FROM selection s
+        WHERE (coalesce(s.spec, '') <> '' OR s.path IS NOT NULL)
+          AND (EXISTS (SELECT 1 FROM intervals i WHERE i.kind = s.kind AND i.chrom = c.CHROM
+                       -- Native modes 1 and 2 both use the record reference span, including its anchor.
+                       AND c.POS <= i.hi
+                       AND c.POS + CASE WHEN i.mode = 0 THEN 0
+                           WHEN EXISTS (SELECT 1 FROM read_hts_header(getvariable('score_path'))
+                                        WHERE record_type = 'INFO' AND id = 'END')
+                                OR list_any_value(list_filter(c.ALT, a -> regexp_matches(a, '[<>\[\]]'))) IS NOT NULL
+                           THEN error('score_reference: END/symbolic span overlap is unsupported: ' || getvariable('score_path'))
+                           ELSE len(c.REF) - 1 END >= i.lo) = false)
+    )
+$selection$ END || $score$
+),
+matched AS (
+    SELECT c.*, m.path, m.beta, m.lp,
+           list_position(list_prepend(REF, ALT), effect) - 1 AS allele,
+           CASE WHEN mode = 'GT' THEN gt_width >= 2
+                WHEN ds_width IS NULL THEN false
+                WHEN ds_width <> len(ALT) THEN error('score_reference: invalid DS FORMAT cardinality at ' ||
+                    getvariable('score_path') || ':' || c.CHROM || ':' || c.POS)
+                ELSE true END AS available,
+           CASE WHEN mode = 'GT' THEN alleles[1] IS NULL OR (len(alleles) >= 2 AND alleles[2] IS NULL)
+                ELSE len(list_filter(dosage, x -> x IS NOT NULL)) <> len(ALT) END AS missing,
+           CASE WHEN mode = 'GT' THEN len(list_filter(alleles[1:2], x -> x = allele))::FLOAT
+                WHEN allele > 0 THEN dosage[allele]
+                ELSE list_reduce(list_prepend(2::FLOAT, dosage), (a, b) -> (a - b)::FLOAT) END AS dose
+    FROM (SELECT *, unnest(['I:' || ID, 'P:' || CHROM || ':' || POS]) AS marker_key FROM selected_calls) c
+    JOIN markers m USING (marker_key)
+    CROSS JOIN options
+),
+terms AS (
+    SELECT sample_index, path, t.suffix, (beta * dose)::FLOAT::DOUBLE AS term
+    FROM matched CROSS JOIN thresholds t
+    WHERE available AND NOT missing AND allele >= 0
+      AND (getvariable('score_q_score_thr') IS NULL OR matched.lp IS NULL OR isnan(matched.lp) OR matched.lp >= t.lp)
+),
+reductions AS (
+    SELECT sample_index, path, suffix, sum(term) AS score, count(*)::BIGINT AS n, sum(abs(term)) AS magnitude
+    FROM terms GROUP BY sample_index, path, suffix
+),
+results AS (
+    SELECT sample_name AS SAMPLE, prs || t.suffix AS metric,
+           coalesce(score, 0) AS score, coalesce(n, 0)::BIGINT AS n,
+           prs || '_CNT' || t.suffix AS count_metric,
+           CASE WHEN n * pow(2, -24) >= 1 THEN 'Infinity'::DOUBLE
+                ELSE coalesce(magnitude * (n * pow(2, -24) / (1 - n * pow(2, -24)) +
+                                           n * pow(2, -53) / (1 - n * pow(2, -53))) /
+                    (1 - n * pow(2, -53) / (1 - n * pow(2, -53))), 0) END AS bound
+    FROM samples CROSS JOIN summaries CROSS JOIN thresholds t
+    LEFT JOIN reductions r ON samples.sample_index = r.sample_index AND summaries.path = r.path AND t.suffix = r.suffix
+)
+SELECT SAMPLE,
+$score$ || array_to_string(list_transform(
+    flatten(list_transform(
+        list_transform(getvariable('score_summaries'), p -> regexp_replace(regexp_extract(p, '[^/]+$'),
+            '(\.(txt|tsv|ssf|gz|bgz))+$', '')),
+        p -> list_transform(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0]), q ->
+            {'metric': p || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END,
+             'count_metric': p || '_CNT' || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END}))),
+    m -> 'max(score) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
+         ') AS "' || replace(m['metric'], '"', '""') || '"' ||
+         CASE WHEN coalesce(getvariable('score_counts'), false) THEN
+             ', max(n) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
+             ') AS "' || replace(m['count_metric'], '"', '""') || '"' ELSE '' END ||
+         CASE WHEN coalesce(getvariable('score_bounds'), false) THEN
+             ', max(bound) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
+             ') AS "' || replace(m['metric'], '"', '""') || '_BOUND"' ELSE '' END), ', ') ||
+$score$
+FROM results GROUP BY SAMPLE ORDER BY SAMPLE
+$score$ END)

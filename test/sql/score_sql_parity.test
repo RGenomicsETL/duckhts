@@ -1,0 +1,618 @@
+# name: test/sql/score_sql_parity.test
+# description: Relational GT/DS score reference and float32 forward error bounds
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SET VARIABLE score_sql = (SELECT content FROM read_text('test/sql/score_reference.sql'));
+
+statement ok
+SET VARIABLE score_compare = $compare$
+WITH native_cells AS (
+    SELECT n.SAMPLE, j.key, j.value FROM native_score n, json_each(to_json(n)) j
+    WHERE j.key <> 'SAMPLE'
+), reference_cells AS (
+    SELECT r.SAMPLE, j.key, j.value, to_json(r) AS row FROM sql_score r, json_each(to_json(r)) j
+    WHERE j.key <> 'SAMPLE' AND NOT ends_with(j.key, '_BOUND')
+)
+SELECT count(*) FROM native_cells n FULL JOIN reference_cells r USING (SAMPLE, key)
+WHERE n.SAMPLE IS NULL OR r.SAMPLE IS NULL OR n.value IS NULL OR r.value IS NULL
+   OR json_type(n.value) = 'NULL' OR json_type(r.value) = 'NULL'
+   OR NOT isfinite(n.value::DOUBLE) OR NOT isfinite(r.value::DOUBLE)
+   OR CASE WHEN regexp_matches(coalesce(n.key, r.key), '_CNT(_p|$)')
+           THEN n.value::BIGINT <> r.value::BIGINT
+           ELSE json_extract(r.row, '/' || r.key || '_BOUND') IS NULL
+                OR json_type(json_extract(r.row, '/' || r.key || '_BOUND')) = 'NULL'
+                OR NOT isfinite(json_extract(r.row, '/' || r.key || '_BOUND')::DOUBLE)
+                OR abs(n.value::DOUBLE - r.value::DOUBLE) >
+                   json_extract(r.row, '/' || r.key || '_BOUND')::DOUBLE END
+$compare$;
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_counts = true;
+
+statement ok
+SET VARIABLE score_bounds = true;
+
+foreach preset PLINK PLINK2 REGENIE SAIGE BOLT METAL PGS SSF
+
+statement ok
+SET VARIABLE score_columns = '${preset}';
+
+statement ok
+SET VARIABLE score_summaries = [CASE WHEN '${preset}' = 'PLINK' THEN 'test/data/score_summary.tsv' ELSE 'test/data/score_summary_' || lower('${preset}') || '.tsv' END];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := '${preset}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT name, type FROM pragma_table_info('native_score') EXCEPT ALL SELECT name, type FROM pragma_table_info('sql_score') WHERE NOT ends_with(name, '_BOUND')) UNION ALL (SELECT name, type FROM pragma_table_info('sql_score') WHERE NOT ends_with(name, '_BOUND') EXCEPT ALL SELECT name, type FROM pragma_table_info('native_score')));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_columns = 'PLINK';
+
+foreach fixture score_summary score_summary_rsid score_summary_comments score_summary_log10p score_summary_or score_summary_mismatch score_summary_na score_summary_skips
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/${fixture}.tsv'];
+
+foreach by_id false true
+
+statement ok
+SET VARIABLE score_use_variant_id = ${by_id};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', use_variant_id := ${by_id}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+endloop
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+foreach fixture score_input score_chrprefix score_dosage score_missing_gt
+
+statement ok
+SET VARIABLE score_path = 'test/data/${fixture}.vcf';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_aliases.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_aliases.tsv'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query TII
+SELECT SAMPLE, score_sql_aliases::INTEGER, score_sql_aliases_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	5	3
+S2	5	3
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+statement ok
+SET VARIABLE score_use = 'DS';
+
+foreach fixture score_dosage score_missing_ds
+
+statement ok
+SET VARIABLE score_path = 'test/data/${fixture}.vcf';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'DS', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_bad_ds.vcf';
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+invalid DS FORMAT cardinality
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_dosage.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv', 'test/data/score_summary_or.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1, 0.3, 1.0];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'DS', columns := 'PLINK', q_score_thr := '0.1,0.3,1', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary_smallp.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [1e-200];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '1e-200', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary_log10p.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1, 1.0];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '0.1,1', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_columns = 'PLINK';
+
+statement ok
+SET VARIABLE score_q_score_thr = NULL;
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+foreach sample_selection S1 S2 ^S2
+
+statement ok
+SET VARIABLE score_samples = '${sample_selection}';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', samples := '${sample_selection}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_samples = NULL;
+
+foreach region 1:100-200 2,1 1:100-100,chrZ:5-9 1:300-300,1:1-400,1:100-100,1:100-100,1:101-199,1:200-200 1:300-300,1:100-100 chrZ:1-1000,chrY
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '${region}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '${region}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+endloop
+
+foreach filters PASS q10
+
+statement ok
+SET VARIABLE score_apply_filters = '${filters}';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', apply_filters := '${filters}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_apply_filters = NULL;
+
+# BED is zero-based half-open; plain TSV is one-based inclusive.
+foreach fixture score_sql_selection.bed score_sql_selection.tsv score_sql_anchor.bed
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind}_file = 'test/data/${fixture}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_spans.vcf';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind}_file := 'test/data/${fixture}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind}_file = NULL;
+
+endloop
+
+endloop
+
+foreach site 100 103 104
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '1:${site}-${site}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '1:${site}-${site}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_hla.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_hla_summary.tsv'];
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '{HLA-A*01:01}:100-100';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '{HLA-A*01:01}:100-100', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+# First marker per key, full allele-string matching, and REF counted per record.
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_quirks.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_quirks.tsv'];
+
+foreach mode GT DS
+
+statement ok
+SET VARIABLE score_use = '${mode}';
+
+foreach by_id false true
+
+statement ok
+SET VARIABLE score_use_variant_id = ${by_id};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := '${mode}', columns := 'PLINK', use_variant_id := ${by_id}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+endloop
+
+query TII
+SELECT SAMPLE, score_sql_quirks::INTEGER, score_sql_quirks_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	16	5
+S2	9	5
+
+# Comparator controls: reject a changed score, count, and missing error bound.
+statement ok
+UPDATE sql_score SET score_sql_quirks = score_sql_quirks + 1 WHERE SAMPLE = 'S1';
+
+query I
+FROM query(getvariable('score_compare'));
+----
+1
+
+statement ok
+UPDATE sql_score SET score_sql_quirks = score_sql_quirks - 1, score_sql_quirks_CNT = score_sql_quirks_CNT - 1 WHERE SAMPLE = 'S1';
+
+query I
+FROM query(getvariable('score_compare'));
+----
+1
+
+statement ok
+UPDATE sql_score SET score_sql_quirks_CNT = score_sql_quirks_CNT + 1, score_sql_quirks_BOUND = NULL WHERE SAMPLE = 'S1';
+
+query I
+FROM query(getvariable('score_compare'));
+----
+1
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+statement ok
+SET VARIABLE score_counts = false;
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK');
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_regions = '1:1-200';
+
+statement ok
+SET VARIABLE score_targets = '1:300';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', regions := '1:1-200', targets := '1:300');
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_regions = NULL;
+
+statement ok
+SET VARIABLE score_targets = NULL;
+
+statement ok
+SET VARIABLE score_regions_file = 'test/data/score_sql_bad_interval.bed';
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+invalid interval in test/data/score_sql_bad_interval.bed at data row 1
+
+statement ok
+SET VARIABLE score_regions_file = NULL;
+
+foreach invalid_region 1:bad chrZ:abc chrZ:7-3 {chrZ
+
+statement ok
+SET VARIABLE score_regions = '${invalid_region}';
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+invalid region/target expression
+
+endloop
+
+statement ok
+SET VARIABLE score_regions = NULL;
+
+statement ok
+SET VARIABLE score_use = 'HDS';
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+supported use values are GT and DS
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_as.vcf';
+
+statement error
+SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK');
+----
+VCF does not include the GT FORMAT field
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+required FORMAT/GT is absent from header
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use_variant_id = true;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary_no_snp.tsv'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+missing marker name column
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv', 'test/data/score_summary.tsv'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+duplicate PRS names
+
+foreach fixture score_truncated.tsv.gz score_truncated.header.tsv.gz
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/${fixture}'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+read_tabix: failed to read
+
+endloop

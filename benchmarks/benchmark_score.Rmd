@@ -11,13 +11,23 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE, warning 
 
 # Benchmark
 
-This benchmark validates and times DuckHTS `bcftools_score()` against the
+This benchmark validates and times DuckHTS `bcftools_score()` and the test-only
+query in `test/sql/score_reference.sql` against the
 `bcftools +score` plugin bundled by
 [`RGenomicsETL/RBCFTools`](https://github.com/RGenomicsETL/RBCFTools).
 It covers both a single TSV/PLINK summary and multi-PRS TSV scoring where
 several summary files are scored in one genotype scan. Because upstream
 `bcftools +score` writes scores with `%#.6g`, the comparison formats DuckHTS
-scores the same way before checking cell-level equality.
+native scores the same way before checking cell-level equality. SQL sums float32
+products in double precision. Its comparison uses the forward error bound
+`(gamma(n, 2^-24) + gamma(n, 2^-53)) * A / (1-gamma(n, 2^-53))`, where
+`A` is SQL `sum(abs(term))`, `gamma(n, u) = n*u/(1-n*u)` and `n` is the number
+of contributing markers. The denominator accounts for rounding in `A`; using
+`n` rather than `n-1` leaves slack for evaluating the bound.
+This assumes finite normal arithmetic and `n*2^-24 < 1`. Counts must match exactly.
+All engines read the same BGZF VCF and TSV summaries, with counts enabled.
+Parity is checked before any timed repeat. DuckDB uses one thread, a 4 GB memory
+limit and a 3 GB spill limit; upstream uses one thread.
 
 # Run
 
@@ -67,6 +77,12 @@ con <- dbConnect(drv, dbdir = ":memory:")
 ext_path <- normalizePath("build/release/duckhts.duckdb_extension", mustWork = TRUE)
 DBI::dbExecute(con, sprintf("LOAD '%s';", gsub("\\\\", "/", ext_path)))
 DBI::dbExecute(con, "PRAGMA threads=4;")
+DBI::dbExecute(con, "SET memory_limit='4GB'")
+DBI::dbExecute(con, "SET max_temp_directory_size='3GB'")
+spill_dir <- file.path(tempdir(), "score-spill")
+dir.create(spill_dir)
+DBI::dbExecute(con, paste0("SET temp_directory = '", gsub("'", "''", spill_dir, fixed = TRUE), "'"))
+score_reference <- paste(readLines("test/sql/score_reference.sql"), collapse = "\n")
 ```
 
 ```{r helpers, include = FALSE}
@@ -161,13 +177,23 @@ duckdb_score_sql <- function(vcf_path, summary_paths) {
     "SELECT * FROM bcftools_score(",
     sql_string(vcf_path), ", ",
     sql_summary_arg(summary_paths), ", ",
-    "use := 'GT', columns := 'PLINK') ",
+    "use := 'GT', columns := 'PLINK', counts := true) ",
     "ORDER BY SAMPLE"
   )
 }
 
-run_duckdb_bench <- function(vcf_path, summary_paths, n = 3L) {
-  sql <- duckdb_score_sql(vcf_path, summary_paths)
+set_sql_inputs <- function(vcf_path, summary_paths, bounds = FALSE) {
+  DBI::dbExecute(con, paste0("SET VARIABLE score_path = ", sql_string(vcf_path)))
+  DBI::dbExecute(con, paste0("SET VARIABLE score_summaries = [",
+                            paste(sql_string(summary_paths), collapse = ", "), "]"))
+  DBI::dbExecute(con, "SET VARIABLE score_use = 'GT'")
+  DBI::dbExecute(con, "SET VARIABLE score_counts = true")
+  DBI::dbExecute(con, paste0("SET VARIABLE score_bounds = ", if (bounds) "true" else "false"))
+}
+
+run_duckdb_bench <- function(vcf_path, summary_paths, n = 3L, engine = "duckhts_native") {
+  if (engine == "duckhts_sql") set_sql_inputs(vcf_path, summary_paths)
+  sql <- if (engine == "duckhts_sql") score_reference else duckdb_score_sql(vcf_path, summary_paths)
   times <- numeric(n)
   output_samples <- NA_integer_
   score_columns <- NA_integer_
@@ -180,11 +206,11 @@ run_duckdb_bench <- function(vcf_path, summary_paths, n = 3L) {
     out <- DBI::dbGetQuery(con, sql)
     times[i] <- proc.time()[["elapsed"]] - t0
     output_samples <- nrow(out)
-    score_columns <- ncol(out) - 1L
+    score_columns <- sum(!grepl("_CNT$", names(out)) & names(out) != "SAMPLE")
   }
 
   data.frame(
-    engine = "duckhts",
+    engine = engine,
     runs = n,
     median_sec = stats::median(times),
     min_sec = min(times),
@@ -205,7 +231,7 @@ run_duckdb_output <- function(vcf_path, summary_paths) {
 run_bcftools_once <- function(vcf_gz, summary_paths, output_path) {
   summary_args <- paste(shell_quote(summary_paths), collapse = " ")
   cmd <- sprintf(
-    "BCFTOOLS_PLUGINS=%s %s +score --use GT -c PLINK -o %s %s %s",
+    "BCFTOOLS_PLUGINS=%s %s +score --use GT -c PLINK --counts -o %s %s %s",
     shell_quote(score_plugin_dir),
     shell_quote(bcftools_bin),
     shell_quote(output_path),
@@ -230,7 +256,9 @@ bcftools_score_text <- function(x) {
 }
 
 compare_outputs <- function(duck_out, bcf_out) {
-  common_cols <- intersect(names(duck_out), names(bcf_out))
+  stopifnot(setequal(names(duck_out), names(bcf_out)),
+            !anyDuplicated(duck_out$SAMPLE), !anyDuplicated(bcf_out$SAMPLE))
+  common_cols <- names(duck_out)
   score_cols <- setdiff(common_cols, "SAMPLE")
 
   merged <- merge(duck_out[, common_cols, drop = FALSE],
@@ -248,26 +276,34 @@ compare_outputs <- function(duck_out, bcf_out) {
     duck_col <- paste0(col, "_duck")
     bcf_col <- paste0(col, "_bcf")
     if (duck_col %in% names(merged) && bcf_col %in% names(merged)) {
-      d_text <- bcftools_score_text(merged[[duck_col]])
-      b_text <- bcftools_score_text(merged[[bcf_col]])
-      d <- as.numeric(d_text)
-      b <- as.numeric(b_text)
+      if (grepl("_CNT$", col)) {
+        d <- as.numeric(merged[[duck_col]])
+        b <- as.numeric(merged[[bcf_col]])
+        matches <- !is.na(d) & !is.na(b) & d == b
+      } else {
+        d_text <- bcftools_score_text(merged[[duck_col]])
+        b_text <- bcftools_score_text(merged[[bcf_col]])
+        d <- as.numeric(d_text)
+        b <- as.numeric(b_text)
+        matches <- !is.na(d_text) & !is.na(b_text) & d_text == b_text
+      }
       abs_diff <- abs(d - b)
       denom <- pmax(abs(d), abs(b), 1.0)
       rel_diff <- abs_diff / denom
-      matches <- !is.na(d_text) & !is.na(b_text) & d_text == b_text
       n_match <- n_match + sum(matches, na.rm = TRUE)
       n_mismatch <- n_mismatch + sum(!matches, na.rm = TRUE)
-      max_abs_diff <- max(max_abs_diff, max(abs_diff, na.rm = TRUE))
-      max_rel_diff <- max(max_rel_diff, max(rel_diff, na.rm = TRUE))
+      max_abs_diff <- max(c(max_abs_diff, abs_diff), na.rm = TRUE)
+      max_rel_diff <- max(c(max_rel_diff, rel_diff), na.rm = TRUE)
     }
   }
 
   data.frame(
     duck_samples = nrow(duck_out),
     bcf_samples = nrow(bcf_out),
-    score_columns = length(score_cols),
-    compared_score_cells = nrow(duck_out) * length(score_cols),
+    score_columns = sum(!grepl("_CNT$", score_cols)),
+    count_columns = sum(grepl("_CNT$", score_cols)),
+    compared_score_cells = nrow(duck_out) * sum(!grepl("_CNT$", score_cols)),
+    compared_count_cells = nrow(duck_out) * sum(grepl("_CNT$", score_cols)),
     cell_matches = n_match,
     cell_mismatches = n_mismatch,
     only_duck_samples = n_only_duck,
@@ -279,9 +315,40 @@ compare_outputs <- function(duck_out, bcf_out) {
   )
 }
 
+compare_sql_output <- function(native, reference) {
+  counts <- grep("_CNT$", names(native), value = TRUE)
+  scores <- setdiff(names(native), c("SAMPLE", counts))
+  stopifnot(!anyDuplicated(names(reference)),
+            setequal(names(reference), c(names(native), paste0(scores, "_BOUND"))),
+            identical(native$SAMPLE, reference$SAMPLE))
+  differences <- abs(as.matrix(native[scores]) - as.matrix(reference[scores]))
+  bounds <- as.matrix(reference[paste0(scores, "_BOUND")])
+  stopifnot(all(is.finite(differences)), all(is.finite(bounds)),
+            all(differences <= bounds), !anyNA(native[counts]), !anyNA(reference[counts]),
+            identical(as.matrix(native[counts]), as.matrix(reference[counts])))
+  data.frame(score_cells = length(differences), count_cells = nrow(native) * length(counts),
+             max_abs_difference = max(differences), max_bound = max(bounds),
+             outputs_match = TRUE)
+}
+
 run_benchmark_case <- function(fixture, summary_paths, n = 3L) {
-  duck <- run_duckdb_bench(fixture$vcf_path, summary_paths, n = n)
-  duck_out <- run_duckdb_output(fixture$vcf_path, summary_paths)
+  duck_out <- run_duckdb_output(fixture$vcf_gz, summary_paths)
+  DBI::dbExecute(con, "PRAGMA threads=1")
+  set_sql_inputs(fixture$vcf_gz, summary_paths, bounds = TRUE)
+  sql_out <- DBI::dbGetQuery(con, score_reference)
+  sql_comparison <- compare_sql_output(duck_out, sql_out)
+  parity_path <- tempfile("bcftools_score_parity_", fileext = ".tsv")
+  on.exit(unlink(parity_path), add = TRUE)
+  upstream <- run_bcftools_once(fixture$vcf_gz, summary_paths, parity_path)
+  comparison <- compare_outputs(duck_out, upstream$data)
+  if (!comparison$outputs_match) {
+    print(comparison)
+    print(merge(duck_out, upstream$data, by = "SAMPLE", suffixes = c("_native", "_upstream")))
+    stop("Native/upstream score parity failed before timing")
+  }
+
+  duck <- run_duckdb_bench(fixture$vcf_gz, summary_paths, n = n)
+  sql <- run_duckdb_bench(fixture$vcf_gz, summary_paths, n = n, engine = "duckhts_sql")
 
   bcftools_times <- numeric(n)
   bcftools_out <- NULL
@@ -292,13 +359,14 @@ run_benchmark_case <- function(fixture, summary_paths, n = 3L) {
     run <- run_bcftools_once(fixture$vcf_gz, summary_paths, out_tsv)
     bcftools_times[i] <- run$elapsed
     output_samples <- nrow(run$data)
-    score_columns <- ncol(run$data) - 1L
+    score_columns <- sum(!grepl("_CNT$", names(run$data)) & names(run$data) != "SAMPLE")
     if (i == 1L) bcftools_out <- run$data
     unlink(out_tsv, force = TRUE)
   }
 
   bench <- rbind(
     duck,
+    sql,
     data.frame(
       engine = "bcftools_RBCFTools",
       runs = n,
@@ -319,9 +387,20 @@ run_benchmark_case <- function(fixture, summary_paths, n = 3L) {
     bench = bench[, c("engine", "runs", "median_sec", "min_sec", "max_sec",
                       "variants", "samples", "genotype_cells",
                       "output_samples", "score_columns", "score_cells")],
-    compare = compare_outputs(duck_out, bcftools_out)
+    compare = compare_outputs(duck_out, bcftools_out),
+    sql_compare = sql_comparison
   )
 }
+```
+
+```{r comparator-controls}
+# Counts compare as integers, independently of R's numeric printing conventions.
+control <- data.frame(SAMPLE = "S", prs = 1, prs_CNT = 500000)
+integer_control <- transform(control, prs_CNT = 500000L)
+stopifnot(compare_outputs(control, integer_control)$outputs_match)
+stopifnot(!compare_outputs(control, transform(control, prs_CNT = 500001L))$outputs_match)
+stopifnot(!compare_outputs(control, transform(control, prs = 2))$outputs_match)
+stopifnot(!compare_outputs(control, transform(control, SAMPLE = "other"))$outputs_match)
 ```
 
 ## Tools
@@ -342,6 +421,10 @@ data.frame(
   samples = n_samples,
   multi_prs_files = n_prs,
   runs = bench_runs,
+  threads = 1L,
+  memory_limit = "4GB",
+  spill_limit = "3GB",
+  source_revision = system2("git", c("rev-parse", "HEAD"), stdout = TRUE),
   stringsAsFactors = FALSE
 )
 ```
@@ -359,6 +442,7 @@ single_case$bench
 
 ```{r synthetic-single-compare, echo = FALSE}
 single_case$compare
+single_case$sql_compare
 ```
 
 ## Synthetic Multi-PRS TSV Case
@@ -370,4 +454,10 @@ multi_case$bench
 
 ```{r synthetic-multi-compare, echo = FALSE}
 multi_case$compare
+multi_case$sql_compare
+```
+
+```{r cleanup, include = FALSE}
+DBI::dbDisconnect(con, shutdown = TRUE)
+unlink(c(fixture_dir, spill_dir), recursive = TRUE)
 ```
