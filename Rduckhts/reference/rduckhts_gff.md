@@ -11,10 +11,6 @@ rduckhts_gff(
   path,
   region = NULL,
   index_path = NULL,
-  header = NULL,
-  header_names = NULL,
-  auto_detect = NULL,
-  column_types = NULL,
   scan_mode = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
@@ -46,22 +42,6 @@ rduckhts_gff(
 - index_path:
 
   Optional explicit path to index file (.tbi/.csi)
-
-- header:
-
-  Logical. If TRUE, use first non-meta line as column names
-
-- header_names:
-
-  Character vector to override column names
-
-- auto_detect:
-
-  Logical. If TRUE, infer basic numeric column types
-
-- column_types:
-
-  Character vector of column types (e.g. "BIGINT", "VARCHAR")
 
 - scan_mode:
 

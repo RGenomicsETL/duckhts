@@ -57,8 +57,11 @@ rduckhts_bam(
 
 - auxiliary_tags:
 
-  Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags.
-  Default FALSE.
+  Logical, or a character vector of two-character tag names. `TRUE` adds
+  an `AUXILIARY_TAGS` map of the non-standard tags; tag names such as
+  `c("UR", "UB")` add one `VARCHAR` column per tag instead, formatted
+  like the map values and `NULL` when a record lacks the tag. A named
+  tag must not be a `standard_tags` column. Default `FALSE`.
 
 - sequence_encoding:
 

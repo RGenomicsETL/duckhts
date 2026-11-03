@@ -39,7 +39,14 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="development version" id="rduckhts-development-version">Rduckhts (development version)<a class="anchor" aria-label="anchor" href="#rduckhts-development-version"></a></h2>
-<ul><li>
+<ul><li>The bundled extension fixes crashes, hangs and wrong results found by a review of its C code. Calls that used to end the R session now return an R error: idxstats or bin counts with a stale index, a malformed VariantKey, score files with mismatched DS/AP/GP counts, malformed include/exclude expressions, <code>fasta_nuc()</code> on an empty FASTA, and index building with <code>min_shift</code> outside 0–30. Among the wrong results now fixed: region strings with thousands separators (<code>"chr1:1,000-1,500"</code>), parallel BAM/BCF scans that dropped records at position 0, VariantKey chromosome codes above 31, soft-masking lost in full <code>read_fasta</code> scans, contig names from VCF tabix indexes, CSQ numbers parsed from text, BED regions in <code>rduckhts_bcftools_score()</code>, and <code>bcftools_norm</code> on records mixing <code>*</code> with other alleles.</li>
+<li>Building a cgranges interval index with <code>duckhts_cgranges_add()</code> no longer leaks about 94 bytes of memory per interval.</li>
+<li>
+<code>input_quality_encoding = "auto"</code> now stops with an error when the qualities fit more than one encoding, instead of guessing phred64; pass the encoding explicitly.</li>
+<li>A failed <code>overwrite = TRUE</code> run of bgzip, bgunzip, mosdepth or idxstats keeps the existing output file instead of deleting it.</li>
+<li>
+<code><a href="../reference/rduckhts_bam_bed_coverage.html">rduckhts_bam_bed_coverage()</a></code> no longer has the <code>bed_index_path</code>, <code>fragment_mode</code> and <code>processing_threads</code> arguments, which did nothing or always failed. <code><a href="../reference/rduckhts_gff.html">rduckhts_gff()</a></code>, <code><a href="../reference/rduckhts_gtf.html">rduckhts_gtf()</a></code> and <code><a href="../reference/rduckhts_gff_convert_parquet.html">rduckhts_gff_convert_parquet()</a></code> no longer have <code>header</code>, <code>header_names</code>, <code>auto_detect</code> and <code>column_types</code>, which the reader ignored.</li>
+<li>
 <code><a href="../reference/rduckhts_bam.html">rduckhts_bam()</a></code> and <code><a href="../reference/rduckhts_bam_multi.html">rduckhts_bam_multi()</a></code> accept tag names in <code>auxiliary_tags</code>, such as <code>c("UR", "UB")</code>, and then return one text column per tag instead of the <code>AUXILIARY_TAGS</code> map; a single name is still sent as a list. <code>TRUE</code> and <code>FALSE</code> keep their meaning. Reading a few tags no longer builds a map for every record.</li>
 <li>A BAM whose reads sit on one large reference, such as a single-chromosome BAM, now scans on several threads: the bundled extension cuts such a reference into byte-balanced pieces from its index. The records returned do not change.</li>
 <li>

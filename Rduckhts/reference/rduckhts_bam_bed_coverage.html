@@ -56,7 +56,6 @@ post-filter outputs.</p>
 <span>  <span class="va">bed_path</span>,</span>
 <span>  reference <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  bed_index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  mapq <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  min_baseq <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  min_read_len <span class="op">=</span> <span class="fl">0</span>,</span>
@@ -65,9 +64,7 @@ post-filter outputs.</p>
 <span>  min_depth <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  max_depth <span class="op">=</span> <span class="fl">1e+06</span>,</span>
 <span>  decompression_threads <span class="op">=</span> <span class="fl">0</span>,</span>
-<span>  fragment_mode <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  strand_outputs <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  processing_threads <span class="op">=</span> <span class="fl">0</span></span>
+<span>  strand_outputs <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -93,10 +90,6 @@ post-filter outputs.</p>
 
 <dt id="arg-index-path">index_path<a class="anchor" aria-label="anchor" href="#arg-index-path"></a></dt>
 <dd><p>Optional explicit BAM/CRAM index path</p></dd>
-
-
-<dt id="arg-bed-index-path">bed_index_path<a class="anchor" aria-label="anchor" href="#arg-bed-index-path"></a></dt>
-<dd><p>Optional explicit BED index path (reserved for future use)</p></dd>
 
 
 <dt id="arg-mapq">mapq<a class="anchor" aria-label="anchor" href="#arg-mapq"></a></dt>
@@ -133,16 +126,8 @@ post-filter outputs.</p>
 threads to use for BAM/CRAM input. `0` disables htslib worker threads.</p></dd>
 
 
-<dt id="arg-fragment-mode">fragment_mode<a class="anchor" aria-label="anchor" href="#arg-fragment-mode"></a></dt>
-<dd><p>Logical. Reserved for future fragment-level semantics.</p></dd>
-
-
 <dt id="arg-strand-outputs">strand_outputs<a class="anchor" aria-label="anchor" href="#arg-strand-outputs"></a></dt>
 <dd><p>Logical. Emit forward/reverse post-filter summary columns.</p></dd>
-
-
-<dt id="arg-processing-threads">processing_threads<a class="anchor" aria-label="anchor" href="#arg-processing-threads"></a></dt>
-<dd><p>Reserved for future parallel interval processing.</p></dd>
 
 </dl></div>
     <div class="section level2">

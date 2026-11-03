@@ -50,10 +50,6 @@
 <span>  <span class="va">path</span>,</span>
 <span>  region <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  index_path <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  header <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  header_names <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  auto_detect <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  column_types <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  scan_mode <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  attributes_map <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  attributes_list <span class="op">=</span> <span class="cn">FALSE</span>,</span>
@@ -86,22 +82,6 @@
 
 <dt id="arg-index-path">index_path<a class="anchor" aria-label="anchor" href="#arg-index-path"></a></dt>
 <dd><p>Optional explicit path to index file (.tbi/.csi)</p></dd>
-
-
-<dt id="arg-header">header<a class="anchor" aria-label="anchor" href="#arg-header"></a></dt>
-<dd><p>Logical. If TRUE, use first non-meta line as column names</p></dd>
-
-
-<dt id="arg-header-names">header_names<a class="anchor" aria-label="anchor" href="#arg-header-names"></a></dt>
-<dd><p>Character vector to override column names</p></dd>
-
-
-<dt id="arg-auto-detect">auto_detect<a class="anchor" aria-label="anchor" href="#arg-auto-detect"></a></dt>
-<dd><p>Logical. If TRUE, infer basic numeric column types</p></dd>
-
-
-<dt id="arg-column-types">column_types<a class="anchor" aria-label="anchor" href="#arg-column-types"></a></dt>
-<dd><p>Character vector of column types (e.g. "BIGINT", "VARCHAR")</p></dd>
 
 
 <dt id="arg-scan-mode">scan_mode<a class="anchor" aria-label="anchor" href="#arg-scan-mode"></a></dt>

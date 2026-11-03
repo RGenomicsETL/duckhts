@@ -13,7 +13,6 @@ rduckhts_bam_bed_coverage(
   bed_path,
   reference = NULL,
   index_path = NULL,
-  bed_index_path = NULL,
   mapq = 0,
   min_baseq = 0,
   min_read_len = 0,
@@ -22,9 +21,7 @@ rduckhts_bam_bed_coverage(
   min_depth = 1,
   max_depth = 1e+06,
   decompression_threads = 0,
-  fragment_mode = FALSE,
-  strand_outputs = TRUE,
-  processing_threads = 0
+  strand_outputs = TRUE
 )
 ```
 
@@ -49,10 +46,6 @@ rduckhts_bam_bed_coverage(
 - index_path:
 
   Optional explicit BAM/CRAM index path
-
-- bed_index_path:
-
-  Optional explicit BED index path (reserved for future use)
 
 - mapq:
 
@@ -88,17 +81,9 @@ rduckhts_bam_bed_coverage(
   Integer. Number of htslib decompression worker threads to use for
   BAM/CRAM input. \`0\` disables htslib worker threads.
 
-- fragment_mode:
-
-  Logical. Reserved for future fragment-level semantics.
-
 - strand_outputs:
 
   Logical. Emit forward/reverse post-filter summary columns.
-
-- processing_threads:
-
-  Reserved for future parallel interval processing.
 
 ## Value
 

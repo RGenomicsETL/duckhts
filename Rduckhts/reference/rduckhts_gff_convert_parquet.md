@@ -13,10 +13,6 @@ rduckhts_gff_convert_parquet(
   columns = NULL,
   region = NULL,
   index_path = NULL,
-  header = NULL,
-  header_names = NULL,
-  auto_detect = NULL,
-  column_types = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
@@ -60,22 +56,6 @@ rduckhts_gff_convert_parquet(
 - index_path:
 
   Optional explicit index path.
-
-- header:
-
-  Logical; pass \`header := true/false\` to \`read_gff(...)\`.
-
-- header_names:
-
-  Optional character vector of column names.
-
-- auto_detect:
-
-  Logical; request type auto-detection.
-
-- column_types:
-
-  Optional character vector of DuckDB column types.
 
 - attributes_map:
 

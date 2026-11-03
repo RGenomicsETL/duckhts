@@ -58,7 +58,7 @@ rduckhts_bam_multi(
 
 - auxiliary_tags:
 
-  Logical; include auxiliary tag map column.
+  Logical, or a character vector of tag names; see \[rduckhts_bam()\].
 
 - sequence_encoding:
 
