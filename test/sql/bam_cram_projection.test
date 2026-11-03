@@ -277,3 +277,18 @@ SELECT (SELECT count(*) FROM region_scan), (SELECT count(*) FROM oracle), count(
   (SELECT * FROM oracle EXCEPT ALL SELECT * FROM region_scan));
 ----
 18	18	0
+
+# Read names discarded at CRAM encoding are generated per pair from the mate links,
+# which htslib resolves only when a mate field is decoded. A QNAME-only projection must
+# still give mates one name. Fixture: test/data/cram_lossy_names.sam, written with
+#   samtools view -C -T test/data/bam_mismatch.fa --output-fmt-option lossy_names=1 \
+#     -o test/data/cram_lossy_names.cram test/data/cram_lossy_names.sam
+#   samtools index test/data/cram_lossy_names.cram   (samtools 1.23)
+query IT
+SELECT count(*), string_agg(QNAME, ',' ORDER BY QNAME)
+FROM (SELECT QNAME, count(*) AS n
+      FROM read_bam('__WORKING_DIRECTORY__/test/data/cram_lossy_names.cram',
+                    reference := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+      GROUP BY QNAME HAVING n = 2);
+----
+2	cram_lossy_names.cram:1,cram_lossy_names.cram:2
