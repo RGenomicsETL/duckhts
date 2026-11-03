@@ -383,7 +383,7 @@ Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, samp
 Signature:
 
 ```sql
-read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL, include_file_offset := FALSE)
+read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL, include_file_offset := FALSE, duplicate_names := 'error')
 ```
 
 Returns:
@@ -391,6 +391,10 @@ Returns:
 ```
 table
 ```
+
+### Column names
+
+INFO_<key>, VEP_<field>, FORMAT_<key> (tidy) and FORMAT_<key>_<sample> (wide) keep the header spelling. VCF allows keys and sample IDs that differ only in case, and DuckDB column names ignore case; a wide name can also repeat because keys and sample IDs may contain _. duplicate_names := 'error' rejects such a schema at bind and names both columns; 'suffix' keeps the first name in header order and renames each later one to name__2, name__3. tidy_format := TRUE avoids sample collisions.
 
 ### Types
 

@@ -1,5 +1,12 @@
 # Rduckhts (development version)
 
+- `rduckhts_bcf(..., duplicate_names = "suffix")` reads VCF/BCF files whose INFO keys,
+  FORMAT keys or sample names differ only in case (`DP` and `dp`, `s1` and `S1`), which
+  VCF allows and DuckDB column names cannot hold; later names get `__2`, `__3`. The
+  default `"error"` now names both columns.
+- Column-name collision errors from `rduckhts_bam(auxiliary_tags = ...)` and the GFF,
+  GTF and GenBank `attributes` arguments now read "`A` and `B` name the same column
+  (column names ignore case)".
 - The bundled extension fixes crashes, hangs and wrong results found by a review of its
   C code. Calls that used to end the R session now return an R error: idxstats or bin
   counts with a stale index, a malformed VariantKey, score files with mismatched DS/AP/GP

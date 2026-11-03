@@ -247,11 +247,12 @@
       "name": "read_bcf",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL, include_file_offset := FALSE)",
+      "signature": "read_bcf(path, region := NULL, index_path := NULL, tidy_format := FALSE, additional_csq_column_types := NULL, scan_mode := 'auto', decompression_threads := 0, decode_error_policy := 'null', samples := NULL, regions := NULL, include_file_offset := FALSE, duplicate_names := 'error')",
       "returns": "table",
       "r_wrapper": "rduckhts_bcf",
       "description": "Read VCF/BCF with header-typed INFO/FORMAT, typed CSQ/ANN/BCSQ annotations, sample selection, optional tidy sample rows and optional record file positions.",
       "details": {
+        "Column names": "INFO_<key>, VEP_<field>, FORMAT_<key> (tidy) and FORMAT_<key>_<sample> (wide) keep the header spelling. VCF allows keys and sample IDs that differ only in case, and DuckDB column names ignore case; a wide name can also repeat because keys and sample IDs may contain _. duplicate_names := 'error' rejects such a schema at bind and names both columns; 'suffix' keeps the first name in header order and renames each later one to name__2, name__3. tidy_format := TRUE avoids sample collisions.",
         "Types": "INFO/FORMAT Type and Number determine SQL types and scalar/list shape, including nonstandard declarations for named tags; no schema repair is inferred. additional_csq_column_types overrides typed annotation subfields. Missing numeric/string list positions are NULL; numeric vector-end padding terminates lists. Absent fields are NULL; explicit numeric missing lists are [NULL], without inferred allele/genotype cardinality. Tidy rows repeat complete record annotation across output chunks.",
         "FILTER": "FILTER is VARCHAR[] in header order. PASS is [PASS], an unapplied dot is NULL, and named failures retain their identifiers.",
         "Errors": "decode_error_policy is null, warn or error for header/payload type mismatches and oversized numeric scalars. Multiple scalar elements before vector-end padding count as malformed, including missing elements. FORMAT null/warn withholds that tag for every selected sample on the record.",

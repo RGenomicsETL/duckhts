@@ -44,6 +44,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckdb_map.h"
 #include "include/bam_format.h"
 #include "include/bam_partition.h"
+#include "include/duckhts_column_names.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
@@ -410,15 +411,6 @@ static int bam_parse_scan_mode(const char *mode, int *scan_sequential) {
     return 0;
 }
 
-/* The standard tag whose column a named tag column would duplicate: DuckDB
- * column names ignore case, while SAM tag names do not (cm is not CM). */
-static const char *bam_std_tag_matching_column(const char *name) {
-    for (int i = 0; BAM_STD_TAGS[i].tag; i++) {
-        if (strcasecmp(BAM_STD_TAGS[i].tag, name) == 0) return BAM_STD_TAGS[i].tag;
-    }
-    return NULL;
-}
-
 /* Parse auxiliary_tags: BOOLEAN selects the AUXILIARY_TAGS map; a list of
  * two-character SAM tag names selects one VARCHAR column per tag. Returns 1 on
  * success, 0 with `error` set. Names must match [A-Za-z][A-Za-z0-9], be unique,
@@ -429,6 +421,8 @@ static int bam_parse_auxiliary_tags(duckdb_value value, bam_bind_data_t *bind,
     duckdb_type type_id = duckdb_get_type_id(type);
     idx_t n;
     int ok = 1;
+    duckhts_column_names columns;
+    char detail[100]; /* two-character tag names keep collision messages short */
 
     if (type_id == DUCKDB_TYPE_BOOLEAN) {
         bind->auxiliary_tags = duckdb_get_bool(value) ? 1 : 0;
@@ -472,6 +466,15 @@ static int bam_parse_auxiliary_tags(duckdb_value value, bam_bind_data_t *bind,
                  "read_bam: auxiliary_tags must name between 1 and %d tags", BAM_MAX_NAMED_TAGS);
         return 0;
     }
+    /* SAM tag names are case-sensitive and DuckDB column names are not (cm is not
+     * CM), so named tags must not repeat each other or a standard tag column. */
+    duckhts_column_names_init(&columns, 0);
+    for (int i = 0; bind->standard_tags && BAM_STD_TAGS[i].tag; i++) {
+        if (duckhts_column_names_claim(&columns, BAM_STD_TAGS[i].tag, NULL, detail, sizeof(detail)) != 0) {
+            snprintf(error, error_size, "read_bam: %s", detail);
+            ok = 0;
+        }
+    }
     for (idx_t i = 0; ok && i < n; i++) {
         duckdb_value child = duckdb_get_list_child(value, i);
         char *name = child && !duckdb_is_null_value(child) ? duckdb_get_varchar(child) : NULL;
@@ -481,28 +484,17 @@ static int bam_parse_auxiliary_tags(duckdb_value value, bam_bind_data_t *bind,
             snprintf(error, error_size,
                      "read_bam: auxiliary_tags names must be two characters, [A-Za-z][A-Za-z0-9]");
             ok = 0;
-        } else if (bind->standard_tags && bam_std_tag_matching_column(name)) {
-            snprintf(error, error_size,
-                     "read_bam: auxiliary_tags names %s, which matches the standard_tags column %s "
-                     "(column names ignore case)", name, bam_std_tag_matching_column(name));
+        } else if (duckhts_column_names_claim(&columns, name, NULL, detail, sizeof(detail)) != 0) {
+            snprintf(error, error_size, "read_bam: auxiliary_tags: %s", detail);
             ok = 0;
         } else {
-            for (int k = 0; ok && k < bind->n_named_tags; k++) {
-                if (strcasecmp(bind->named_tags[k], name) == 0) {
-                    snprintf(error, error_size,
-                             "read_bam: auxiliary_tags names %s and %s, the same column "
-                             "(column names ignore case)", bind->named_tags[k], name);
-                    ok = 0;
-                }
-            }
-            if (ok) {
-                memcpy(bind->named_tags[bind->n_named_tags], name, 3);
-                bind->n_named_tags++;
-            }
+            memcpy(bind->named_tags[bind->n_named_tags], name, 3);
+            bind->n_named_tags++;
         }
         if (name) duckdb_free(name);
         if (child) duckdb_destroy_value(&child);
     }
+    duckhts_column_names_destroy(&columns);
     return ok;
 }
 

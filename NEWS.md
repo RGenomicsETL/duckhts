@@ -2,6 +2,25 @@
 
 # duckhts (development version)
 
+- `read_bcf(..., duplicate_names := 'suffix')` reads VCF/BCF files whose INFO keys,
+  FORMAT keys or sample IDs differ only in case, such as `DP` and `dp` or samples `s1`
+  and `S1`. VCF 4.3 and 4.5 allow them, while DuckDB column names ignore case. The first
+  name in header order is kept and each later one becomes `name__2`, `name__3`. The
+  default, `'error'`, still rejects such a schema at bind, now with a message naming both
+  columns and the option instead of DuckDB's duplicate-column error. The same check
+  catches wide FORMAT names that repeat because keys and sample IDs may contain `_`
+  (key `A_B` with sample `C`, key `A` with sample `B_C`), and long names are no longer
+  cut at 255 or 511 bytes.
+- One bind-time helper, `src/column_names.c`, now checks result column names the way
+  DuckDB compares them, for `read_bcf`, the GFF/GTF/GenBank `attributes` columns,
+  `read_bam` named tags and `bcftools_score` output columns. `bcftools_score` now rejects
+  PRS names that differ only in case with its own message instead of DuckDB's. Collision
+  messages read "`A` and `B` name the same column (column names ignore case)".
+- `src/include/duckhts_bind_params.h` reads named parameters for `read_bcf`,
+  `duckhts_mosdepth` and `bcftools_score`, replacing 50 hand-written
+  read/check/destroy blocks; the first of the shared host helpers that will separate the
+  DuckDB C API from reader code. Their string parameters now report an allocation
+  failure instead of being treated as absent.
 - Fixes from a review of the whole first-party C tree. Each fix has a regression test
   that fails on the previous code.
   - Inputs that crashed or hung the host process now return errors:

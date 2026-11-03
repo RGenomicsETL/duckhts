@@ -184,22 +184,22 @@ SELECT count(*) FROM (DESCRIBE SELECT * FROM read_genbank('__WORKING_DIRECTORY__
 statement error
 SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['product', 'PRODUCT']);
 ----
-distinct column names
+name the same column
 
 statement error
 SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['Start']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['attributes']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/genbank_qualifiers.gb', attributes := ['attributes_map'], attributes_map := true);
 ----
-collides with a reader column name
+name the same column
 
 # Without attributes_map the name is not reserved.
 query I

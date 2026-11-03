@@ -20,6 +20,8 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "bcftools_shim.h"
 #include "filter.h"
+#include "duckhts_column_names.h"
+#include "duckhts_bind_params.h"
 
 #ifndef duckdb_malloc
 #define duckdb_malloc malloc
@@ -1731,69 +1733,39 @@ static int score_format_metric_name(const score_bind_t *bind,
 }
 
 static int score_validate_prs_names(const score_bind_t *bind, char *err, size_t err_sz) {
-    char **seen = NULL;
-    int n_seen = 0;
-    int max_seen;
-    int i, j, k;
+    duckhts_column_names columns;
+    char detail[300];
+    int rc = 0;
     if (!bind || !bind->prs_names) return 0;
 
-    max_seen = 1 + bind->n_prs * bind->n_q_thr * (bind->counts ? 2 : 1);
-    seen = (char **)duckdb_malloc(sizeof(char *) * (size_t)max_seen);
-    if (!seen) {
-        snprintf(err, err_sz, "bcftools_score: out of memory");
-        return -1;
+    duckhts_column_names_init(&columns, 0);
+    if (duckhts_column_names_claim(&columns, "SAMPLE", NULL, detail, sizeof(detail)) != 0) {
+        snprintf(err, err_sz, "bcftools_score: %s", detail);
+        rc = -1;
     }
-    memset(seen, 0, sizeof(char *) * (size_t)max_seen);
-    seen[n_seen++] = score_dup("SAMPLE");
-    if (!seen[0]) {
-        duckdb_free(seen);
-        snprintf(err, err_sz, "bcftools_score: out of memory");
-        return -1;
-    }
-
-    for (i = 0; i < bind->n_prs; i++) {
+    for (int i = 0; rc == 0 && i < bind->n_prs; i++) {
         if (!bind->prs_names[i] || !bind->prs_names[i][0]) {
             snprintf(err, err_sz, "bcftools_score: summary PRS name must not be empty");
-            goto fail;
+            rc = -1;
         }
-        for (j = 0; j < bind->n_q_thr; j++) {
-            for (k = 0; k < (bind->counts ? 2 : 1); k++) {
+        for (int j = 0; rc == 0 && j < bind->n_q_thr; j++) {
+            for (int k = 0; rc == 0 && k < (bind->counts ? 2 : 1); k++) {
                 char metric_name[256];
-                int m;
                 if (score_format_metric_name(bind, bind->prs_names[i], j, k == 1, metric_name, sizeof(metric_name)) != 0) {
                     snprintf(err, err_sz, "bcftools_score: generated output column name for PRS '%s' is too long", bind->prs_names[i]);
-                    goto fail;
-                }
-                if (!metric_name[0]) {
+                    rc = -1;
+                } else if (!metric_name[0]) {
                     snprintf(err, err_sz, "bcftools_score: generated output column name must not be empty");
-                    goto fail;
+                    rc = -1;
+                } else if (duckhts_column_names_claim(&columns, metric_name, NULL, detail, sizeof(detail)) != 0) {
+                    snprintf(err, err_sz, "bcftools_score: duplicate generated output column name: %s; use unique summary filenames or GWAS-VCF samples", detail);
+                    rc = -1;
                 }
-                for (m = 0; m < n_seen; m++) {
-                    if (strcmp(seen[m], metric_name) == 0) {
-                        snprintf(err, err_sz, "bcftools_score: duplicate generated output column name '%s'; use unique summary filenames or GWAS-VCF samples", metric_name);
-                        goto fail;
-                    }
-                }
-                seen[n_seen] = score_dup(metric_name);
-                if (!seen[n_seen]) {
-                    snprintf(err, err_sz, "bcftools_score: out of memory");
-                    goto fail;
-                }
-                n_seen++;
             }
         }
     }
-
-    for (i = 0; i < n_seen; i++) duckdb_free(seen[i]);
-    duckdb_free(seen);
-    return 0;
-
-fail:
-    for (i = 0; i < n_seen; i++) {
-        if (seen[i]) duckdb_free(seen[i]);
-    }
-    duckdb_free(seen);
-    return -1;
+    duckhts_column_names_destroy(&columns);
+    return rc;
 }
 
 static int score_write_log(const score_bind_t *bind,
@@ -1840,21 +1812,6 @@ static int score_write_log(const score_bind_t *bind,
 static void score_bind(duckdb_bind_info info) {
     duckdb_value bcf_val = duckdb_bind_get_parameter(info, 0);
     duckdb_value summary_val = duckdb_bind_get_parameter(info, 1);
-    duckdb_value use_val;
-    duckdb_value columns_val;
-    duckdb_value columns_file_val;
-    duckdb_value variant_id_val;
-    duckdb_value q_thr_val;
-    duckdb_value counts_val;
-    duckdb_value regions_val;
-    duckdb_value regions_file_val;
-    duckdb_value regions_overlap_val;
-    duckdb_value targets_val;
-    duckdb_value targets_file_val;
-    duckdb_value targets_overlap_val;
-    duckdb_value apply_filters_val;
-    duckdb_value include_val;
-    duckdb_value exclude_val;
     duckdb_logical_type varchar_type;
     duckdb_logical_type bool_type;
     duckdb_logical_type dbl_type;
@@ -1887,149 +1844,63 @@ static void score_bind(duckdb_bind_info info) {
     }
     if (summary_val) duckdb_destroy_value(&summary_val);
 
-    use_val = duckdb_bind_get_named_parameter(info, "use");
-    if (use_val && !duckdb_is_null_value(use_val)) {
-        char *use_str = duckdb_get_varchar(use_val);
-        if (use_str) {
-            if (strcasecmp(use_str, "GT") == 0) bind->use_tag = SCORE_USE_GT;
-            else if (strcasecmp(use_str, "DS") == 0) bind->use_tag = SCORE_USE_DS;
-            else if (strcasecmp(use_str, "HDS") == 0) bind->use_tag = SCORE_USE_HDS;
-            else if (strcasecmp(use_str, "AP") == 0) bind->use_tag = SCORE_USE_AP;
-            else if (strcasecmp(use_str, "GP") == 0) bind->use_tag = SCORE_USE_GP;
-            else if (strcasecmp(use_str, "AS") == 0) bind->use_tag = SCORE_USE_AS;
-            else {
-                duckdb_bind_set_error(info, "bcftools_score: use must be one of GT,DS,HDS,AP,GP,AS");
-                duckdb_free(use_str);
-                duckdb_destroy_value(&use_val);
-                score_destroy_bind(bind);
-                return;
-            }
-            duckdb_free(use_str);
-        }
+    static const char *const use_names[] = {"GT", "DS", "HDS", "AP", "GP", "AS", NULL};
+    static const int use_tags[] = {SCORE_USE_GT, SCORE_USE_DS, SCORE_USE_HDS,
+                                   SCORE_USE_AP, SCORE_USE_GP, SCORE_USE_AS};
+    char *use_str = NULL;
+    char *columns_preset = NULL;
+    char *q_str = NULL;
+    int read_ok = duckhts_bind_varchar(info, "use", &use_str) &&
+                  duckhts_bind_varchar(info, "columns", &columns_preset) &&
+                  duckhts_bind_varchar(info, "columns_file", &bind->columns_file) &&
+                  duckhts_bind_varchar(info, "q_score_thr", &q_str) &&
+                  duckhts_bind_varchar(info, "samples", &bind->samples) &&
+                  duckhts_bind_varchar(info, "regions", &bind->regions) &&
+                  duckhts_bind_varchar(info, "regions_file", &bind->regions_file) &&
+                  duckhts_bind_varchar(info, "targets", &bind->targets) &&
+                  duckhts_bind_varchar(info, "targets_file", &bind->targets_file) &&
+                  duckhts_bind_varchar(info, "apply_filters", &bind->apply_filters) &&
+                  duckhts_bind_varchar(info, "include", &bind->include_expr) &&
+                  duckhts_bind_varchar(info, "exclude", &bind->exclude_expr) &&
+                  duckhts_bind_varchar(info, "summaries_list_file", &bind->summaries_list_file) &&
+                  duckhts_bind_varchar(info, "log_path", &bind->log_path);
+    bind->use_variant_id = duckhts_bind_bool(info, "use_variant_id", false);
+    bind->counts = duckhts_bind_bool(info, "counts", false);
+    bind->force_samples = duckhts_bind_bool(info, "force_samples", false);
+    /* INT64_MIN marks an absent overlap mode; the bind keeps -1 for "use the default". */
+    int64_t regions_overlap = duckhts_bind_int64(info, "regions_overlap", INT64_MIN);
+    int64_t targets_overlap = duckhts_bind_int64(info, "targets_overlap", INT64_MIN);
+    const char *error = NULL;
+    if (columns_preset) {
+        duckdb_free(bind->columns_preset);
+        bind->columns_preset = columns_preset;
     }
-    if (use_val) duckdb_destroy_value(&use_val);
-
-    columns_val = duckdb_bind_get_named_parameter(info, "columns");
-    if (columns_val && !duckdb_is_null_value(columns_val)) {
-        char *p = duckdb_get_varchar(columns_val);
-        if (p) {
-            if (bind->columns_preset) duckdb_free(bind->columns_preset);
-            bind->columns_preset = p;
-        }
+    if (!read_ok) {
+        error = "bcftools_score: out of memory reading parameters";
+    } else if (use_str) {
+        int i = 0;
+        while (use_names[i] && strcasecmp(use_str, use_names[i]) != 0) i++;
+        if (use_names[i]) bind->use_tag = use_tags[i];
+        else error = "bcftools_score: use must be one of GT,DS,HDS,AP,GP,AS";
     }
-    if (columns_val) duckdb_destroy_value(&columns_val);
-
-    columns_file_val = duckdb_bind_get_named_parameter(info, "columns_file");
-    if (columns_file_val && !duckdb_is_null_value(columns_file_val)) {
-        bind->columns_file = duckdb_get_varchar(columns_file_val);
+    if (!error && q_str && score_parse_q_thresholds(q_str, &bind->q_thr_lp, &bind->n_q_thr) != 0) {
+        error = "bcftools_score: q_score_thr must be a comma-separated list of p-values in (0,1]";
     }
-    if (columns_file_val) duckdb_destroy_value(&columns_file_val);
-
-    variant_id_val = duckdb_bind_get_named_parameter(info, "use_variant_id");
-    if (variant_id_val && !duckdb_is_null_value(variant_id_val)) bind->use_variant_id = duckdb_get_bool(variant_id_val) ? 1 : 0;
-    if (variant_id_val) duckdb_destroy_value(&variant_id_val);
-
-    q_thr_val = duckdb_bind_get_named_parameter(info, "q_score_thr");
-    if (q_thr_val && !duckdb_is_null_value(q_thr_val)) {
-        char *q_str = duckdb_get_varchar(q_thr_val);
-        if (score_parse_q_thresholds(q_str, &bind->q_thr_lp, &bind->n_q_thr) != 0) {
-            duckdb_bind_set_error(info, "bcftools_score: q_score_thr must be a comma-separated list of p-values in (0,1]");
-            duckdb_free(q_str);
-            duckdb_destroy_value(&q_thr_val);
-            score_destroy_bind(bind);
-            return;
-        }
-        if (q_str) duckdb_free(q_str);
+    if (!error && regions_overlap != INT64_MIN && (regions_overlap < 0 || regions_overlap > 2)) {
+        error = "bcftools_score: regions_overlap must be 0, 1, or 2";
     }
-    if (q_thr_val) duckdb_destroy_value(&q_thr_val);
-
-    counts_val = duckdb_bind_get_named_parameter(info, "counts");
-    if (counts_val && !duckdb_is_null_value(counts_val)) bind->counts = duckdb_get_bool(counts_val) ? 1 : 0;
-    if (counts_val) duckdb_destroy_value(&counts_val);
-
-    {
-        duckdb_value samples_val = duckdb_bind_get_named_parameter(info, "samples");
-        if (samples_val && !duckdb_is_null_value(samples_val)) {
-            bind->samples = duckdb_get_varchar(samples_val);
-        }
-        if (samples_val) duckdb_destroy_value(&samples_val);
+    if (!error && targets_overlap != INT64_MIN && (targets_overlap < 0 || targets_overlap > 2)) {
+        error = "bcftools_score: targets_overlap must be 0, 1, or 2";
     }
-    {
-        duckdb_value force_samples_val = duckdb_bind_get_named_parameter(info, "force_samples");
-        if (force_samples_val && !duckdb_is_null_value(force_samples_val)) {
-            bind->force_samples = duckdb_get_bool(force_samples_val) ? 1 : 0;
-        }
-        if (force_samples_val) duckdb_destroy_value(&force_samples_val);
+    if (use_str) duckdb_free(use_str);
+    if (q_str) duckdb_free(q_str);
+    if (error) {
+        duckdb_bind_set_error(info, error);
+        score_destroy_bind(bind);
+        return;
     }
-
-    regions_val = duckdb_bind_get_named_parameter(info, "regions");
-    if (regions_val && !duckdb_is_null_value(regions_val)) bind->regions = duckdb_get_varchar(regions_val);
-    if (regions_val) duckdb_destroy_value(&regions_val);
-
-    regions_file_val = duckdb_bind_get_named_parameter(info, "regions_file");
-    if (regions_file_val && !duckdb_is_null_value(regions_file_val)) bind->regions_file = duckdb_get_varchar(regions_file_val);
-    if (regions_file_val) duckdb_destroy_value(&regions_file_val);
-
-    regions_overlap_val = duckdb_bind_get_named_parameter(info, "regions_overlap");
-    if (regions_overlap_val && !duckdb_is_null_value(regions_overlap_val)) {
-        int64_t v = duckdb_get_int64(regions_overlap_val);
-        if (v < 0 || v > 2) {
-            duckdb_bind_set_error(info, "bcftools_score: regions_overlap must be 0, 1, or 2");
-            if (regions_overlap_val) duckdb_destroy_value(&regions_overlap_val);
-            score_destroy_bind(bind);
-            return;
-        }
-        bind->regions_overlap = (int)v;
-    }
-    if (regions_overlap_val) duckdb_destroy_value(&regions_overlap_val);
-
-    targets_val = duckdb_bind_get_named_parameter(info, "targets");
-    if (targets_val && !duckdb_is_null_value(targets_val)) bind->targets = duckdb_get_varchar(targets_val);
-    if (targets_val) duckdb_destroy_value(&targets_val);
-
-    targets_file_val = duckdb_bind_get_named_parameter(info, "targets_file");
-    if (targets_file_val && !duckdb_is_null_value(targets_file_val)) bind->targets_file = duckdb_get_varchar(targets_file_val);
-    if (targets_file_val) duckdb_destroy_value(&targets_file_val);
-
-    targets_overlap_val = duckdb_bind_get_named_parameter(info, "targets_overlap");
-    if (targets_overlap_val && !duckdb_is_null_value(targets_overlap_val)) {
-        int64_t v = duckdb_get_int64(targets_overlap_val);
-        if (v < 0 || v > 2) {
-            duckdb_bind_set_error(info, "bcftools_score: targets_overlap must be 0, 1, or 2");
-            if (targets_overlap_val) duckdb_destroy_value(&targets_overlap_val);
-            score_destroy_bind(bind);
-            return;
-        }
-        bind->targets_overlap = (int)v;
-    }
-    if (targets_overlap_val) duckdb_destroy_value(&targets_overlap_val);
-
-    apply_filters_val = duckdb_bind_get_named_parameter(info, "apply_filters");
-    if (apply_filters_val && !duckdb_is_null_value(apply_filters_val)) bind->apply_filters = duckdb_get_varchar(apply_filters_val);
-    if (apply_filters_val) duckdb_destroy_value(&apply_filters_val);
-
-    include_val = duckdb_bind_get_named_parameter(info, "include");
-    if (include_val && !duckdb_is_null_value(include_val)) bind->include_expr = duckdb_get_varchar(include_val);
-    if (include_val) duckdb_destroy_value(&include_val);
-
-    exclude_val = duckdb_bind_get_named_parameter(info, "exclude");
-    if (exclude_val && !duckdb_is_null_value(exclude_val)) bind->exclude_expr = duckdb_get_varchar(exclude_val);
-    if (exclude_val) duckdb_destroy_value(&exclude_val);
-
-    {
-        duckdb_value summaries_list_file_val = duckdb_bind_get_named_parameter(info, "summaries_list_file");
-        if (summaries_list_file_val && !duckdb_is_null_value(summaries_list_file_val)) {
-            bind->summaries_list_file = duckdb_get_varchar(summaries_list_file_val);
-        }
-        if (summaries_list_file_val) duckdb_destroy_value(&summaries_list_file_val);
-    }
-    {
-        duckdb_value log_path_val = duckdb_bind_get_named_parameter(info, "log_path");
-        if (log_path_val && !duckdb_is_null_value(log_path_val)) {
-            bind->log_path = duckdb_get_varchar(log_path_val);
-        }
-        if (log_path_val) duckdb_destroy_value(&log_path_val);
-    }
+    if (regions_overlap != INT64_MIN) bind->regions_overlap = (int)regions_overlap;
+    if (targets_overlap != INT64_MIN) bind->targets_overlap = (int)targets_overlap;
 
     if (bind->include_expr && bind->exclude_expr) {
         duckdb_bind_set_error(info, "bcftools_score: only one of include or exclude may be set");

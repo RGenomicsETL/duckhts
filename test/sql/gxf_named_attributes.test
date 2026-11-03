@@ -83,72 +83,72 @@ SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_gff('__WORKING
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['ID','id']);
 ----
-distinct column names
+name the same column
 
 statement error
 SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['gene_id','gene_id']);
 ----
-distinct column names
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['START']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['attributes_map'], attributes_map := true);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['SEQNAME']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['SOURCE']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['FEATURE']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['END']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['SCORE']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['STRAND']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['FRAME']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['ATTRIBUTES']);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['ATTRIBUTES_LIST'], attributes_list := true);
 ----
-collides with a reader column name
+name the same column
 
 statement error
 SELECT * FROM read_gtf('__WORKING_DIRECTORY__/test/data/gtf_named_attributes.gtf', attributes := ['ATTRIBUTES_PAIRS'], attributes_pairs := true);
 ----
-collides with a reader column name
+name the same column
 
 query I
 SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_named_attributes.gff3', attributes := ['attributes_map']);

@@ -2,22 +2,12 @@
 DUCKDB_EXTENSION_EXTERN
 
 #include "named_attribute_columns.h"
+#include "duckhts_column_names.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* DuckDB identifier comparisons fold ASCII letters, not the host locale. */
-static bool column_name_equal(const char *left, const char *right) {
-    while (*left && *right) {
-        unsigned char a = (unsigned char)*left++;
-        unsigned char b = (unsigned char)*right++;
-        if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
-        if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
-        if (a != b) return false;
-    }
-    return *left == *right;
-}
 
 void duckhts_attribute_columns_destroy(duckhts_attribute_columns *columns) {
     for (idx_t i = 0; i < columns->count; i++) duckdb_free(columns->keys[i].name);
@@ -31,6 +21,16 @@ bool duckhts_attribute_columns_bind(duckdb_bind_info info, const char *parameter
     duckdb_value list = duckdb_bind_get_named_parameter(info, parameter);
     if (!list) return true;
     const char *error = NULL;
+    char detail[512];
+    char message[600];
+    duckhts_column_names names;
+    duckhts_column_names_init(&names, 0);
+    for (size_t j = 0; j < reserved_count; j++) {
+        if (duckhts_column_names_claim(&names, reserved_names[j], NULL, detail, sizeof(detail)) != 0) {
+            error = detail;
+            goto done;
+        }
+    }
     if (duckdb_is_null_value(list)) {
         error = "attributes must be a non-NULL VARCHAR[]";
         goto done;
@@ -58,21 +58,14 @@ bool duckhts_attribute_columns_bind(duckdb_bind_info info, const char *parameter
             break;
         }
         columns->keys[i].length = strlen(name);
-        for (size_t j = 0; j < reserved_count; j++) {
-            if (column_name_equal(name, reserved_names[j])) {
-                error = "attributes key collides with a reader column name (case-insensitive)";
-                break;
-            }
+        if (duckhts_column_names_claim(&names, name, NULL, detail, sizeof(detail)) != 0) {
+            snprintf(message, sizeof(message), "attributes: %s", detail);
+            error = message;
+            break;
         }
-        for (idx_t j = 0; !error && j < i; j++) {
-            if (column_name_equal(name, columns->keys[j].name)) {
-                error = "attributes keys must have distinct column names (case-insensitive)";
-                break;
-            }
-        }
-        if (error) break;
     }
 done:
+    duckhts_column_names_destroy(&names);
     duckdb_destroy_value(&list);
     if (error) duckdb_bind_set_error(info, error);
     return error == NULL;

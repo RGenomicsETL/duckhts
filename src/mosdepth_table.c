@@ -43,6 +43,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/bed_line.h"
 #include "include/hts_io_tuning.h"
 #include "include/duckhts_output_file.h"
+#include "include/duckhts_bind_params.h"
 
 #define MOSDEPTH_DEFAULT_PRECISION 2
 #define MOSDEPTH_MAX_COVERAGE 400000
@@ -2367,7 +2368,6 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     duckdb_value prefix_val = duckdb_bind_get_parameter(info, 0);
     duckdb_value path_val = duckdb_bind_get_parameter(info, 1);
     mosdepth_bind_t *bind = NULL;
-    duckdb_value val;
     char err[512];
 
     memset(err, 0, sizeof(err));
@@ -2400,123 +2400,46 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     memset(bind, 0, sizeof(mosdepth_bind_t));
     bind->prefix = prefix;
     bind->path = path;
-    bind->threads = 2;
-    bind->processing_threads = 2;
-    bind->flag = 1796;
-    bind->include_flag = 0;
-    bind->mapq = 0;
-    bind->min_frag_len = -1;
-    bind->max_frag_len = -1;
-    bind->precision = MOSDEPTH_DEFAULT_PRECISION;
-    bind->fast_mode = 0;
-    bind->fragment_mode = 0;
-    bind->use_median = 0;
-    bind->no_per_base = 0;
-    bind->overwrite = 0;
+    char *thresholds = NULL;
+    char *quantize = NULL;
+    int read_ok = duckhts_bind_varchar(info, "chrom", &bind->chrom) &&
+                  duckhts_bind_varchar(info, "by", &bind->by) &&
+                  duckhts_bind_varchar(info, "fasta", &bind->fasta) &&
+                  duckhts_bind_varchar(info, "read_groups", &bind->read_groups) &&
+                  duckhts_bind_varchar(info, "index_path", &bind->index_path) &&
+                  duckhts_bind_varchar(info, "thresholds", &thresholds) &&
+                  duckhts_bind_varchar(info, "quantize", &quantize);
+    bind->threads = duckhts_bind_int64(info, "threads", 2);
+    bind->processing_threads = duckhts_bind_int64(info, "processing_threads", 2);
+    bind->flag = duckhts_bind_int64(info, "flag", 1796);
+    bind->include_flag = duckhts_bind_int64(info, "include_flag", 0);
+    bind->mapq = duckhts_bind_int64(info, "mapq", 0);
+    bind->min_frag_len = duckhts_bind_int64(info, "min_frag_len", -1);
+    bind->max_frag_len = duckhts_bind_int64(info, "max_frag_len", -1);
+    bind->precision = duckhts_bind_int64(info, "precision_digits", MOSDEPTH_DEFAULT_PRECISION);
+    bind->no_per_base = duckhts_bind_bool(info, "no_per_base", false);
+    bind->fast_mode = duckhts_bind_bool(info, "fast_mode", false);
+    bind->fragment_mode = duckhts_bind_bool(info, "fragment_mode", false);
+    bind->use_median = duckhts_bind_bool(info, "use_median", false);
+    bind->overwrite = duckhts_bind_bool(info, "overwrite", false);
 
-    val = duckdb_bind_get_named_parameter(info, "chrom");
-    if (val && !duckdb_is_null_value(val)) bind->chrom = duckdb_get_varchar(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "by");
-    if (val && !duckdb_is_null_value(val)) bind->by = duckdb_get_varchar(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "fasta");
-    if (val && !duckdb_is_null_value(val)) bind->fasta = duckdb_get_varchar(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "read_groups");
-    if (val && !duckdb_is_null_value(val)) bind->read_groups = duckdb_get_varchar(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "index_path");
-    if (val && !duckdb_is_null_value(val)) bind->index_path = duckdb_get_varchar(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "threads");
-    if (val && !duckdb_is_null_value(val)) bind->threads = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "processing_threads");
-    if (val && !duckdb_is_null_value(val)) bind->processing_threads = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "flag");
-    if (val && !duckdb_is_null_value(val)) bind->flag = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "include_flag");
-    if (val && !duckdb_is_null_value(val)) bind->include_flag = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "mapq");
-    if (val && !duckdb_is_null_value(val)) bind->mapq = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "min_frag_len");
-    if (val && !duckdb_is_null_value(val)) bind->min_frag_len = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "max_frag_len");
-    if (val && !duckdb_is_null_value(val)) bind->max_frag_len = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "precision_digits");
-    if (val && !duckdb_is_null_value(val)) bind->precision = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "thresholds");
-    if (val && !duckdb_is_null_value(val)) {
-        char *thresholds = duckdb_get_varchar(val);
-        if (thresholds) {
-            if (parse_thresholds_string(thresholds, &bind->thresholds, err, sizeof(err)) != 0) {
-                duckdb_free(thresholds);
-                duckdb_destroy_value(&val);
-                destroy_mosdepth_bind(bind);
-                duckdb_bind_set_error(info, err);
-                return;
-            }
-            duckdb_free(thresholds);
-        }
+    int parse_rc = 0;
+    if (!read_ok) {
+        snprintf(err, sizeof(err), "duckhts_mosdepth: out of memory reading parameters");
+        parse_rc = -1;
+    } else if (thresholds) {
+        parse_rc = parse_thresholds_string(thresholds, &bind->thresholds, err, sizeof(err));
     }
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "quantize");
-    if (val && !duckdb_is_null_value(val)) {
-        char *quantize = duckdb_get_varchar(val);
-        if (quantize) {
-            if (parse_quantize_string(quantize, &bind->quantize, err, sizeof(err)) != 0) {
-                duckdb_free(quantize);
-                duckdb_destroy_value(&val);
-                destroy_mosdepth_bind(bind);
-                duckdb_bind_set_error(info, err);
-                return;
-            }
-            duckdb_free(quantize);
-        }
+    if (parse_rc == 0 && quantize) {
+        parse_rc = parse_quantize_string(quantize, &bind->quantize, err, sizeof(err));
     }
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "no_per_base");
-    if (val && !duckdb_is_null_value(val)) bind->no_per_base = duckdb_get_bool(val) ? 1 : 0;
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "fast_mode");
-    if (val && !duckdb_is_null_value(val)) bind->fast_mode = duckdb_get_bool(val) ? 1 : 0;
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "fragment_mode");
-    if (val && !duckdb_is_null_value(val)) bind->fragment_mode = duckdb_get_bool(val) ? 1 : 0;
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "use_median");
-    if (val && !duckdb_is_null_value(val)) bind->use_median = duckdb_get_bool(val) ? 1 : 0;
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "overwrite");
-    if (val && !duckdb_is_null_value(val)) bind->overwrite = duckdb_get_bool(val) ? 1 : 0;
-    if (val) duckdb_destroy_value(&val);
+    if (thresholds) duckdb_free(thresholds);
+    if (quantize) duckdb_free(quantize);
+    if (parse_rc != 0) {
+        destroy_mosdepth_bind(bind);
+        duckdb_bind_set_error(info, err);
+        return;
+    }
 
     if (bind->threads < 0) {
         destroy_mosdepth_bind(bind);

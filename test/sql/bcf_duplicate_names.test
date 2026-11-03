@@ -1,0 +1,84 @@
+# name: test/sql/bcf_duplicate_names.test
+# description: VCF IDs that are distinct but give one DuckDB column name (case-insensitive)
+# group: [duckhts]
+
+require duckhts
+
+# VCF 4.3 and 4.5 allow keys and sample IDs that differ only in case: they forbid only
+# exact duplicates ("Duplicate keys are not allowed", "Duplicate sample IDs are not allowed").
+# '|' stands for a tab in these fixtures.
+statement ok
+COPY (SELECT replace(line, '|', chr(9)) FROM (VALUES
+    (1, '##fileformat=VCFv4.3'),
+    (2, '##contig=<ID=chr1,length=100>'),
+    (3, '##INFO=<ID=DP,Number=1,Type=Integer,Description="upper">'),
+    (4, '##INFO=<ID=dp,Number=1,Type=Integer,Description="lower">'),
+    (5, '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">'),
+    (6, '#CHROM|POS|ID|REF|ALT|QUAL|FILTER|INFO|FORMAT|s1|S1'),
+    (7, 'chr1|5|.|A|G|.|PASS|DP=1;dp=2|GT|0/1|1/1')) t(ordinal, line) ORDER BY ordinal)
+TO '__WORKING_DIRECTORY__/test/sql/bcf_case_names.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+# The default keeps rejecting the schema, now naming both IDs and the option.
+statement error
+SELECT CHROM, POS FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_case_names.vcf');
+----
+read_bcf: INFO_DP and INFO_dp name the same column (column names ignore case); set duplicate_names := 'suffix' to rename the later column
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_case_names.vcf', duplicate_names := 'error');
+----
+INFO_DP and INFO_dp name the same column
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_case_names.vcf', duplicate_names := 'rename');
+----
+read_bcf: duplicate_names must be 'error' or 'suffix'
+
+# 'suffix' keeps the first name in header order and renames the later one.
+query IITT
+SELECT INFO_DP, INFO_dp__2, FORMAT_GT_s1, FORMAT_GT_S1__2
+FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_case_names.vcf', duplicate_names := 'suffix');
+----
+1	2	0/1	1/1
+
+query T
+SELECT column_name
+FROM (DESCRIBE SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_case_names.vcf', duplicate_names := 'suffix'))
+WHERE column_name LIKE 'INFO_%' OR column_name LIKE 'FORMAT_%';
+----
+INFO_DP
+INFO_dp__2
+FORMAT_GT_s1
+FORMAT_GT_S1__2
+
+# Tidy samples are rows, so only the INFO keys collide.
+query TT
+SELECT SAMPLE_ID, FORMAT_GT
+FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_case_names.vcf', tidy_format := true, duplicate_names := 'suffix')
+ORDER BY SAMPLE_ID;
+----
+S1	1/1
+s1	0/1
+
+# Wide names join a FORMAT key and a sample ID with '_', which both may contain: key A_B
+# with sample C and key A with sample B_C give the same name without any case change.
+statement ok
+COPY (SELECT replace(line, '|', chr(9)) FROM (VALUES
+    (1, '##fileformat=VCFv4.3'),
+    (2, '##contig=<ID=chr1,length=100>'),
+    (3, '##FORMAT=<ID=A_B,Number=1,Type=Integer,Description="joined">'),
+    (4, '##FORMAT=<ID=A,Number=1,Type=Integer,Description="short">'),
+    (5, '#CHROM|POS|ID|REF|ALT|QUAL|FILTER|INFO|FORMAT|C|B_C'),
+    (6, 'chr1|5|.|A|G|.|PASS|.|A_B:A|1:2|3:4')) t(ordinal, line) ORDER BY ordinal)
+TO '__WORKING_DIRECTORY__/test/sql/bcf_underscore_names.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_underscore_names.vcf');
+----
+FORMAT_A_B_C and FORMAT_A_B_C name the same column
+
+query IIII
+SELECT FORMAT_A_B_C, FORMAT_A_C, FORMAT_A_B_B_C, FORMAT_A_B_C__2
+FROM read_bcf('__WORKING_DIRECTORY__/test/sql/bcf_underscore_names.vcf', duplicate_names := 'suffix');
+----
+1	2	3	4

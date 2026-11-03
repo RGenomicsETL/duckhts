@@ -205,8 +205,8 @@ test-extension-symbols:
 test-named-attribute-columns:
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		$(CC) -std=c11 -O2 -Wall -Wextra -Werror -UNDEBUG \
-			-Iduckdb_capi -Isrc/include \
-			test/scripts/named_attribute_columns_test.c src/named_attribute_columns.c \
+			-Iduckdb_capi -Isrc/include -Ithird_party/htslib \
+			test/scripts/named_attribute_columns_test.c src/named_attribute_columns.c src/column_names.c \
 			-o "$$tmp/named_attribute_columns_test"; \
 		"$$tmp/named_attribute_columns_test"
 
