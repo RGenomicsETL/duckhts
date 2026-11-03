@@ -540,7 +540,7 @@ table
 
 ### Tags
 
-auxiliary_tags := TRUE adds the AUXILIARY_TAGS map of the non-standard tags. auxiliary_tags := ['UR', 'UB'] instead adds one VARCHAR column per named tag, after the standard tag columns, formatted like the map value (the SAM text after TYPE:, B arrays as subtype then comma-separated values) and NULL when a record lacks the tag. It builds no map, so reading a few tags from a large file costs much less. Names must match [A-Za-z][A-Za-z0-9], at most 64, unique ignoring case, and with standard_tags := TRUE not equal to a standard tag column ignoring case, since DuckDB column names ignore case while SAM tag names do not. The strings 'true'/'false' and integers are still read as the BOOLEAN form.
+standard_tags := TRUE returns NULL when a tag is absent or its stored type does not match the standard SAM tag type. Scalar integers accept all BAM integer widths; arrays require the standard subtype. auxiliary_tags := TRUE adds the AUXILIARY_TAGS map of the non-standard tags. auxiliary_tags := ['UR', 'UB'] instead adds one VARCHAR column per named tag, after the standard tag columns, formatted like the map value (the SAM text after TYPE:, B arrays as subtype then comma-separated values) and NULL when a record lacks the tag. It builds no map, so reading a few tags from a large file costs much less. Names must match [A-Za-z][A-Za-z0-9], at most 64, unique ignoring case, and with standard_tags := TRUE not equal to a standard tag column ignoring case, since DuckDB column names ignore case while SAM tag names do not. The strings 'true'/'false' and integers are still read as the BOOLEAN form.
 
 ### Map keys
 

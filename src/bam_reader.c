@@ -128,6 +128,17 @@ static duckdb_logical_type bam_std_tag_type(const bam_std_tag_t *t) {
     }
 }
 
+static bool bam_std_tag_matches(const bam_std_tag_t *tag, const uint8_t *aux) {
+    if (!aux) return false;
+    if (tag->type == 'i') {
+        /* BAM stores scalar SAM integers in the narrowest available width. */
+        return aux[0] == 'c' || aux[0] == 'C' || aux[0] == 's' ||
+               aux[0] == 'S' || aux[0] == 'i' || aux[0] == 'I';
+    }
+    if (tag->type == 'B') return aux[0] == 'B' && aux[1] == tag->subtype;
+    return aux[0] == tag->type;
+}
+
 static int bam_assign_list_int(duckdb_vector vec, idx_t row, const uint8_t *aux) {
     uint32_t len = bam_auxB_len(aux);
     duckdb_list_entry entry;
@@ -1629,7 +1640,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         int std_idx = (int)(col_id - BAM_COL_CORE_COUNT);
                         const bam_std_tag_t *st = &BAM_STD_TAGS[std_idx];
                         uint8_t *aux = bam_aux_get(b, st->tag);
-                        if (!aux) {
+                        if (!bam_std_tag_matches(st, aux)) {
                             set_null(vec, row_count);
                             break;
                         }
@@ -1657,8 +1668,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 break;
                             }
                             case 'B': {
-                                char subtype = aux[1];
-                                if (subtype == 'f' || subtype == 'd') {
+                                if (st->subtype == 'f') {
                                     if (!bam_assign_list_double(vec, row_count, aux)) goto list_error;
                                 } else {
                                     if (!bam_assign_list_int(vec, row_count, aux)) goto list_error;
