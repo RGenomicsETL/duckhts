@@ -1,0 +1,77 @@
+# Diagnostics retain the SQL function, input paths and complete mate QNAMEs.
+require duckhts
+
+statement error
+SELECT * FROM read_tabix(repeat('missing/', 100) || 'diagnostic-tail.tsv');
+----
+<REGEX>:.*read_tabix:.*missing/.*diagnostic-tail.tsv.*
+
+statement error
+SELECT * FROM read_gff(repeat('missing/', 100) || 'diagnostic-tail.gff');
+----
+<REGEX>:.*read_gff:.*missing/.*diagnostic-tail.gff.*
+
+statement error
+SELECT * FROM read_fastq(repeat('missing/', 100) || 'diagnostic-tail.fq');
+----
+<REGEX>:.*read_fastq:.*missing/.*diagnostic-tail.fq.*
+
+statement error
+SELECT * FROM read_fasta(repeat('missing/', 100) || 'diagnostic-tail.fa');
+----
+<REGEX>:.*read_fasta:.*missing/.*diagnostic-tail.fa.*
+
+statement ok
+COPY (SELECT '@HD' || chr(9) || 'VN:1.6' || chr(10) || repeat('a', 240) || 'FIRST' || chr(9) || '4' || chr(9) || '*' || chr(9) || '0' || chr(9) || '0' || chr(9) || '*' || chr(9) || '*' || chr(9) || '0' || chr(9) || '0' || chr(9) || 'A' || chr(9) || 'I') TO '__WORKING_DIRECTORY__/test/sql/diagnostic_first.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+COPY (SELECT '@HD' || chr(9) || 'VN:1.6' || chr(10) || repeat('b', 240) || 'SECOND' || chr(9) || '4' || chr(9) || '*' || chr(9) || '0' || chr(9) || '0' || chr(9) || '*' || chr(9) || '*' || chr(9) || '0' || chr(9) || '0' || chr(9) || 'A' || chr(9) || 'I') TO '__WORKING_DIRECTORY__/test/sql/diagnostic_second.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement error
+SELECT * FROM read_fastq('__WORKING_DIRECTORY__/test/sql/diagnostic_first.sam', mate_path := '__WORKING_DIRECTORY__/test/sql/diagnostic_second.sam');
+----
+<REGEX>:.*read_fastq: mate files out of sync.*QNAME mismatch: 'a{240}FIRST' vs 'b{240}SECOND'.*diagnostic_first.sam.*diagnostic_second.sam.*
+
+statement ok
+COPY (SELECT '@first' || chr(10) || 'A' || chr(10) || '+' || chr(10) || 'I') TO '__WORKING_DIRECTORY__/test/sql/diagnostic_first.fq' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+COPY (SELECT '@second' || chr(10) || 'A' || chr(10) || '+' || chr(10) || 'I') TO '__WORKING_DIRECTORY__/test/sql/diagnostic_second.fq' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement error
+SELECT * FROM read_fastq('__WORKING_DIRECTORY__/test/sql/diagnostic_first.fq', mate_path := '__WORKING_DIRECTORY__/test/sql/diagnostic_second.fq');
+----
+<REGEX>:.*read_fastq: mate files out of sync.*QNAME mismatch: 'first' vs 'second'.*diagnostic_first.fq.*diagnostic_second.fq.*
+
+statement error
+SELECT * FROM read_fastq('test/data/reader_io_error.sam', mate_path := 'test/data/diagnostic_missing.sam');
+----
+read_fastq: Failed to open mate FASTQ file: test/data/diagnostic_missing.sam
+
+statement error
+SELECT * FROM read_tabix('test/data/reader_io_error.bed', region := '11:1-8');
+----
+read_tabix: Region query requested but no tabix index found for: test/data/reader_io_error.bed
+
+statement error
+SELECT * FROM read_fastq('__WORKING_DIRECTORY__/test/sql/diagnostic_first.fq', mate_path := '__WORKING_DIRECTORY__/test/sql/diagnostic_missing.fq');
+----
+<REGEX>:.*read_fastq: Failed to open mate FASTQ file: .*diagnostic_missing.fq.*
+
+statement ok
+COPY (SELECT '@SQ' || chr(9) || 'LN:10') TO '__WORKING_DIRECTORY__/test/sql/diagnostic_bad_header.sam' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement error
+SELECT * FROM read_fastq('__WORKING_DIRECTORY__/test/sql/diagnostic_bad_header.sam');
+----
+<REGEX>:.*read_fastq: Failed to read header: .*diagnostic_bad_header.sam.*
+
+statement error
+SELECT * FROM read_fasta('__WORKING_DIRECTORY__/test/sql/diagnostic_bad_header.sam');
+----
+<REGEX>:.*read_fasta: Failed to read header: .*diagnostic_bad_header.sam.*
+
+statement error
+SELECT * FROM read_fastq('test/data/reader_io_error.sam', mate_path := '__WORKING_DIRECTORY__/test/sql/diagnostic_bad_header.sam');
+----
+<REGEX>:.*read_fastq: Failed to read mate FASTQ header: .*diagnostic_bad_header.sam.*

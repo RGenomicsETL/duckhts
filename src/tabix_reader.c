@@ -1311,7 +1311,10 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         /* Generic tabix: if indexed, use header/meta settings; otherwise peek */
         htsFile *fp = hts_open(bd->file_path, "r");
         if (!fp) {
-            duckdb_bind_set_error(info, "Cannot open file");
+            kstring_t message = {0, 0, NULL};
+            int result = ksprintf(&message, "read_tabix: Cannot open file: %s", bd->file_path);
+            duckdb_bind_set_error(info, result < 0 ? "read_tabix: out of memory reporting open failure" : message.s);
+            free(message.s);
             tabix_bind_data_destroy(bd);
             return;
         }
@@ -1566,11 +1569,14 @@ static void tabix_init(duckdb_init_info info) {
         return;
     }
 
+    const char *name = bd->mode == TABIX_MODE_GTF ? "read_gtf" :
+                       bd->mode == TABIX_MODE_GFF ? "read_gff" : "read_tabix";
     id->fp = hts_open(bd->file_path, "r");
     if (!id->fp) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "Cannot open file: %s", bd->file_path);
-        duckdb_init_set_error(info, msg);
+        kstring_t message = {0, 0, NULL};
+        int result = ksprintf(&message, "%s: Cannot open file: %s", name, bd->file_path);
+        duckdb_init_set_error(info, result < 0 ? "tabix reader: out of memory reporting open failure" : message.s);
+        free(message.s);
         tabix_init_data_destroy(id);
         return;
     }
@@ -1589,11 +1595,11 @@ static void tabix_init(duckdb_init_info info) {
 
     if (bd->n_regions > 0) {
         if (!id->tbx) {
-            char msg[512];
-            snprintf(msg, sizeof(msg),
-                     "Region query requested but no tabix index found for: %s",
-                     bd->file_path);
-            duckdb_init_set_error(info, msg);
+            kstring_t message = {0, 0, NULL};
+            int result = ksprintf(&message, "%s: Region query requested but no tabix index found for: %s",
+                                  name, bd->file_path);
+            duckdb_init_set_error(info, result < 0 ? "tabix reader: out of memory reporting index failure" : message.s);
+            free(message.s);
             tabix_init_data_destroy(id);
             return;
         }
