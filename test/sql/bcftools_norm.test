@@ -4,6 +4,21 @@
 
 require duckhts
 
+# bcftools 1.23 oracle: bcftools norm -c w -f test/data/liftover_repeat_src.fa test/data/norm_review.vcf
+# Spanning deletions pass through; REF-only records still require a valid matching REF.
+query ITTT
+SELECT nr.pos_normed, nr.ref_normed, nr.alt_normed::VARCHAR, nr.norm_status
+FROM (
+  SELECT bcftools_norm_row('chrS', 2, ref, alt,
+    '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa',
+    NULL::BIGINT, NULL::BIGINT, NULL, NULL) AS nr
+  FROM (VALUES ('T', '*,TT'), ('A', '.'), ('Z', '.')) t(ref, alt)
+) s;
+----
+2	T	[*, TT]	SpanningDeletion
+2	A	[]	RefMismatch
+2	Z	[]	InvalidRefAllele
+
 statement ok
 CREATE OR REPLACE TEMP TABLE norm_seq AS
 SELECT *
@@ -206,7 +221,7 @@ SELECT pos_normed,
        norm_status
 FROM duckhts_bcftools_norm('norm_spanning', '__WORKING_DIRECTORY__/test/data/liftover_repeat_src.fa');
 ----
-1	1	G	[*, GT]	1	Normalized
+2	2	T	[*, TT]	NULL	SpanningDeletion
 
 query TIITTIT
 SELECT case_id,

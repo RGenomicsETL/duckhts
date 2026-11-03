@@ -2096,7 +2096,7 @@
       "details": {
         "Arguments": "All nine arguments are positional and required. DuckDB ignores a `name :=` label on a scalar argument and binds the value by position, so pass NULL for an unused end_pos, svlen, fasta_index_path or gzi_path. A NULL index path lets htslib find the index next to fasta_ref.",
         "Input": "alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_pos; `<DUP>` may use svlen.",
-        "Output": "Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END.",
+        "Output": "Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END. Rows containing a spanning-deletion `*` pass through with SpanningDeletion and NULL normed. REF-only rows require a valid REF matching the FASTA before returning RefOnly.",
         "Contig names": "The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error."
       },
       "examples": [

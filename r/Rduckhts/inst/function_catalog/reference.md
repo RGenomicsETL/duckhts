@@ -4164,7 +4164,7 @@ alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_p
 
 ### Output
 
-Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END.
+Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END. Rows containing a spanning-deletion `*` pass through with SpanningDeletion and NULL normed. REF-only rows require a valid REF matching the FASTA before returning RefOnly.
 
 ### Contig names
 

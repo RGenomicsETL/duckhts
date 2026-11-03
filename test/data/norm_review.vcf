@@ -1,0 +1,8 @@
+##fileformat=VCFv4.2
+##contig=<ID=chrS,length=7>
+##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="Length difference">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chrS	2	missing_end	T	<DEL>	.	.	SVLEN=-1
+chrS	2	spanning	T	*,TT	.	.	.
+chrS	2	ref_mismatch	A	.	.	.	.
+chrS	2	ref_invalid	Z	.	.	.	.
