@@ -10,6 +10,8 @@
   soft-masking lost in full `read_fasta` scans, contig names from VCF tabix indexes,
   CSQ numbers parsed from text, BED regions in `rduckhts_bcftools_score()`, and
   `bcftools_norm` on records mixing `*` with other alleles.
+- Building a cgranges interval index with `duckhts_cgranges_add()` no longer leaks
+  about 94 bytes of memory per interval.
 - `input_quality_encoding = "auto"` now stops with an error when the qualities fit more
   than one encoding, instead of guessing phred64; pass the encoding explicitly.
 - A failed `overwrite = TRUE` run of bgzip, bgunzip, mosdepth or idxstats keeps the

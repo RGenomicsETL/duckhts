@@ -64,6 +64,8 @@
     `header_names`, `column_types` and `auto_detect` (also from
     `duckhts_gff_convert_parquet_sql`), and `duckhts_bam_bed_coverage`
     `bed_index_path`, `fragment_mode` and `processing_threads`.
+  - `duckhts_cgranges_add` leaked two or three DuckDB logical types per row, about
+    94 bytes: 2,000,000 rows peaked at 373 MB of memory against 186 MB now.
   - `read_pileup` documents htslib's 8,000-read depth limit per position.
   - `bam_bin_counts(rmdup := 'streaming')` now reads its contigs on one thread, in
     header order, to keep one deduplication state; the other modes still read contigs
