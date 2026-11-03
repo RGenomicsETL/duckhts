@@ -814,6 +814,11 @@ static void bam_bed_cov_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "duckhts_bam_bed_coverage: numeric parameters and thread counts must be non-negative");
         return;
     }
+    if (bind->min_depth > UINT32_MAX || bind->max_depth > UINT32_MAX) {
+        destroy_bam_bed_cov_bind(bind);
+        duckdb_bind_set_error(info, "duckhts_bam_bed_coverage: min_depth and max_depth must be at most 4294967295");
+        return;
+    }
     if (bind->min_depth == 0) bind->min_depth = 1;
     if (bind->fragment_mode) {
         destroy_bam_bed_cov_bind(bind);

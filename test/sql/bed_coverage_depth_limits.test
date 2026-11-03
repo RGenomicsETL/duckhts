@@ -1,0 +1,25 @@
+# name: test/sql/bed_coverage_depth_limits.test
+# description: Coverage depth parameters must fit their uint32 counters
+# group: [duckhts]
+
+require duckhts
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', min_depth := 4294967296);
+----
+min_depth and max_depth must be at most 4294967295
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', max_depth := 4294967296);
+----
+min_depth and max_depth must be at most 4294967295
+
+query II
+SELECT sum(numreads_pre), sum(covbases_pre) FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', max_depth := 4294967295);
+----
+6	144
+
+query I
+SELECT sum(covbases_pre) FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', min_depth := 4294967295);
+----
+0
