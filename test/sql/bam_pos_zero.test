@@ -1,0 +1,46 @@
+require duckhts
+
+# Rebuild fixtures: python3 test/scripts/prepare_bam_review_fixtures.py
+# Both contigs begin with an unmapped record with a reference and BAM pos = -1.
+statement ok
+SET threads = 3;
+
+query I
+SELECT count(*) FROM read_bam('test/data/bam_pos_zero.bam');
+----
+12
+
+statement ok
+CREATE TABLE sequential AS SELECT * FROM read_bam('test/data/bam_pos_zero.bam', scan_mode := 'sequential');
+
+query II
+SELECT count(*), count(DISTINCT FILE_OFFSET) FROM sequential;
+----
+12	12
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM read_bam('test/data/bam_pos_zero.bam') EXCEPT ALL SELECT * FROM sequential)
+  UNION ALL
+  (SELECT * FROM sequential EXCEPT ALL SELECT * FROM read_bam('test/data/bam_pos_zero.bam'))
+);
+----
+0
+
+statement ok
+SET threads = 1;
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM read_bam('test/data/bam_pos_zero.bam') EXCEPT ALL SELECT * FROM sequential)
+  UNION ALL
+  (SELECT * FROM sequential EXCEPT ALL SELECT * FROM read_bam('test/data/bam_pos_zero.bam'))
+);
+----
+0
+
+# Region queries retain coordinate overlap semantics (POS 0 is outside a:1-100).
+query I
+SELECT count(*) FROM read_bam('test/data/bam_pos_zero.bam', region := 'a:1-100');
+----
+5

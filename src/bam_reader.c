@@ -1287,6 +1287,12 @@ static int claim_next_contig(bam_local_init_data_t *local,
      * that optional count, and CRAI does not supply it. */
     errno = 0;
     local->itr = sam_itr_queryi(local->idx, tid, beg, end);
+    if (local->itr && tid >= 0 && beg == 0 && !local->fp->is_cram) {
+        /* BAM indexing places pos=-1 records in the first bin. htslib clamps
+         * query starts to zero; full scans must also accept their end=0. */
+        local->itr->beg = -1;
+        local->part_beg = -1;
+    }
     if (!local->itr) {
         /* Without a mapped chunk or optional count, HTSlib cannot distinguish
          * an empty BAM from an all-unplaced BAM. No named-contig iterator can
