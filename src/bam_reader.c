@@ -1058,8 +1058,9 @@ static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_dat
  *
  * A CRAM decoder decodes only the data series behind the SAM fields it is
  * asked for (htslib cram/cram_decode.c:564-616). read_bam always asks for
- * the fixed SAM fields QNAME to TLEN. It drops two groups when no projected
- * column reads them:
+ * FLAG, RNAME, POS and CIGAR for scan ownership and iterator overlap checks.
+ * Other fixed fields follow the projection. It also drops two groups when no
+ * projected column reads them:
  *   - SEQ and QUAL. Without them htslib does not fetch the reference for a
  *     single-reference slice (cram_decode.c:2452-2458) and returns an empty
  *     sequence (cram_decode.c:3184-3198).
@@ -1080,14 +1081,23 @@ static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_dat
 
 static int bam_cram_required_fields(const bam_bind_data_t *bind,
                                     const idx_t *column_ids, idx_t column_count) {
-    int fields = SAM_QNAME | SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ |
-                 SAM_CIGAR | SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
+    int fields = SAM_FLAG | SAM_RNAME | SAM_POS | SAM_CIGAR;
     int need_sequence = 0;
     int need_tags = 0;
 
     for (idx_t i = 0; i < column_count; i++) {
         idx_t col_id = column_ids[i];
-        if (col_id == BAM_COL_SEQ || col_id == BAM_COL_QUAL) {
+        if (col_id == BAM_COL_QNAME) {
+            fields |= SAM_QNAME;
+        } else if (col_id == BAM_COL_MAPQ) {
+            fields |= SAM_MAPQ;
+        } else if (col_id == BAM_COL_RNEXT) {
+            fields |= SAM_RNEXT;
+        } else if (col_id == BAM_COL_PNEXT) {
+            fields |= SAM_PNEXT;
+        } else if (col_id == BAM_COL_TLEN) {
+            fields |= SAM_TLEN;
+        } else if (col_id == BAM_COL_SEQ || col_id == BAM_COL_QUAL) {
             need_sequence = 1;
         } else if (col_id == BAM_COL_CIGAR) {
             /* A record may keep BAM's long-CIGAR placeholder with the real
@@ -1189,6 +1199,10 @@ static void bam_read_local_init(duckdb_init_info info) {
 
     if (hts_get_format(local->fp)->format == cram) {
         int fields = bam_cram_required_fields(bind, local->column_ids, local->column_count);
+        /* CRAM 1.x reconstructs mate flag bits from mate data (cram_io.c). */
+        if (hts_get_format(local->fp)->version.major == 1) {
+            fields |= SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
+        }
         if (hts_set_opt(local->fp, CRAM_OPT_REQUIRED_FIELDS, fields) < 0) {
             duckdb_init_set_error(info, "read_bam: failed to set the CRAM required fields");
             destroy_bam_local(local);

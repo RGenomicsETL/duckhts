@@ -179,6 +179,20 @@ static void bam_pileup_local_init(duckdb_init_info info) {
         destroy_bam_pileup_local(local);
         return;
     }
+    /* bam_plp_init does not enable mate-overlap correction, so pileup needs
+     * neither read names nor mate fields. AUX preserves CG long CIGARs. */
+    int fields = SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ | SAM_CIGAR |
+                 SAM_SEQ | SAM_QUAL | SAM_AUX;
+    /* CRAM 1.x reconstructs mate flag bits from mate data (cram_io.c). */
+    if (hts_get_format(local->fp)->format == cram &&
+        hts_get_format(local->fp)->version.major == 1) {
+        fields |= SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
+    }
+    if (hts_set_opt(local->fp, CRAM_OPT_REQUIRED_FIELDS, fields) < 0) {
+        duckdb_init_set_error(info, "read_pileup: failed to configure CRAM required fields");
+        destroy_bam_pileup_local(local);
+        return;
+    }
     duckhts_apply_remote_hts_tuning(local->fp, bind->file_path,
                                     DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     (void)hts_set_threads(local->fp, 2);
