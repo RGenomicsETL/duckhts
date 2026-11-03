@@ -597,11 +597,23 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
                 destroy_seq_bind(bind);
                 return;
             }
+            if (detect.is_ambiguous) {
+                duckdb_bind_set_error(info,
+                    "read_fastq: ambiguous quality encoding; set input_quality_encoding explicitly");
+                destroy_seq_bind(bind);
+                return;
+            }
             bind->input_quality_encoding = detect.guessed_encoding;
             if (bind->paired) {
                 duckhts_quality_detect_result mate_detect;
                 if (duckhts_detect_fastq_quality_encoding(bind->mate_path, 10000, &mate_detect, err, sizeof(err)) != 0) {
                     duckdb_bind_set_error(info, err);
+                    destroy_seq_bind(bind);
+                    return;
+                }
+                if (mate_detect.is_ambiguous) {
+                    duckdb_bind_set_error(info,
+                        "read_fastq: ambiguous quality encoding in mate; set input_quality_encoding explicitly");
                     destroy_seq_bind(bind);
                     return;
                 }

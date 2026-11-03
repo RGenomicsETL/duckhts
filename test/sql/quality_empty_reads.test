@@ -1,0 +1,23 @@
+require duckhts
+
+statement ok
+COPY (SELECT '@empty' UNION ALL SELECT '' UNION ALL SELECT '+' UNION ALL SELECT '' UNION ALL SELECT '@nonempty' UNION ALL SELECT 'AC' UNION ALL SELECT '+' UNION ALL SELECT '!!') TO '__WORKING_DIRECTORY__/test/sql/empty_quality.fq' (FORMAT CSV, HEADER false, QUOTE '');
+
+query TT
+SELECT name, quality FROM read_fastq('__WORKING_DIRECTORY__/test/sql/empty_quality.fq', input_quality_encoding := 'auto');
+----
+empty	NULL
+nonempty	!!
+
+query II
+SELECT records_sampled, observed_ascii_min FROM detect_quality_encoding('__WORKING_DIRECTORY__/test/sql/empty_quality.fq');
+----
+2	33
+
+statement ok
+COPY (SELECT '@empty' UNION ALL SELECT '' UNION ALL SELECT '+' UNION ALL SELECT '') TO '__WORKING_DIRECTORY__/test/sql/all_empty_quality.fq' (FORMAT CSV, HEADER false, QUOTE '');
+
+query TT
+SELECT name, quality FROM read_fastq('__WORKING_DIRECTORY__/test/sql/all_empty_quality.fq', input_quality_encoding := 'auto');
+----
+empty	NULL

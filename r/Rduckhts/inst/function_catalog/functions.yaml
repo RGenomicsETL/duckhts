@@ -591,7 +591,7 @@
       "signature": "read_fastq(path, interleaved := FALSE, mate_path := NULL, sequence_encoding := 'string', quality_representation := 'string', input_quality_encoding := 'phred33', scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_fastq",
-      "description": "Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.",
+      "description": "Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. 'auto' samples up to 10,000 records per file and errors on ambiguous evidence; select an explicit encoding in that case. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.",
       "examples": [
         "SELECT NAME, MATE FROM read_fastq('r1.fq', mate_path := 'r2.fq') LIMIT 5;"
       ]

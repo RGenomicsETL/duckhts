@@ -1066,7 +1066,7 @@ SELECT * FROM duckhts_cgranges_overlaps('targets_idx', 'chr1', 100, 150);
 
 ## read_fastq
 
-Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.
+Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. 'auto' samples up to 10,000 records per file and errors on ambiguous evidence; select an explicit encoding in that case. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.
 
 Signature:
 
