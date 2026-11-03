@@ -1197,6 +1197,15 @@ static void seq_fasta_count_only_function(duckdb_function_info info,
  * Reference: htslib-1.23/samples/read_fast.c
  * ================================================================ */
 
+static void seq_alignment_read_error(duckdb_function_info info, seq_bind_data_t *bind,
+                                     const char *path, int status) {
+    kstring_t message = {0, 0, NULL};
+    int result = ksprintf(&message, "%s: failed to read '%s' (htslib status %d)",
+                         bind->is_fastq ? "read_fastq" : "read_fasta", path, status);
+    duckdb_function_set_error(info, result < 0 ? "sequence reader: out of memory reporting read failure" : message.s);
+    free(message.s);
+}
+
 static void seq_read_function(duckdb_function_info info, duckdb_data_chunk output) {
     seq_bind_data_t *bind = (seq_bind_data_t *)duckdb_function_get_bind_data(info);
     seq_init_data_t *init = (seq_init_data_t *)duckdb_function_get_init_data(info);
@@ -1315,9 +1324,21 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                 init->pending_mate = 0;
             } else {
                 int r1 = sam_read1(init->fp, init->hdr, init->rec);
+                if (r1 < -1) {
+                    seq_alignment_read_error(info, bind, bind->file_path, r1);
+                    init->done = 1;
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
                 int r2 = sam_read1(init->fp_mate, init->hdr_mate, init->rec_mate);
-                if (r1 < 0 || r2 < 0) {
-                    if (r1 < 0 && r2 < 0) {
+                if (r2 < -1) {
+                    seq_alignment_read_error(info, bind, bind->mate_path, r2);
+                    init->done = 1;
+                    duckdb_data_chunk_set_size(output, 0);
+                    return;
+                }
+                if (r1 == -1 || r2 == -1) {
+                    if (r1 == -1 && r2 == -1) {
                         init->done = 1;
                         break;
                     }
@@ -1346,8 +1367,13 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
             }
         } else {
             int ret = sam_read1(init->fp, init->hdr, init->rec);
-            if (ret < 0) {
-                /* -1 = EOF, < -1 = error */
+            if (ret < -1) {
+                seq_alignment_read_error(info, bind, bind->file_path, ret);
+                init->done = 1;
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
+            if (ret == -1) {
                 if (init->interleaved && init->interleaved_mate == 2) {
                     duckdb_function_set_error(info,
                         "read_fastq: interleaved file has an unpaired record");

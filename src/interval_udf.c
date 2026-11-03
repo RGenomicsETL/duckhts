@@ -144,6 +144,7 @@ typedef struct {
     hts_itr_t *bed_itr;
     kstring_t bed_line;
     bool bed_finished;
+    uint64_t bed_line_number;
 
     int region_tid;
     hts_pos_t region_beg;
@@ -453,15 +454,25 @@ static void read_bed_init(duckdb_init_info info) {
     duckdb_init_set_init_data(info, init, destroy_bed_init);
 }
 
-static inline int next_bed_line(bed_init_data_t *init, bool report) {
+static inline int next_bed_line(duckdb_function_info info, bed_init_data_t *init) {
     while (!init->finished) {
         int ret = init->itr ? tbx_itr_next(init->fp, init->tbx, init->itr, &init->line)
                             : hts_getline(init->fp, '\n', &init->line);
         if (ret < 0) {
             init->finished = true;
+            if (ret < -1) {
+                bed_bind_data_t *bind = duckdb_function_get_bind_data(info);
+                kstring_t message = {0, 0, NULL};
+                int result = ksprintf(&message, "read_bed: failed to read '%s' after %s %lld (htslib status %d)",
+                         bind->file_path, init->itr ? "region record" : "line",
+                         (long long)init->line_number, ret);
+                duckdb_function_set_error(info, result < 0 ? "read_bed: out of memory reporting read failure" : message.s);
+                free(message.s);
+                return ret;
+            }
             return 0;
         }
-        if (report) init->line_number++;
+        init->line_number++;
         if (init->line.l == 0 || duckhts_bed_line_is_meta(init->line.s)) continue;
         return 1;
     }
@@ -526,7 +537,8 @@ static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk out
                                 bed_init_data_t *init, duckdb_vector *vectors, idx_t col_count) {
     idx_t row_count = 0;
     const idx_t vector_size = duckdb_vector_size();
-    while (row_count < vector_size && next_bed_line(init, false)) {
+    int status = 0;
+    while (row_count < vector_size && (status = next_bed_line(info, init)) > 0) {
         if (count_tab_fields(init->line.s) < 3) {
             duckdb_function_set_error(info, bed_short_line_error);
             init->finished = true;
@@ -590,16 +602,16 @@ static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk out
         }
         row_count++;
     }
-    duckdb_data_chunk_set_size(output, row_count);
+    duckdb_data_chunk_set_size(output, status < 0 ? 0 : row_count);
 }
 
 static void read_bed_rows_tolerant(duckdb_function_info info, duckdb_data_chunk output,
                                    bed_init_data_t *init, duckdb_vector *vectors, idx_t col_count) {
-    (void)info;
     const bool report = init->error_policy == BED_ERROR_POLICY_REPORT;
     idx_t row_count = 0;
     const idx_t vector_size = duckdb_vector_size();
-    while (row_count < vector_size && next_bed_line(init, report)) {
+    int status = 0;
+    while (row_count < vector_size && (status = next_bed_line(info, init)) > 0) {
         if (count_tab_fields(init->line.s) < 3) {
             if (!report) continue;
             for (idx_t c = 0; c < col_count; c++) {
@@ -632,7 +644,7 @@ static void read_bed_rows_tolerant(duckdb_function_info info, duckdb_data_chunk 
         }
         row_count++;
     }
-    duckdb_data_chunk_set_size(output, row_count);
+    duckdb_data_chunk_set_size(output, status < 0 ? 0 : row_count);
 }
 
 static void read_bed_scan(duckdb_function_info info, duckdb_data_chunk output) {
@@ -977,14 +989,26 @@ static bool bed_overlap_region(const fasta_nuc_init_data_t *init, const char *ch
     return end > (int64_t)init->region_beg && start < (int64_t)init->region_end;
 }
 
-static int next_fasta_nuc_bed_interval(fasta_nuc_init_data_t *init, const char **chrom, int64_t *start, int64_t *end) {
+/* Return 1 for an interval, 0 for EOF, and -1 after setting an error. */
+static int next_fasta_nuc_bed_interval(duckdb_function_info info, fasta_nuc_init_data_t *init,
+                                      const char **chrom, int64_t *start, int64_t *end) {
     while (!init->bed_finished) {
         int ret = init->bed_itr ? tbx_itr_next(init->bed_fp, init->bed_tbx, init->bed_itr, &init->bed_line)
                                 : hts_getline(init->bed_fp, '\n', &init->bed_line);
         if (ret < 0) {
             init->bed_finished = true;
+            if (ret < -1) {
+                kstring_t message = {0, 0, NULL};
+                int result = ksprintf(&message, "fasta_nuc: failed to read BED '%s' after %s %llu (htslib status %d)",
+                         init->bind->bed_path, init->bed_itr ? "region record" : "line",
+                         (unsigned long long)init->bed_line_number, ret);
+                duckdb_function_set_error(info, result < 0 ? "fasta_nuc: out of memory reporting read failure" : message.s);
+                free(message.s);
+                return -1;
+            }
             return 0;
         }
+        init->bed_line_number++;
         if (init->bed_line.l == 0 || duckhts_bed_line_is_meta(init->bed_line.s)) continue;
         int len0 = 0, len1 = 0, len2 = 0;
         const char *f0 = duckhts_bed_line_field(init->bed_line.s, 0, &len0);
@@ -997,7 +1021,15 @@ static int next_fasta_nuc_bed_interval(fasta_nuc_init_data_t *init, const char *
             continue;
         }
         char *chrom_buf = (char *)malloc((size_t)len0 + 1);
-        if (!chrom_buf) return 0;
+        if (!chrom_buf) {
+            kstring_t message = {0, 0, NULL};
+            int result = ksprintf(&message, "fasta_nuc: out of memory copying chromosome from BED '%s' at %s %llu",
+                     init->bind->bed_path, init->bed_itr ? "region record" : "line",
+                     (unsigned long long)init->bed_line_number);
+            duckdb_function_set_error(info, result < 0 ? "fasta_nuc: out of memory copying BED chromosome" : message.s);
+            free(message.s);
+            return -1;
+        }
         memcpy(chrom_buf, f0, (size_t)len0);
         chrom_buf[len0] = '\0';
         if (!bed_overlap_region(init, chrom_buf, s, e)) {
@@ -1075,8 +1107,13 @@ static void fasta_nuc_scan(duckdb_function_info info, duckdb_data_chunk output) 
         const char *chrom = NULL;
         int64_t start = 0, end = 0;
         int have_interval = init->bind->mode == FASTA_NUC_MODE_BED
-            ? next_fasta_nuc_bed_interval(init, &chrom, &start, &end)
+            ? next_fasta_nuc_bed_interval(info, init, &chrom, &start, &end)
             : next_fasta_nuc_bin_interval(init, &chrom, &start, &end);
+        if (have_interval < 0) {
+            init->done = true;
+            duckdb_data_chunk_set_size(output, 0);
+            return;
+        }
         if (!have_interval) break;
 
         hts_pos_t seq_len = (hts_pos_t)(end - start);

@@ -1332,7 +1332,8 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         bd->line_skip = skip_lines;
 
         /* Skip comment/header lines (meta char or line_skip prefix) */
-        while (hts_getline(fp, '\n', &line) >= 0) {
+        int read_status;
+        while ((read_status = hts_getline(fp, '\n', &line)) >= 0) {
             if (line.l == 0) continue;
             if (skip_lines > 0) {
                 if (bd->header && !bd->header_names && line.l > 0) {
@@ -1356,6 +1357,16 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         free(line.s);
         hts_close(fp);
         if (tbx) tbx_destroy(tbx);
+        if (read_status < -1) {
+            kstring_t message = {0, 0, NULL};
+            int result = ksprintf(&message, "read_tabix: failed to read '%s' during schema discovery (htslib status %d)",
+                                  bd->file_path, read_status);
+            duckdb_bind_set_error(info, result < 0 ? "read_tabix: out of memory reporting read failure" : message.s);
+            free(message.s);
+            free(header_candidate);
+            tabix_bind_data_destroy(bd);
+            return;
+        }
 
         if (bd->header_names && bd->header_names_count > 0) {
             n_cols = bd->header_names_count;
@@ -1401,7 +1412,8 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
                 int skip2 = bd->line_skip;
                 int skip_header = bd->skip_header_line;
                 int seen = 0;
-                while (seen < 100 && hts_getline(fp2, '\n', &l2) >= 0) {
+                read_status = 0;
+                while (seen < 100 && (read_status = hts_getline(fp2, '\n', &l2)) >= 0) {
                     if (l2.l == 0) continue;
                     if (skip2 > 0) { skip2--; continue; }
                     if (bd->meta_char && l2.s[0] == bd->meta_char) continue;
@@ -1425,6 +1437,17 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
                 }
                 free(l2.s);
                 hts_close(fp2);
+                if (read_status < -1) {
+                    kstring_t message = {0, 0, NULL};
+                    int result = ksprintf(&message, "read_tabix: failed to read '%s' during type inference (htslib status %d)",
+                                          bd->file_path, read_status);
+                    duckdb_bind_set_error(info, result < 0 ? "read_tabix: out of memory reporting read failure" : message.s);
+                    free(message.s);
+                    free(type_state);
+                    free(fields);
+                    tabix_bind_data_destroy(bd);
+                    return;
+                }
             }
 
             for (int i = 0; i < bd->n_cols; i++) {
@@ -1655,6 +1678,19 @@ static void tabix_scan(duckdb_function_info info, duckdb_data_chunk output) {
 
         if (ret < 0) {
             id->finished = true;
+            if (ret < -1) {
+                const char *name = bd->mode == TABIX_MODE_GTF ? "read_gtf" :
+                                   bd->mode == TABIX_MODE_GFF ? "read_gff" : "read_tabix";
+                kstring_t message = {0, 0, NULL};
+                int result = ksprintf(&message, "%s: failed to read '%s' after %s %llu (htslib status %d)",
+                                      name, bd->file_path, id->itr ? "region record" : "line",
+                                      (unsigned long long)id->line_number, ret);
+                duckdb_function_set_error(info, result < 0 ? "tabix reader: out of memory reporting read failure" : message.s);
+                free(message.s);
+                free(vectors);
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
             break;
         }
         id->line_number++;

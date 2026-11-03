@@ -1,0 +1,120 @@
+# Physical read failures error independently of projection and BED short-line policy.
+# Fixtures: bash test/scripts/reader_io_error_fixtures.sh
+# The script uses bgzip and tabix on reader_io_error.bed/.sam, then head -c -36
+# to remove the EOF block and eight bytes of the final data block.
+require duckhts
+
+statement error
+SELECT * FROM read_bed('test/data/reader_io_error.bed.gz', scan_mode := 'sequential');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT count(*) FROM read_bed('test/data/reader_io_error.bed.gz', scan_mode := 'sequential');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_bed('test/data/reader_io_error.bed.gz', error_policy := 'skip', scan_mode := 'sequential');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT count(*) FROM read_bed('test/data/reader_io_error.bed.gz', error_policy := 'skip', scan_mode := 'sequential');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_bed('test/data/reader_io_error.bed.gz', error_policy := 'report');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT count(*) FROM read_bed('test/data/reader_io_error.bed.gz', error_policy := 'report');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_bed('test/data/reader_io_error.bed.gz', region := '11:1-8');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT count(*) FROM read_bed('test/data/reader_io_error.bed.gz', region := '11:1-8');
+----
+read_bed: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_tabix('test/data/reader_io_error.bed.gz', scan_mode := 'sequential');
+----
+read_tabix: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT count(*) FROM read_tabix('test/data/reader_io_error.bed.gz', scan_mode := 'sequential');
+----
+read_tabix: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_tabix('test/data/reader_io_error.bed.gz', region := '11:1-8');
+----
+read_tabix: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT count(*) FROM read_tabix('test/data/reader_io_error.bed.gz', region := '11:1-8');
+----
+read_tabix: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_tabix('test/data/reader_io_error.bed.gz', auto_detect := TRUE);
+----
+read_tabix: failed to read 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_tabix('test/data/reader_io_error_first.gz');
+----
+read_tabix: failed to read 'test/data/reader_io_error_first.gz'
+
+statement error
+SELECT * FROM fasta_nuc('test/data/fixture_ref.fa', bed_path := 'test/data/reader_io_error.bed.gz');
+----
+fasta_nuc: failed to read BED 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT count(*) FROM fasta_nuc('test/data/fixture_ref.fa', bed_path := 'test/data/reader_io_error.bed.gz');
+----
+fasta_nuc: failed to read BED 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM fasta_nuc('test/data/fixture_ref.fa', bed_path := 'test/data/reader_io_error.bed.gz', region := '11:1-8');
+----
+fasta_nuc: failed to read BED 'test/data/reader_io_error.bed.gz'
+
+statement error
+SELECT * FROM read_fastq('test/data/reader_io_error.sam.gz', scan_mode := 'sequential');
+----
+read_fastq: failed to read 'test/data/reader_io_error.sam.gz'
+
+statement error
+SELECT count(*) FROM read_fastq('test/data/reader_io_error.sam.gz', scan_mode := 'sequential');
+----
+read_fastq: failed to read 'test/data/reader_io_error.sam.gz'
+
+statement error
+SELECT * FROM read_fasta('test/data/reader_io_error.sam.gz', scan_mode := 'sequential');
+----
+read_fasta: failed to read 'test/data/reader_io_error.sam.gz'
+
+statement error
+SELECT count(*) FROM read_fasta('test/data/reader_io_error.sam.gz', scan_mode := 'sequential');
+----
+read_fasta: failed to read 'test/data/reader_io_error.sam.gz'
+
+statement error
+SELECT * FROM read_fastq('test/data/reader_io_error.sam.gz', mate_path := 'test/data/reader_io_error.sam', scan_mode := 'sequential');
+----
+read_fastq: failed to read 'test/data/reader_io_error.sam.gz'
+
+statement error
+SELECT * FROM read_fastq('test/data/reader_io_error.sam', mate_path := 'test/data/reader_io_error.sam.gz', scan_mode := 'sequential');
+----
+read_fastq: failed to read 'test/data/reader_io_error.sam.gz'
