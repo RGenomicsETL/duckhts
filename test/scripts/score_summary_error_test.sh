@@ -30,3 +30,6 @@ done
 for failure in record ES LP; do
     "$work/test" gwas test/data/score_gwas_summary.vcf 0 "$failure"
 done
+"$work/test" tsv test/data/score_truncated.tsv.gz 0 read
+"$work/test" tsv test/data/score_truncated.header.tsv.gz 0 read
+"$work/test" gwas test/data/score_truncated.vcf.gz 0 read

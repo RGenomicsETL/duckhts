@@ -895,6 +895,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
     score_summary_t *summary = NULL;
     char *pending_allele = NULL;
     uint64_t line_no = 0;
+    int read_status;
 
     if (bind->columns_file && bind->columns_file[0]) {
         mapping = score_mapping_file(bind->columns_file, &mapping_n);
@@ -920,11 +921,15 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         return NULL;
     }
 
-    while (hts_getline(fp, '\n', &str) >= 0) {
+    for (;;) {
+        errno = 0;
+        read_status = hts_getline(fp, '\n', &str);
+        if (read_status < 0) break;
         line_no++;
         if (str.s[0] == '#' && strncmp(str.s, "#CHR", 4) != 0 && strncmp(str.s, "#ID", 3) != 0) continue;
         break;
     }
+    if (read_status < -1) goto read_error;
     if (!str.s || str.l == 0) {
         snprintf(err, err_sz, "bcftools_score: empty summary file '%s'", summary_path);
         hts_close(fp);
@@ -997,7 +1002,10 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         if (!summary->rid_pos2idx) goto oom;
     }
 
-    while (hts_getline(fp, '\n', &str) >= 0) {
+    for (;;) {
+        errno = 0;
+        read_status = hts_getline(fp, '\n', &str);
+        if (read_status < 0) break;
         int n_fields;
         float es = NAN;
         float lp = NAN;
@@ -1098,14 +1106,21 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         pending_allele = NULL;
     }
 
+    if (read_status < -1) goto read_error;
     hts_close(fp);
     free(str.s);
     if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
     return summary;
 
+read_error:
+    snprintf(err, err_sz, "bcftools_score: failed reading summary '%s' after line %llu (htslib status %d)%s%s",
+             summary_path, (unsigned long long)line_no, read_status,
+             errno ? ": " : "", errno ? strerror(errno) : "");
+    goto fail;
 oom:
     snprintf(err, err_sz, "bcftools_score: out of memory loading summary '%s' at line %llu",
              summary_path, (unsigned long long)line_no);
+fail:
     duckdb_free(pending_allele);
     score_destroy_summary(summary);
     hts_close(fp);
@@ -1135,6 +1150,7 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     int m_float = 0;
     int m_lp = 0;
     uint64_t record_no = 0;
+    int read_status;
     int i;
 
     sfp = hts_open(summary_path, "r");
@@ -1197,7 +1213,10 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
 
     rec = bcf_init1();
     if (!rec) goto oom;
-    while (bcf_read(sfp, shdr, rec) == 0) {
+    for (;;) {
+        errno = 0;
+        read_status = bcf_read(sfp, shdr, rec);
+        if (read_status != 0) break;
         int n_es, n_lp = 0;
         int rid;
         uint64_t key;
@@ -1272,6 +1291,7 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
         }
     }
 
+    if (read_status < -1) goto read_error;
     bcf_destroy1(rec);
     free(float_arr);
     free(lp_arr);
@@ -1279,9 +1299,15 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     hts_close(sfp);
     return summaries;
 
+read_error:
+    snprintf(err, err_sz, "bcftools_score: failed reading GWAS-VCF summary '%s' after record %llu (htslib status %d)%s%s",
+             summary_path, (unsigned long long)record_no, read_status,
+             errno ? ": " : "", errno ? strerror(errno) : "");
+    goto fail;
 oom:
     snprintf(err, err_sz, "bcftools_score: out of memory loading GWAS-VCF summary '%s' at record %llu",
              summary_path, (unsigned long long)record_no);
+fail:
     duckdb_free(pending_allele);
     if (summaries) {
         for (i = 0; i < n_prs; i++) score_destroy_summary(summaries[i]);

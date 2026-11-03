@@ -847,3 +847,37 @@ FROM bcftools_score(
 )
 ----
 only one of targets or targets_file may be set
+
+# Physical summary read failures must not return scores from a partial marker set.
+# Binary fixtures retain one complete BGZF block followed by a truncated block.
+# Text sources under test/data/: score_summary.tsv, score_summary_comments.tsv,
+# and score_gwas_summary.vcf.
+# Generate with:
+# BGZIP=/usr/local/lib/R/site-library/RBCFTools/htslib/bin/bgzip bash test/scripts/make_score_truncated_fixtures.sh
+statement error
+SELECT * FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_truncated.tsv.gz',
+  use := 'GT'
+)
+----
+score_truncated.tsv.gz' after line 2
+
+statement error
+SELECT * FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_truncated.vcf.gz',
+  use := 'GT'
+)
+----
+score_truncated.vcf.gz' after record 1
+
+# An unreadable header must retain the read failure instead of an empty-file error.
+statement error
+SELECT * FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_truncated.header.tsv.gz',
+  use := 'GT'
+)
+----
+score_truncated.header.tsv.gz' after line 1

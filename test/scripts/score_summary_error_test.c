@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
     const char *mode = argv[1];
     const char *path = argv[2];
     int inject = argc > 3 ? atoi(argv[3]) : 0;
+    int expect_read_error = argc > 4 && strcmp(argv[4], "read") == 0;
     int gwas = strcmp(mode, "gwas") == 0;
     bcf_hdr_t *hdr = bcf_hdr_init("r");
     assert(hdr);
@@ -105,7 +106,7 @@ int main(int argc, char **argv) {
     duckdb_malloc = test_malloc;
     duckdb_free = test_free;
     fail_at = inject;
-    if (argc > 4) {
+    if (argc > 4 && !expect_read_error) {
         if (strcmp(argv[4], "record") == 0) fail_record = 1;
         else fail_format = argv[4];
     }
@@ -138,9 +139,10 @@ int main(int argc, char **argv) {
     printf("%s allocations=%d rc=%d markers=%d live=%zu error=%s\n",
            mode, allocation_count, rc, markers, nlive, err);
     if (nlive != 0) return 1;
-    if (inject || fail_record || fail_format) {
+    if (inject || fail_record || fail_format || expect_read_error) {
+        const char *message = expect_read_error ? "failed reading" : "out of memory";
         if (rc == 0 || !strstr(err, "bcftools_score:") ||
-            !strstr(err, "out of memory") || !strstr(err, path)) return 1;
+            !strstr(err, message) || !strstr(err, path)) return 1;
     } else {
         if (rc != 0 || markers != (gwas ? 5 : 3)) return 1;
     }
