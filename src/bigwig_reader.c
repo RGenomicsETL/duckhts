@@ -582,7 +582,8 @@ read_bigwig_scan(duckdb_function_info info, duckdb_data_chunk output)
                 duckdb_function_set_error(info,
                     "read_bigwig: failed to initialize an indexed range");
                 local->done = 1;
-                break;
+                duckdb_data_chunk_set_size(output, 0u);
+                return;
             }
             if (claim_status == 0) {
                 local->done = 1;
@@ -600,7 +601,8 @@ read_bigwig_scan(duckdb_function_info info, duckdb_data_chunk output)
                 duckdb_function_set_error(info,
                     "read_bigwig: failed while reading an indexed range");
                 local->done = 1;
-                break;
+                duckdb_data_chunk_set_size(output, 0u);
+                return;
             }
             local->iterator = next;
             local->interval_index = 0u;
