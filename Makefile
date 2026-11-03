@@ -192,11 +192,11 @@ test-duckdb-v2: release test-sql-lambda-syntax
 	.pi/duckdb-v2-venv/bin/python test/scripts/test_duckdb_v2.py
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
-test_release: test-error-handling test-fasta-nuc-alloc test-bam-open-error
+test_release: test-error-handling test-fasta-nuc-alloc test-bam-open-error test-score-summary-errors
 endif
 
 # Native fault-injection and error-path tests; they link Linux-built objects.
-.PHONY: test-error-handling test-fasta-nuc-alloc test-bam-open-error
+.PHONY: test-error-handling test-fasta-nuc-alloc test-bam-open-error test-score-summary-errors
 test-error-handling:
 	sh test/scripts/run_error_handling_tests.sh
 
@@ -205,6 +205,9 @@ test-fasta-nuc-alloc:
 
 test-bam-open-error:
 	bash test/scripts/bam_open_error_test.sh
+
+test-score-summary-errors:
+	bash test/scripts/score_summary_error_test.sh
 
 .PHONY: test-extension-symbols
 test-extension-symbols:
