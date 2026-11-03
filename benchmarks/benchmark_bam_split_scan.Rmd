@@ -26,8 +26,9 @@ alignments:
 - **Named tag columns.** `auxiliary_tags := ['XS', 'XA']` returns one text column
   per tag instead of building the `AUXILIARY_TAGS` map for every record.
 
-`bam_bin_counts` is unchanged by this work. It is timed on the same inputs as
-context for the other BAM scanners, which still claim one reference per thread.
+`bam_bin_counts` does not use scan pieces; it still claims one reference per thread.
+This change moved its scan from bind to execution on DuckDB worker threads, so its
+rows measure that thread policy (see the note after the results).
 
 ## Inputs
 
