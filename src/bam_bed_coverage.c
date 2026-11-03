@@ -97,7 +97,6 @@ typedef struct {
     char *bed_path;
     char *reference;
     char *index_path;
-    char *bed_index_path;
     int64_t mapq;
     int64_t min_baseq;
     int64_t min_read_len;
@@ -106,9 +105,7 @@ typedef struct {
     int64_t min_depth;
     int64_t max_depth;
     int64_t decompression_threads;
-    int fragment_mode;
     int strand_outputs;
-    int64_t processing_threads;
 
     bedcov_region_t *regions;
     size_t n_regions;
@@ -269,7 +266,6 @@ static void destroy_bam_bed_cov_bind(void *data) {
     if (bind->bed_path) duckdb_free(bind->bed_path);
     if (bind->reference) duckdb_free(bind->reference);
     if (bind->index_path) duckdb_free(bind->index_path);
-    if (bind->bed_index_path) duckdb_free(bind->bed_index_path);
     if (bind->regions) {
         for (i = 0; i < bind->n_regions; i++) {
             if (bind->regions[i].chrom) duckdb_free(bind->regions[i].chrom);
@@ -605,13 +601,17 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
 
     for (i = 0; i < bind->n_regions; i++) {
         hts_itr_t *itr;
+        int iter_rc;
         bedcov_region_t *region = &bind->regions[i];
         bedcov_tile_t *tiles = NULL;
         if (region->len <= 0) continue;
 
         itr = sam_itr_queryi(idx, region->tid, region->start, region->end);
-        if (!itr) continue;
-        while (sam_itr_next(fp, itr, rec) >= 0) {
+        if (!itr) {
+            snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to create iterator for '%s'", region->chrom);
+            goto read_error;
+        }
+        while ((iter_rc = sam_itr_next(fp, itr, rec)) >= 0) {
             int64_t clip_start;
             int64_t clip_end;
             int64_t tile_start;
@@ -647,6 +647,11 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
             }
         }
         hts_itr_destroy(itr);
+        if (iter_rc < -1) {
+            snprintf(err, errlen, "duckhts_bam_bed_coverage: error while reading alignments for '%s'", region->chrom);
+            destroy_tile_list(tiles);
+            goto read_error;
+        }
         flush_completed_tiles(&tiles, region, bind, INT64_MAX);
         destroy_tile_list(tiles);
     }
@@ -656,6 +661,13 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
     sam_hdr_destroy(hdr);
     sam_close(fp);
     return 0;
+
+read_error:
+    bam_destroy1(rec);
+    hts_idx_destroy(idx);
+    sam_hdr_destroy(hdr);
+    sam_close(fp);
+    return -1;
 }
 
 static void add_result_columns(duckdb_bind_info info) {
@@ -718,9 +730,7 @@ static void bam_bed_cov_bind(duckdb_bind_info info) {
     bind->min_depth = 1;
     bind->max_depth = DUCKHTS_BEDCOV_DEFAULT_MAX_DEPTH;
     bind->decompression_threads = 0;
-    bind->fragment_mode = 0;
     bind->strand_outputs = 1;
-    bind->processing_threads = 0;
     duckdb_destroy_value(&path_val);
     duckdb_destroy_value(&bed_val);
 
@@ -741,10 +751,6 @@ static void bam_bed_cov_bind(duckdb_bind_info info) {
 
     val = duckdb_bind_get_named_parameter(info, "index_path");
     if (val && !duckdb_is_null_value(val)) bind->index_path = duckdb_get_varchar(val);
-    if (val) duckdb_destroy_value(&val);
-
-    val = duckdb_bind_get_named_parameter(info, "bed_index_path");
-    if (val && !duckdb_is_null_value(val)) bind->bed_index_path = duckdb_get_varchar(val);
     if (val) duckdb_destroy_value(&val);
 
     val = duckdb_bind_get_named_parameter(info, "mapq");
@@ -779,36 +785,23 @@ static void bam_bed_cov_bind(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) bind->decompression_threads = duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
-    val = duckdb_bind_get_named_parameter(info, "fragment_mode");
-    if (val && !duckdb_is_null_value(val)) bind->fragment_mode = duckdb_get_bool(val) ? 1 : 0;
-    if (val) duckdb_destroy_value(&val);
-
     val = duckdb_bind_get_named_parameter(info, "strand_outputs");
     if (val && !duckdb_is_null_value(val)) bind->strand_outputs = duckdb_get_bool(val) ? 1 : 0;
     if (val) duckdb_destroy_value(&val);
 
-    val = duckdb_bind_get_named_parameter(info, "processing_threads");
-    if (val && !duckdb_is_null_value(val)) bind->processing_threads = duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
-
     if (bind->mapq < 0 || bind->min_baseq < 0 || bind->min_read_len < 0 ||
         bind->require_flags < 0 || bind->exclude_flags < 0 || bind->min_depth < 0 ||
-        bind->max_depth < 0 || bind->decompression_threads < 0 || bind->processing_threads < 0) {
+        bind->max_depth < 0 || bind->decompression_threads < 0) {
         destroy_bam_bed_cov_bind(bind);
         duckdb_bind_set_error(info, "duckhts_bam_bed_coverage: numeric parameters and thread counts must be non-negative");
         return;
     }
+    if (bind->min_depth > UINT32_MAX || bind->max_depth > UINT32_MAX) {
+        destroy_bam_bed_cov_bind(bind);
+        duckdb_bind_set_error(info, "duckhts_bam_bed_coverage: min_depth and max_depth must be at most 4294967295");
+        return;
+    }
     if (bind->min_depth == 0) bind->min_depth = 1;
-    if (bind->fragment_mode) {
-        destroy_bam_bed_cov_bind(bind);
-        duckdb_bind_set_error(info, "duckhts_bam_bed_coverage: fragment_mode is not implemented yet");
-        return;
-    }
-    if (bind->processing_threads != 0) {
-        destroy_bam_bed_cov_bind(bind);
-        duckdb_bind_set_error(info, "duckhts_bam_bed_coverage: processing_threads is not implemented yet");
-        return;
-    }
 
     /* The BED regions are read and the coverage computed per execution
      * (bam_bed_cov_init), so bind data stays immutable and a binder pass,
@@ -963,7 +956,6 @@ void register_duckhts_bam_bed_coverage_function(duckdb_connection connection) {
     duckdb_table_function_add_parameter(tf, varchar_type);
     duckdb_table_function_add_named_parameter(tf, "reference", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);
-    duckdb_table_function_add_named_parameter(tf, "bed_index_path", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "mapq", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "min_baseq", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "min_read_len", bigint_type);
@@ -972,9 +964,7 @@ void register_duckhts_bam_bed_coverage_function(duckdb_connection connection) {
     duckdb_table_function_add_named_parameter(tf, "min_depth", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "max_depth", bigint_type);
     duckdb_table_function_add_named_parameter(tf, "decompression_threads", bigint_type);
-    duckdb_table_function_add_named_parameter(tf, "fragment_mode", bool_type);
     duckdb_table_function_add_named_parameter(tf, "strand_outputs", bool_type);
-    duckdb_table_function_add_named_parameter(tf, "processing_threads", bigint_type);
     duckdb_table_function_set_bind(tf, bam_bed_cov_bind);
     duckdb_table_function_set_init(tf, bam_bed_cov_init);
     duckdb_table_function_set_function(tf, bam_bed_cov_scan);

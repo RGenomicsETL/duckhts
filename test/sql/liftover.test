@@ -4,6 +4,29 @@
 
 require duckhts
 
+# Identity-chain indels cannot acquire a base before contig position 1 or swap alleles.
+# A complex indel requiring a left anchor at position 1 is rejected.
+# FASTA index: SELECT * FROM fasta_index('test/data/liftover_contig_start.fa');
+query ITTIT
+SELECT lo.dest_pos, lo.dest_ref, lo.dest_alt, lo.swap, coalesce(lo.reject_reason, 'OK')
+FROM (
+  SELECT bcftools_liftover(
+    'chrS', pos, ref, alt,
+    '__WORKING_DIRECTORY__/test/data/liftover_contig_start.chain',
+    '__WORKING_DIRECTORY__/test/data/liftover_contig_start.fa',
+    '__WORKING_DIRECTORY__/test/data/liftover_contig_start.fa',
+    1, 250, false, NULL::BIGINT, false
+  ) AS lo
+  FROM (VALUES (1, 'AA', 'A'), (2, 'AA', 'A'), (3, 'AA', 'A'),
+               (1, 'A', 'AA'), (1, 'AA', 'C')) v(pos, ref, alt)
+) s;
+----
+1	AA	A	0	OK
+1	AA	A	0	OK
+1	AA	A	0	OK
+1	A	AA	0	OK
+NULL	NULL	NULL	0	AlleleExtensionFailed
+
 query TITTIIITT
 SELECT lo.dest_chrom, lo.dest_pos, lo.dest_ref, lo.dest_alt,
        CASE WHEN lo.mapped THEN 1 ELSE 0 END,

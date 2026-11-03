@@ -1,0 +1,22 @@
+require duckhts
+
+statement ok
+COPY (SELECT '@r1' UNION ALL SELECT 'ACGT' UNION ALL SELECT '+' UNION ALL SELECT 'IIII') TO '__WORKING_DIRECTORY__/test/sql/ambiguous_quality.fq' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement error
+SELECT quality FROM read_fastq('__WORKING_DIRECTORY__/test/sql/ambiguous_quality.fq', input_quality_encoding := 'auto');
+----
+ambiguous quality encoding
+
+query T
+SELECT quality::VARCHAR FROM read_fastq('__WORKING_DIRECTORY__/test/sql/ambiguous_quality.fq', input_quality_encoding := 'phred33', quality_representation := 'phred');
+----
+[40, 40, 40, 40]
+
+statement ok
+COPY (SELECT '@r1' UNION ALL SELECT 'ACGT' UNION ALL SELECT '+' UNION ALL SELECT '!!!!') TO '__WORKING_DIRECTORY__/test/sql/unambiguous_quality.fq' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement error
+SELECT quality FROM read_fastq('__WORKING_DIRECTORY__/test/sql/unambiguous_quality.fq', mate_path := '__WORKING_DIRECTORY__/test/sql/ambiguous_quality.fq', input_quality_encoding := 'auto');
+----
+ambiguous quality encoding in mate

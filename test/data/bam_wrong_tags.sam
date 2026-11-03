@@ -1,0 +1,4 @@
+@HD	VN:1.6	SO:coordinate
+@SQ	SN:a	LN:100
+wrong	0	a	1	60	1M	*	0	0	A	I	ML:B:f,0.5	NM:Z:abc	CG:Z:abc
+valid	0	a	2	60	1M	*	0	0	A	I	ML:B:C,1,255	NM:i:2	CG:B:I,16

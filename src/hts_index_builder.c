@@ -224,6 +224,20 @@ static void scan_index_build(duckdb_function_info info, duckdb_data_chunk output
     duckdb_data_chunk_set_size(output, 1);
 }
 
+/* Match bcftools index -m: htslib does not validate these shift counts. */
+static int bind_min_shift(duckdb_bind_info info, int *min_shift) {
+    duckdb_value val = duckdb_bind_get_named_parameter(info, "min_shift");
+    int64_t value = *min_shift;
+    if (val && !duckdb_is_null_value(val)) value = duckdb_get_int64(val);
+    if (val) duckdb_destroy_value(&val);
+    if (value < 0 || value > 30) {
+        duckdb_bind_set_error(info, "min_shift must be between 0 and 30");
+        return -1;
+    }
+    *min_shift = (int)value;
+    return 0;
+}
+
 static void bind_bam_index(duckdb_bind_info info) {
     duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
     char *path = duckdb_get_varchar(path_val);
@@ -244,9 +258,11 @@ static void bind_bam_index(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) index_path = duckdb_get_varchar(val);
     if (val) duckdb_destroy_value(&val);
 
-    val = duckdb_bind_get_named_parameter(info, "min_shift");
-    if (val && !duckdb_is_null_value(val)) min_shift = (int)duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
+    if (bind_min_shift(info, &min_shift) != 0) {
+        duckdb_free(path);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
 
     val = duckdb_bind_get_named_parameter(info, "threads");
     if (val && !duckdb_is_null_value(val)) threads = (int)duckdb_get_int64(val);
@@ -283,9 +299,11 @@ static void bind_bcf_index(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) index_path = duckdb_get_varchar(val);
     if (val) duckdb_destroy_value(&val);
 
-    val = duckdb_bind_get_named_parameter(info, "min_shift");
-    if (val && !duckdb_is_null_value(val)) min_shift = (int)duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
+    if (bind_min_shift(info, &min_shift) != 0) {
+        duckdb_free(path);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
 
     val = duckdb_bind_get_named_parameter(info, "threads");
     if (val && !duckdb_is_null_value(val)) threads = (int)duckdb_get_int64(val);
@@ -378,9 +396,12 @@ static void bind_tabix_index(duckdb_bind_info info) {
     if (val && !duckdb_is_null_value(val)) conf.line_skip = (int32_t)duckdb_get_int64(val);
     if (val) duckdb_destroy_value(&val);
 
-    val = duckdb_bind_get_named_parameter(info, "min_shift");
-    if (val && !duckdb_is_null_value(val)) min_shift = (int)duckdb_get_int64(val);
-    if (val) duckdb_destroy_value(&val);
+    if (bind_min_shift(info, &min_shift) != 0) {
+        duckdb_free(path);
+        if (index_path) duckdb_free(index_path);
+        if (preset) duckdb_free(preset);
+        return;
+    }
 
     val = duckdb_bind_get_named_parameter(info, "threads");
     if (val && !duckdb_is_null_value(val)) threads = (int)duckdb_get_int64(val);

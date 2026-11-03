@@ -1095,8 +1095,10 @@ static int scalar_initialize_alleles(scalar_realign_t *ra, char **alleles, int n
     return 1;
 }
 
-/* Exact port of upstream pad_left() for scalar_realign_t */
+/* Pad with available reference bases before the variant. */
 static void scalar_pad_left(scalar_realign_t *ra, int npad) {
+    if (npad > ra->pos) npad = (int)ra->pos;
+    if (npad <= 0) return;
     if (ra->beg == 0 || ra->pos - npad < ra->beg) {
         ra->beg = ra->pos - npad;
         free(ra->ref);
@@ -1165,27 +1167,24 @@ static void scalar_pad_from_right(scalar_realign_t *ra, const char *s_ptr, int d
     }
 }
 
-/* Exact port of upstream pad_from_left() for scalar_realign_t */
+/* Extend the upstream repeat scan only over bases present before this variant. */
 static void scalar_pad_from_left(scalar_realign_t *ra, const char *s_ptr, int d) {
     int npad = 0;
-    const char *l_ptr = &ra->ref[ra->pos - ra->beg - 1];
-    while (1) {
+    while (npad < ra->pos) {
         if (ra->pos - npad <= ra->beg) {
             ra->beg -= ra->aln_win;
             free(ra->ref);
             ra->ref = NULL;
             scalar_safe_fetch_sequence(ra);
-            if (!ra->ref) break;
-            l_ptr = &ra->ref[ra->pos - ra->beg - npad - 1];
-            if (npad >= d) s_ptr = &ra->ref[ra->pos - ra->beg - npad + d - 1];
+            if (!ra->ref) return;
         }
-        if (npad == d) s_ptr = &ra->ref[ra->pos - ra->beg - 1];
+        char left = ra->ref[ra->pos - ra->beg - npad - 1];
+        char repeat = npad < d ? s_ptr[-npad] : ra->ref[ra->pos - ra->beg - npad + d - 1];
         npad++;
-        if (*l_ptr != *s_ptr) break;
-        l_ptr--;
-        s_ptr--;
+        if (left != repeat) break;
     }
-    if (!ra->ref) return;
+    if (npad == 0) return;
+    const char *l_ptr = &ra->ref[ra->pos - ra->beg - npad];
     for (int i = 0; i < ra->n_allele; i++) {
         if (ra->als[i].s[0] == '*') continue;
         ks_resize(&ra->als[i], ra->als[i].l + (size_t)npad);
@@ -1223,16 +1222,19 @@ static int scalar_is_extension_needed(char **alleles, int n_allele) {
     return 0;
 }
 
-/* Exact port of upstream extend_alleles() for scalar_realign_t.
+/* Adapt upstream allele extension, rejecting unavailable left anchors.
  * Inspired by Petr Danecek's code from realign() in bcftools/vcfnorm.c. */
-static void scalar_extend_alleles(scalar_realign_t *ra, char **alleles, int n_allele) {
-    if (!scalar_initialize_alleles(ra, alleles, n_allele) || !ra->ref) return;
+static int scalar_extend_alleles(scalar_realign_t *ra, char **alleles, int n_allele) {
+    if (!scalar_initialize_alleles(ra, alleles, n_allele) || !ra->ref) return 0;
 
     for (int i = 0; i < ra->n_allele; i++) {
         if (ra->als[i].s[0] == '*') continue;
         for (int j = i + 1; j < ra->n_allele; j++) {
             if (ra->als[j].s[0] == '*') continue;
-            if (ra->als[i].s[0] != ra->als[j].s[0]) scalar_pad_left(ra, 1);
+            if (ra->als[i].s[0] != ra->als[j].s[0]) {
+                if (ra->pos == 0) return 0;
+                scalar_pad_left(ra, 1);
+            }
             if (ra->als[i].s[ra->als[i].l - 1] != ra->als[j].s[ra->als[j].l - 1]) scalar_pad_right(ra, 1);
             if (ra->als[i].l == ra->als[j].l) continue;
             kstring_t *l_str = ra->als[i].l > ra->als[j].l ? &ra->als[i] : &ra->als[j];
@@ -1243,6 +1245,7 @@ static void scalar_extend_alleles(scalar_realign_t *ra, char **alleles, int n_al
                 scalar_pad_from_left(ra, l_str->s + l_str->l - s_str->l - 1, (int)(l_str->l - s_str->l));
         }
     }
+    return 1;
 }
 
 /* Scalar update_alleles: copies result from ra->als[0..1] into output strings.
@@ -2100,16 +2103,20 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
                         ra.fai = bind->src_fai;
                         ra.pos = work_pos;
                         ra.aln_win = SCALAR_ALN_WIN;
-                        scalar_extend_alleles(&ra, work_alleles, work_n_allele);
-                        if (ra.ref) {
+                        if (!scalar_extend_alleles(&ra, work_alleles, work_n_allele)) {
+                            tag_append(reject_reason, sizeof(reject_reason), "AlleleExtensionFailed");
+                        } else if (ra.ref) {
                             /* Update working alleles and position from extension result */
                             char **new_alleles = NULL;
                             int new_n_allele = 0;
-                            work_pos = scalar_update_alleles(&ra, &new_alleles, &new_n_allele);
-                            if (work_pos >= 0) {
+                            hts_pos_t new_pos = scalar_update_alleles(&ra, &new_alleles, &new_n_allele);
+                            if (new_pos >= 0) {
+                                work_pos = new_pos;
                                 free_allele_array(work_alleles, work_n_allele);
                                 work_alleles = new_alleles;
                                 work_n_allele = new_n_allele;
+                            } else {
+                                tag_append(reject_reason, sizeof(reject_reason), "AlleleUpdateFailed");
                             }
                         }
                         scalar_realign_cleanup(&ra);

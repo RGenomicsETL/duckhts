@@ -312,7 +312,7 @@
       "r_wrapper": "rduckhts_bam",
       "description": "Read SAM/BAM/CRAM alignments with optional typed SAM tags, auxiliary tag maps or named tag columns, and packed sequence, quality or CIGAR output.",
       "details": {
-        "Tags": "auxiliary_tags := TRUE adds the AUXILIARY_TAGS map of the non-standard tags. auxiliary_tags := ['UR', 'UB'] instead adds one VARCHAR column per named tag, after the standard tag columns, formatted like the map value (the SAM text after TYPE:, B arrays as subtype then comma-separated values) and NULL when a record lacks the tag. It builds no map, so reading a few tags from a large file costs much less. Names must match [A-Za-z][A-Za-z0-9], at most 64, unique ignoring case, and with standard_tags := TRUE not equal to a standard tag column ignoring case, since DuckDB column names ignore case while SAM tag names do not. The strings 'true'/'false' and integers are still read as the BOOLEAN form.",
+        "Tags": "standard_tags := TRUE returns NULL when a tag is absent or its stored type does not match the standard SAM tag type. Scalar integers accept all BAM integer widths; arrays require the standard subtype. auxiliary_tags := TRUE adds the AUXILIARY_TAGS map of the non-standard tags. auxiliary_tags := ['UR', 'UB'] instead adds one VARCHAR column per named tag, after the standard tag columns, formatted like the map value (the SAM text after TYPE:, B arrays as subtype then comma-separated values) and NULL when a record lacks the tag. It builds no map, so reading a few tags from a large file costs much less. Names must match [A-Za-z][A-Za-z0-9], at most 64, unique ignoring case, and with standard_tags := TRUE not equal to a standard tag column ignoring case, since DuckDB column names ignore case while SAM tag names do not. The strings 'true'/'false' and integers are still read as the BOOLEAN form.",
           "Map keys": "AUXILIARY_TAGS leaves out a tag whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.",
         "Representation": "sequence_encoding='nt16' returns SEQ UTINYINT[]; quality_representation='phred' returns QUAL UTINYINT[]; cigar_representation='binary' returns packed BAM CIGAR UINTEGER[] instead of SAM text.",
         "Offsets": "FILE_OFFSET is the BGZF virtual position immediately after each compressed BAM record, not its start. SAM (including compressed SAM), CRAM and non-BGZF BAM return NULL. ORDER BY FILE_OFFSET orders one unchanged BGZF BAM; arrival order is not guaranteed and offsets are not comparable across files.",
@@ -361,7 +361,7 @@
       "name": "duckhts_gff_convert_parquet_sql",
       "kind": "scalar_macro",
       "category": "Converters",
-      "signature": "duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
+      "signature": "duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')",
       "returns": "VARCHAR",
       "r_wrapper": "rduckhts_gff_convert_parquet",
       "description": "Build COPY SQL for read_gff() output with Parquet metadata, GFF/tabix header text and selected columns, filters or partitions.",
@@ -394,6 +394,9 @@
       "kind": "table",
       "category": "Coverage",
       "signature": "read_pileup(path, region := NULL, index_path := NULL, min_mapq := 0, flag_mask := 1796)",
+      "details": {
+        "Limits": "Uses htslib's default pileup admission limit of 8000 reads per input file, as does samtools mpileup -d 8000. At high depth, reads can be discarded before bases and qualities are emitted; this is not an uncapped depth counter. The limit is not configurable. Alignment I/O and decode failures return an error."
+      },
       "returns": "table",
       "r_wrapper": "rduckhts_pileup",
       "description": "Construct a region-scoped BAM pileup with one row per covered position, emitting chrom, 1-based position, depth, observed bases, and Phred+33 qualities after SAM flag and MAPQ filtering. This is a compact htslib pileup view, not samtools mpileup text parity.",
@@ -588,7 +591,7 @@
       "signature": "read_fastq(path, interleaved := FALSE, mate_path := NULL, sequence_encoding := 'string', quality_representation := 'string', input_quality_encoding := 'phred33', scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_fastq",
-      "description": "Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.",
+      "description": "Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. 'auto' samples up to 10,000 records per file and errors on ambiguous evidence; select an explicit encoding in that case. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.",
       "examples": [
         "SELECT NAME, MATE FROM read_fastq('r1.fq', mate_path := 'r2.fq') LIMIT 5;"
       ]
@@ -1215,7 +1218,7 @@
       "name": "read_gff",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
+      "signature": "read_gff(path, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_gff",
       "description": "Read GFF annotations with optional parsed attributes, strict GFF3 validation and indexed region selection.",
@@ -1233,7 +1236,7 @@
       "name": "read_gtf",
       "kind": "table",
       "category": "Readers",
-      "signature": "read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], region := NULL, index_path := NULL, scan_mode := 'auto')",
+      "signature": "read_gtf(path, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], region := NULL, index_path := NULL, scan_mode := 'auto')",
       "returns": "table",
       "r_wrapper": "rduckhts_gtf",
       "description": "Read GTF annotations with optional parsed attributes and indexed region selection.",
@@ -1353,6 +1356,7 @@
       "r_wrapper": "rduckhts_bam_index",
       "description": "Build a BAM or CRAM index and report the written index path and format.",
       "details": {
+        "Limits": "min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.",
         "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
       },
       "examples": [
@@ -1368,6 +1372,7 @@
       "r_wrapper": "rduckhts_bcf_index",
       "description": "Build a TBI or CSI index for a VCF or BCF file and report the written index path and format.",
       "details": {
+        "Limits": "min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.",
         "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
       },
       "examples": [
@@ -1383,6 +1388,7 @@
       "r_wrapper": "rduckhts_tabix_index",
       "description": "Build a tabix index for a BGZF-compressed text file using a preset or explicit coordinate columns.",
       "details": {
+        "Limits": "min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.",
         "Execution": "The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index."
       },
       "examples": [
@@ -1456,7 +1462,7 @@
       "returns": "table",
       "r_wrapper": "rduckhts_bam_bin_counts",
       "details": {
-        "Execution": "The scan runs when the query executes, not at bind: binding checks only that the file opens and a requested chrom exists, so EXPLAIN and PREPARE read no alignments and a prepared statement returns the same bins at every execution. With an index, DuckDB worker threads claim one reference each, heaviest first, so SET threads bounds the parallelism; the reads without coordinates are one more claim, and the streaming duplicate state is stitched across references in reference order after every claim finishes. Without an index the file is one sequential scan.",
+        "Execution": "The scan runs when the query executes, not at bind: binding checks only that the file opens and a requested chrom exists, so EXPLAIN and PREPARE read no alignments and a prepared statement returns the same bins at every execution. With an index, DuckDB worker threads claim one reference each, heaviest first, so SET threads bounds the parallelism; the reads without coordinates are one more claim. Streaming deduplication instead uses one worker visiting selected references in header order. Without an index the file is one sequential scan. Streaming deduplication preserves previous position and mate position across selected references, including empty references, and updates this state before applying the MAPQ threshold.",
         "Unmapped records": "include_unmapped := TRUE appends one synthetic row with chrom = '*' for no-coordinate records, even when no such records are present; start, end and bin_id are NULL. The default FALSE omits this row. SAM-flag filters, MAPQ filtering and flag-based duplicate removal apply to these records; streaming duplicate removal is not applied to them. Reference-GC fields are NULL for this row."
       },
       "description": "Count BAM or CRAM read starts into fixed-width bins. Returns one row per bin across the selected contig span, including zero-count bins, with total, forward, and reverse counts; `rmdup := 'streaming'` applies the WisecondorX-style larp/larp2 consecutive-position deduplication, `rmdup := 'flag'` drops SAM duplicate-flagged reads, and `stats := 'gc'`, `'mq'`, or `'gc,mq'` adds per-bin pre/post-filter GC and MAPQ sufficient statistics, including reference GC when `reference` is provided.",
@@ -1646,7 +1652,7 @@
       "name": "duckhts_bam_bed_coverage",
       "kind": "table",
       "category": "Coverage",
-      "signature": "duckhts_bam_bed_coverage(path, bed_path, reference := NULL, index_path := NULL, bed_index_path := NULL, mapq := 0, min_baseq := 0, min_read_len := 0, require_flags := 0, exclude_flags := 1796, min_depth := 1, max_depth := 1000000, decompression_threads := 0, fragment_mode := FALSE, strand_outputs := TRUE, processing_threads := 0)",
+      "signature": "duckhts_bam_bed_coverage(path, bed_path, reference := NULL, index_path := NULL, mapq := 0, min_baseq := 0, min_read_len := 0, require_flags := 0, exclude_flags := 1796, min_depth := 1, max_depth := 1000000, decompression_threads := 0, strand_outputs := TRUE)",
       "returns": "table",
       "r_wrapper": "rduckhts_bam_bed_coverage",
       "description": "Compute samtools coverage-like regional summaries for BAM or CRAM input over a BED target set, returning one row per BED interval with DuckHTS-specific pre/post-filter read counts, covered bases, percentage covered, mean depth, mean baseQ, mean mapQ, and strand-specific post-filter summaries in read mode. Indexed BAM/CRAM input is required in the current implementation. decompression_threads controls htslib worker threads for BAM/CRAM decoding; use 0 to disable them.",
@@ -1749,7 +1755,7 @@
       "returns": "UBIGINT",
       "r_wrapper": "",
       "details": {
-        "Chromosome code": "The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name becomes its number modulo 256, with no range check, so 257 shares the code of 1. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither has a number that comes to 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names."
+        "Chromosome code": "The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name must have a value from 1 through 31 to fit the upstream five-bit field; other numeric names return NULL instead of wrapping. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither does 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names."
       },
       "description": "Encode a normalized biallelic variant as an official VariantKey-compatible 64-bit unsigned integer. This DuckHTS wrapper accepts 1-based VCF/DuckHTS POS to match bcftools `%VKX` / `+add-variantkey`, internally converts to the upstream 0-based field, and preserves the official hashed nonreversible mode for large, ambiguous, and symbolic REF/ALT strings. Only CHROM, POS, REF, and ALT are encoded; END, SVLEN, mate breakend coordinates, and other SV metadata are not.",
       "examples": [
@@ -1992,6 +1998,9 @@
       "returns": "UBIGINT",
       "r_wrapper": "",
       "description": "Extend a RegionKey interval by a fixed number of bases on both sides, clamping to the official 28-bit RegionKey position range.",
+      "details": {
+        "Limits": "size must be between 0 and 2^32-1 inclusive; values outside that range return NULL."
+      },
       "examples": [
         "SELECT reverse_regionkey(extend_regionkey(regionkey('X', 10000, 20000, -1), 1000));"
       ]
@@ -2090,7 +2099,7 @@
       "details": {
         "Arguments": "All nine arguments are positional and required. DuckDB ignores a `name :=` label on a scalar argument and binds the value by position, so pass NULL for an unused end_pos, svlen, fasta_index_path or gzi_path. A NULL index path lets htslib find the index next to fasta_ref.",
         "Input": "alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_pos; `<DUP>` may use svlen.",
-        "Output": "Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END.",
+        "Output": "Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END. Rows containing a spanning-deletion `*` pass through with SpanningDeletion and NULL normed. REF-only rows require a valid REF matching the FASTA before returning RefOnly.",
         "Contig names": "The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error."
       },
       "examples": [

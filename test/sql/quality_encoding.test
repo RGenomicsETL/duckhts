@@ -40,12 +40,21 @@ LIMIT 1;
 ----
 hhhh
 
-# --- explicit auto-decoding legacy FASTQ returns canonical Phred+33 text ---
+# --- ambiguous legacy evidence requires an explicit encoding ---
+statement error
+SELECT QUALITY FROM read_fastq(
+  '__WORKING_DIRECTORY__/test/data/legacy_phred64.fq',
+  input_quality_encoding := 'auto'
+);
+----
+ambiguous quality encoding
+
+# --- explicit legacy decoding returns canonical Phred+33 text ---
 query T
 SELECT QUALITY
 FROM read_fastq(
   '__WORKING_DIRECTORY__/test/data/legacy_phred64.fq',
-  input_quality_encoding := 'auto'
+  input_quality_encoding := 'phred64'
 )
 LIMIT 1;
 ----

@@ -1,0 +1,11 @@
+# name: test/sql/pileup_decode_errors.test
+# description: Pileup propagates indexed BAM decode errors
+# group: [duckhts]
+# Fixture: python3 test/scripts/prepare_coverage_decode_fixture.py
+
+require duckhts
+
+statement error
+SELECT * FROM read_pileup('__WORKING_DIRECTORY__/test/data/coverage_decode_error.bam', region := 'bad');
+----
+read_pileup: error while reading alignments

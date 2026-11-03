@@ -17,6 +17,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <math.h>
 #include <stdbool.h>
 #include <limits.h>
+#include <errno.h>
 #include <strings.h>
 
 // htslib headers
@@ -228,12 +229,11 @@ typedef struct {
  * every Tabix contig, especially when index_path is not colocated with the file.
  * BCF record IDs remain tied to the header. Bind owns the copied names. */
 static int bcf_bind_contig_names(bcf_bind_data_t *bind, bcf_hdr_t *hdr, tbx_t *tbx) {
-    int count = hdr->n[BCF_DT_CTG];
-    const char **names = NULL;
-    if (tbx) {
-        names = tbx_seqnames(tbx, &count); /* free array; names borrow the index */
-        if (!names) return 0;
-    }
+    int count = 0;
+    /* Both APIs return compact names even when BCF contig IDs have gaps.
+     * Free the array; each name borrows the header or index. */
+    const char **names = tbx ? tbx_seqnames(tbx, &count) : bcf_hdr_seqnames(hdr, &count);
+    if (!names) return 0;
     int ok = 0;
     if (count < 0) goto cleanup;
     bind->n_contigs = count;
@@ -241,7 +241,7 @@ static int bcf_bind_contig_names(bcf_bind_data_t *bind, bcf_hdr_t *hdr, tbx_t *t
         bind->contig_names = duckhts_alloc_array(count, sizeof(*bind->contig_names));
         if (!bind->contig_names) goto cleanup;
         for (int i = 0; i < count; i++) {
-            bind->contig_names[i] = duckhts_copy_string(names ? names[i] : hdr->id[BCF_DT_CTG][i].key);
+            bind->contig_names[i] = duckhts_copy_string(names[i]);
             if (!bind->contig_names[i]) goto cleanup;
         }
     }
@@ -1057,7 +1057,15 @@ static void bcf_read_bind(duckdb_bind_info info) {
     // -------------------------------------------------------------------------
     // VEP/CSQ/BCSQ/ANN fields (auto-detected)
     // -------------------------------------------------------------------------
+    errno = 0;
     bind->vep_schema = vep_schema_parse(hdr, NULL, bind->additional_csq_column_types);
+    if (!bind->vep_schema && errno == E2BIG) {
+        char error[128];
+        snprintf(error, sizeof(error), "read_bcf: header exceeds the supported annotation field count (%d)",
+                 VEP_MAX_FIELDS);
+        duckdb_bind_set_error(info, error);
+        goto bind_error;
+    }
     if (bind->vep_schema) {
         bind->n_vep_fields = bind->vep_schema->n_fields;
         if (bind->n_vep_fields > INT_MAX - col_idx) goto bind_too_many_columns;
@@ -1524,6 +1532,40 @@ static int bcf_fill_gt_string(duckdb_vector vec, idx_t row_count,
     if (!gt) {
         duckhts_bcf_field_null(vec, row_count, 0);
         return 1;
+    }
+    /* HTSlib's formatter recognizes GT's zero encoding but not BCF integer
+     * missing sentinels. Normalize only this worker-owned sample's GT values
+     * before formatting, preserving vector-end padding and phase bits. */
+    int width;
+    int32_t missing, vector_end;
+    switch (gt->type) {
+        case BCF_BT_INT8:
+            width = 1;
+            missing = bcf_int8_missing;
+            vector_end = bcf_int8_vector_end;
+            break;
+        case BCF_BT_INT16:
+            width = 2;
+            missing = bcf_int16_missing;
+            vector_end = bcf_int16_vector_end;
+            break;
+        case BCF_BT_INT32:
+            width = 4;
+            missing = bcf_int32_missing;
+            vector_end = bcf_int32_vector_end;
+            break;
+        case BCF_BT_NULL:
+            width = 0;
+            missing = vector_end = 0;
+            break;
+        default:
+            return -1;
+    }
+    uint8_t *value = width ? gt->p + (size_t)sample_idx * gt->size : NULL;
+    for (int i = 0; width && i < gt->n; i++, value += width) {
+        int32_t allele = width == 1 ? le_to_i8(value) : width == 2 ? le_to_i16(value) : le_to_i32(value);
+        if (allele == vector_end) break;
+        if (allele == missing) memset(value, 0, (size_t)width);
     }
     init->gt_kstr.l = 0;
     /* HTSlib owns the GT text convention, including VCF 4.4's leading phase

@@ -555,14 +555,15 @@ static double log_ratio_copy_number(double x, double purity, double ploidy) {
 
 /* correctIntegerCN on the segments: the autosomal rule applied to every
  * segment (no chrX sex model here), correctHOMD off. */
-static void correct_copy_numbers(duckhts_depth_state_t *state, int32_t max_cn,
-                                 double purity, double ploidy) {
-    if (!(purity >= MIN_PURITY_TO_CORRECT)) return;
+static int correct_copy_numbers(duckhts_depth_state_t *state, int32_t max_cn,
+                                double purity, double ploidy) {
+    if (!(purity >= MIN_PURITY_TO_CORRECT)) return 0;
     for (size_t s = 0; s < state->n_segments; s++) {
         duckhts_depth_state_segment_t *segment = &state->segments[s];
         if (isnan(segment->median_log2_ratio)) continue;
         double lr_cn = log_ratio_copy_number(segment->median_log2_ratio, purity, ploidy);
         double rounded = nearbyint(lr_cn);
+        if (!isfinite(rounded) || rounded < 0.0 || rounded > INT32_MAX) return -2;
         if (segment->state >= max_cn || (isfinite(lr_cn) && lr_cn >= max_cn * 1.2)) {
             segment->copy_number = (int32_t)rounded;
         }
@@ -572,6 +573,7 @@ static void correct_copy_numbers(duckhts_depth_state_t *state, int32_t max_cn,
             segment->copy_number = (int32_t)rounded;
         }
     }
+    return 0;
 }
 
 /* The guard of run_ichorCNA: the fraction is zero when the longest altered
@@ -777,7 +779,7 @@ int duckhts_depth_state_fit(duckhts_depth_state_t *state,
     solution->ploidy = current.phi;
     solution->log_likelihood = loglik_cur;
     solution->iterations = i - 1;
-    correct_copy_numbers(state, K, 1.0 - current.n, current.phi);
+    if (correct_copy_numbers(state, K, 1.0 - current.n, current.phi) < 0) return -2;
     apply_guard(state, params, solution);
     return 0;
 }

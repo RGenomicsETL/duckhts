@@ -62,20 +62,6 @@ typedef struct {
     uint64_t *bases_post;
     uint64_t *mapq_sum_pre;
     uint64_t *mapq_sum_post;
-
-    int has_first_record;
-    int64_t first_bin;
-    int first_is_paired;
-    int first_is_reverse;
-    int first_local_counted;
-    int64_t first_pos0;
-    int first_has_pnext;
-    int64_t first_pnext0;
-    uint64_t first_gc_bases;
-    uint64_t first_bases;
-    uint8_t first_mapq;
-
-    bam_bin_stream_state_t final_state;
 } bam_bin_contig_t;
 
 typedef struct {
@@ -145,10 +131,10 @@ typedef struct {
  * One execution. `run` is a fresh copy of the immutable bind parameters that owns
  * this execution's contigs, accumulators and rows. Work items are the claimed
  * contigs, then one item for the reads without coordinates; without an index
- * the single item is a sequential scan. DuckDB worker threads claim items, so
- * DuckDB's `threads` setting bounds the concurrency. The thread that completes
- * the last item applies the cross-contig streaming repairs, builds the rows and
- * is the only one to emit them.
+ * the single item is a sequential scan. Streaming deduplication uses one item
+ * for all selected contigs to preserve the ordered POS/PNEXT state. DuckDB's
+ * `threads` setting bounds the concurrency. The thread that completes the last
+ * item builds the rows and is the only one to emit them.
  */
 typedef struct {
     bam_bin_bind_t *run;
@@ -164,6 +150,7 @@ typedef struct {
     sam_hdr_t *hdr;
     hts_idx_t *idx;
     bam1_t *rec;
+    bam_bin_stream_state_t stream_state;
     int claimed_all; /* this thread has run out of items to claim */
     int emitter;     /* this thread completed the last item and emits the rows */
 } bam_bin_local_t;
@@ -419,25 +406,6 @@ static void update_streaming_state(bam_bin_stream_state_t *state,
     }
 }
 
-static void subtract_first_post_metrics(bam_bin_bind_t *bind, bam_bin_contig_t *contig) {
-    int64_t bin_id;
-    if (!bind || !contig || !contig->has_first_record || !contig->first_local_counted) return;
-    bin_id = contig->first_bin;
-    if (bin_id < 0 || bin_id > contig->max_bin) return;
-
-    contig->count_total[bin_id]--;
-    if (contig->first_is_reverse) contig->count_rev[bin_id]--;
-    else contig->count_fwd[bin_id]--;
-
-    if (bind->want_gc) {
-        contig->gc_bases_post[bin_id] -= contig->first_gc_bases;
-        contig->bases_post[bin_id] -= contig->first_bases;
-    }
-    if (bind->want_mq) {
-        contig->mapq_sum_post[bin_id] -= contig->first_mapq;
-    }
-}
-
 static int process_record_into_contig(bam_bin_bind_t *bind,
                                       bam_bin_contig_t *contig,
                                       bam1_t *rec,
@@ -497,18 +465,6 @@ static int process_record_into_contig(bam_bin_bind_t *bind,
     pass_post = 1;
     if (bind->rmdup == BAM_BIN_RMDUP_STREAMING) {
         int is_dup = record_is_streaming_dup(state, pos0, is_paired, has_pnext, pnext0);
-        if (!contig->has_first_record) {
-            contig->has_first_record = 1;
-            contig->first_bin = bin_id;
-            contig->first_is_paired = is_paired;
-            contig->first_is_reverse = is_reverse;
-            contig->first_pos0 = pos0;
-            contig->first_has_pnext = has_pnext;
-            contig->first_pnext0 = pnext0;
-            contig->first_gc_bases = gc_bases;
-            contig->first_bases = read_bases;
-            contig->first_mapq = rec->core.qual;
-        }
         update_streaming_state(state, pos0, is_paired, has_pnext, pnext0);
         if (is_dup) pass_post = 0;
     } else if (bind->rmdup == BAM_BIN_RMDUP_FLAG && (flag & BAM_FDUP)) {
@@ -517,11 +473,6 @@ static int process_record_into_contig(bam_bin_bind_t *bind,
 
     if ((int64_t)rec->core.qual < bind->mapq) {
         pass_post = 0;
-    }
-
-    if (bind->rmdup == BAM_BIN_RMDUP_STREAMING && contig->has_first_record && contig->first_bin == bin_id &&
-        contig->first_pos0 == pos0 && !contig->first_local_counted) {
-        contig->first_local_counted = pass_post;
     }
 
     if (pass_post) {
@@ -535,10 +486,6 @@ static int process_record_into_contig(bam_bin_bind_t *bind,
         if (bind->want_mq) {
             contig->mapq_sum_post[bin_id] += (uint64_t)rec->core.qual;
         }
-    }
-
-    if (bind->rmdup == BAM_BIN_RMDUP_STREAMING) {
-        contig->final_state = *state;
     }
 
     return 0;
@@ -653,13 +600,10 @@ static int open_worker_handles(const bam_bin_bind_t *run, bam_bin_local_t *local
  * writes the contig's arrays. Returns 0, or -1 with `err` set. */
 static int scan_contig_item(bam_bin_bind_t *run, bam_bin_local_t *local,
                             bam_bin_contig_t *contig, char *err, size_t errlen) {
-    bam_bin_stream_state_t state;
     hts_itr_t *itr = sam_itr_queryi(local->idx, contig->tid, 0, HTS_POS_MAX);
     int rc = 0;
 
     if (!itr) return 0;
-    memset(&state, 0, sizeof(state));
-    contig->final_state = state;
     for (;;) {
         int ret = sam_itr_next(local->fp, itr, local->rec);
         if (ret == -1) break;
@@ -668,7 +612,7 @@ static int scan_contig_item(bam_bin_bind_t *run, bam_bin_local_t *local,
             rc = -1;
             break;
         }
-        if (process_record_into_contig(run, contig, local->rec, &state) != 0) {
+        if (process_record_into_contig(run, contig, local->rec, &local->stream_state) != 0) {
             snprintf(err, errlen, "bam_bin_counts: out of memory while accumulating bins");
             rc = -1;
             break;
@@ -711,7 +655,8 @@ static int build_selected_contigs(bam_bin_bind_t *bind,
         }
         if (idx) {
             uint64_t mapped = 0, unmapped = 0;
-            if (hts_idx_get_stat(idx, target_tid, &mapped, &unmapped) == 0) {
+            if (target_tid < hts_idx_nseq(idx) &&
+                hts_idx_get_stat(idx, target_tid, &mapped, &unmapped) == 0) {
                 bind->contigs[0].weight = mapped + unmapped;
             }
         }
@@ -736,7 +681,8 @@ static int build_selected_contigs(bam_bin_bind_t *bind,
         bind->contigs[selected].max_bin = -1;
         if (idx) {
             uint64_t mapped = 0, unmapped = 0;
-            if (hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0) {
+            if (tid < hts_idx_nseq(idx) &&
+                hts_idx_get_stat(idx, tid, &mapped, &unmapped) == 0) {
                 bind->contigs[selected].weight = mapped + unmapped;
             }
         }
@@ -752,6 +698,7 @@ static int sequential_scan_no_index(bam_bin_bind_t *bind, char *err, size_t errl
     sam_hdr_t *hdr = NULL;
     bam1_t *rec = NULL;
     int *tid_to_selected = NULL;
+    bam_bin_stream_state_t state = {0};
 
     fp = sam_open(bind->path, "r");
     if (!fp) {
@@ -827,7 +774,7 @@ static int sequential_scan_no_index(bam_bin_bind_t *bind, char *err, size_t errl
 
         {
             bam_bin_contig_t *contig = &bind->contigs[tid_to_selected[rec->core.tid]];
-            if (process_record_into_contig(bind, contig, rec, &contig->final_state) != 0) {
+            if (process_record_into_contig(bind, contig, rec, &state) != 0) {
                 free(tid_to_selected);
                 bam_destroy1(rec);
                 sam_hdr_destroy(hdr);
@@ -934,27 +881,6 @@ static int indexed_unmapped_scan(bam_bin_bind_t *bind, char *err, size_t errlen)
     sam_hdr_destroy(hdr);
     sam_close(fp);
     return 0;
-}
-
-static void apply_streaming_boundary_repairs(bam_bin_bind_t *bind) {
-    bam_bin_stream_state_t prev;
-    if (!bind || bind->rmdup != BAM_BIN_RMDUP_STREAMING) return;
-    memset(&prev, 0, sizeof(prev));
-
-    for (int i = 0; i < bind->n_contigs; i++) {
-        bam_bin_contig_t *contig = &bind->contigs[i];
-        if (contig->has_first_record &&
-            record_is_streaming_dup(&prev,
-                                    contig->first_pos0,
-                                    contig->first_is_paired,
-                                    contig->first_has_pnext,
-                                    contig->first_pnext0)) {
-            subtract_first_post_metrics(bind, contig);
-        }
-        if (contig->final_state.has_pos) {
-            prev = contig->final_state;
-        }
-    }
 }
 
 static int64_t dense_bin_count_for_contig(const bam_bin_contig_t *contig, int64_t bin_width) {
@@ -1148,8 +1074,8 @@ static void destroy_bam_bin_global(void *data) {
     duckdb_free(global);
 }
 
-/* Global init runs at execution: copy the parameters into a fresh run, select
- * the contigs and order the claims by index weight. */
+/* Global init runs at execution: copy the parameters into a fresh run and
+ * select the contigs. Independent claims are ordered by index weight. */
 static void bam_bin_counts_global_init(duckdb_init_info info) {
     const bam_bin_bind_t *bind = (const bam_bin_bind_t *)duckdb_init_get_bind_data(info);
     bam_bin_global_t *global = duckdb_malloc(sizeof(*global));
@@ -1190,7 +1116,7 @@ static void bam_bin_counts_global_init(duckdb_init_info info) {
     } else {
         idx = sam_index_load3(fp, run->path, run->index_path, HTS_IDX_SILENT_FAIL);
         if (build_selected_contigs(run, hdr, idx, err, sizeof(err)) == 0 && idx &&
-            build_claim_order(run) != 0) {
+            run->rmdup != BAM_BIN_RMDUP_STREAMING && build_claim_order(run) != 0) {
             snprintf(err, sizeof(err), "bam_bin_counts: out of memory building contig claim order");
         }
     }
@@ -1202,7 +1128,7 @@ static void bam_bin_counts_global_init(duckdb_init_info info) {
         return;
     }
     global->indexed = idx != NULL;
-    global->n_items = global->indexed ? run->n_claims + 1 : 1;
+    global->n_items = global->indexed && run->rmdup != BAM_BIN_RMDUP_STREAMING ? run->n_claims + 1 : 1;
     duckdb_init_set_max_threads(info, (idx_t)global->n_items);
 }
 
@@ -1221,6 +1147,14 @@ static int run_item(bam_bin_global_t *global, bam_bin_local_t *local, int item,
                     char *err, size_t errlen) {
     bam_bin_bind_t *run = global->run;
     if (!global->indexed) return sequential_scan_no_index(run, err, errlen);
+    if (run->rmdup == BAM_BIN_RMDUP_STREAMING) {
+        /* One worker owns the ordered POS/PNEXT state across all selected contigs. */
+        if (open_worker_handles(run, local, err, errlen) != 0) return -1;
+        for (int i = 0; i < run->n_contigs; i++) {
+            if (scan_contig_item(run, local, &run->contigs[i], err, errlen) != 0) return -1;
+        }
+        return indexed_unmapped_scan(run, err, errlen);
+    }
     if (item == run->n_claims) return indexed_unmapped_scan(run, err, errlen);
     if (!local->fp && open_worker_handles(run, local, err, errlen) != 0) return -1;
     return scan_contig_item(run, local, &run->contigs[run->claim_order[item]], err, errlen);
@@ -1426,7 +1360,6 @@ static void bam_bin_counts_scan(duckdb_function_info info, duckdb_data_chunk out
         local->claimed_all = 1;
         last = claim_items(global, local, err, sizeof(err));
         if (last == 1) {
-            if (global->indexed) apply_streaming_boundary_repairs(run);
             if (append_rows_from_contigs(run, err, sizeof(err)) != 0) last = -1;
             else local->emitter = 1;
         }

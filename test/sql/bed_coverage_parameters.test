@@ -1,0 +1,20 @@
+# name: test/sql/bed_coverage_parameters.test
+# description: BED coverage accepts only implemented named parameters
+# group: [duckhts]
+
+require duckhts
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', bed_index_path := 'missing-index');
+----
+Invalid named parameter "bed_index_path"
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', fragment_mode := FALSE);
+----
+Invalid named parameter "fragment_mode"
+
+statement error
+SELECT * FROM duckhts_bam_bed_coverage('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', '__WORKING_DIRECTORY__/test/data/fixture_mixed_regions.bed', processing_threads := 0);
+----
+Invalid named parameter "processing_threads"

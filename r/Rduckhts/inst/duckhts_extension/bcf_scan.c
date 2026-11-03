@@ -322,6 +322,10 @@ int duckhts_bcf_scan_contig(duckhts_bcf_scan_t *scan, const char *name,
         snprintf(error, error_size, "BCF scan: failed to create iterator for contig %s", name);
         return 0;
     }
+    /* Full-contig tasks include telomeric POS 0 records (end == 0).
+     * HTSlib clamps query starts to zero when choosing index chunks; widen
+     * only the record-overlap check after those chunks have been selected. */
+    scan->itr->beg = -1;
     return 1;
 }
 

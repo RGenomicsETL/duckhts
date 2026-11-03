@@ -1,0 +1,5 @@
+@HD	VN:1.6	SO:coordinate
+@SQ	SN:good	LN:100
+@SQ	SN:bad	LN:100
+good_read	0	good	1	60	1M	*	0	0	A	I
+bad_read	0	bad	1	60	1M	*	0	0	A	I

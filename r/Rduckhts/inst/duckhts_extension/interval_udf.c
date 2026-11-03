@@ -37,7 +37,6 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/bed_line.h"
 #include "include/hts_io_tuning.h"
 
-#define INTERVAL_BATCH_SIZE 2048
 
 enum {
     BED_COL_CHROM = 0,
@@ -526,7 +525,8 @@ static inline void bed_write_field(bed_init_data_t *init, duckdb_vector vector,
 static void read_bed_rows_error(duckdb_function_info info, duckdb_data_chunk output,
                                 bed_init_data_t *init, duckdb_vector *vectors, idx_t col_count) {
     idx_t row_count = 0;
-    while (row_count < INTERVAL_BATCH_SIZE && next_bed_line(init, false)) {
+    const idx_t vector_size = duckdb_vector_size();
+    while (row_count < vector_size && next_bed_line(init, false)) {
         if (count_tab_fields(init->line.s) < 3) {
             duckdb_function_set_error(info, bed_short_line_error);
             init->finished = true;
@@ -598,7 +598,8 @@ static void read_bed_rows_tolerant(duckdb_function_info info, duckdb_data_chunk 
     (void)info;
     const bool report = init->error_policy == BED_ERROR_POLICY_REPORT;
     idx_t row_count = 0;
-    while (row_count < INTERVAL_BATCH_SIZE && next_bed_line(init, report)) {
+    const idx_t vector_size = duckdb_vector_size();
+    while (row_count < vector_size && next_bed_line(init, report)) {
         if (count_tab_fields(init->line.s) < 3) {
             if (!report) continue;
             for (idx_t c = 0; c < col_count; c++) {
@@ -865,8 +866,12 @@ static void fasta_nuc_init(duckdb_init_info info) {
         } else {
             init->current_tid = 0;
             init->next_bin_start = 0;
-            const char *seqname = faidx_iseq(init->fai, 0);
-            init->current_seq_end_exclusive = faidx_seq_len64(init->fai, seqname);
+            if (faidx_nseq(init->fai) == 0) {
+                init->done = true;
+            } else {
+                const char *seqname = faidx_iseq(init->fai, 0);
+                init->current_seq_end_exclusive = faidx_seq_len64(init->fai, seqname);
+            }
         }
     }
 
@@ -1065,7 +1070,8 @@ static void fasta_nuc_scan(duckdb_function_info info, duckdb_data_chunk output) 
         vectors[c] = duckdb_data_chunk_get_vector(output, c);
     }
 
-    while (row_count < INTERVAL_BATCH_SIZE) {
+    const idx_t vector_size = duckdb_vector_size();
+    while (row_count < vector_size) {
         const char *chrom = NULL;
         int64_t start = 0, end = 0;
         int have_interval = init->bind->mode == FASTA_NUC_MODE_BED

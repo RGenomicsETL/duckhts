@@ -1,0 +1,19 @@
+require duckhts
+
+statement ok
+COPY (SELECT 'c1' AS seqid, '.' AS source, 'gene' AS type, '.' AS start, '.' AS "end", '.' AS score, '+' AS strand, '.' AS phase, '.' AS attributes) TO '__WORKING_DIRECTORY__/test/sql/missing_coordinates.gxf' (FORMAT CSV, HEADER false, DELIMITER '\t', QUOTE '');
+
+query II
+SELECT start, "end" FROM read_gff('__WORKING_DIRECTORY__/test/sql/missing_coordinates.gxf');
+----
+NULL	NULL
+
+query II
+SELECT start, "end" FROM read_gff('__WORKING_DIRECTORY__/test/sql/missing_coordinates.gxf', strict := true);
+----
+NULL	NULL
+
+query II
+SELECT start, "end" FROM read_gtf('__WORKING_DIRECTORY__/test/sql/missing_coordinates.gxf');
+----
+NULL	NULL

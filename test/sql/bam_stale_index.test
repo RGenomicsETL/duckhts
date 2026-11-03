@@ -1,0 +1,30 @@
+require duckhts
+
+# Rebuild fixtures: python3 test/scripts/prepare_bam_review_fixtures.py
+# The BAM has 1000 references; its stale BAI has one empty reference.
+statement ok
+SET threads = 3;
+
+query II
+SELECT success, used_index_fast_path FROM duckhts_samtools_idxstats(
+  'test/data/bam_stale_header.bam', output := '__WORKING_DIRECTORY__/test/sql/stale.idxstats', overwrite := true);
+----
+true	true
+
+query III
+SELECT count(*), sum(mapped), sum(unmapped)
+FROM read_csv('__WORKING_DIRECTORY__/test/sql/stale.idxstats', delim := '\t', header := false,
+  columns := {'chrom':'VARCHAR', 'length':'BIGINT', 'mapped':'BIGINT', 'unmapped':'BIGINT'});
+----
+1001	0	0
+
+query II
+SELECT count(*), sum(count_total) FROM bam_bin_counts('test/data/bam_stale_header.bam', 100);
+----
+1000	0
+
+query II
+SELECT count(*), sum(count_total)
+FROM bam_bin_counts('test/data/bam_stale_header.bam', 100, chrom := 'chr999');
+----
+1	0

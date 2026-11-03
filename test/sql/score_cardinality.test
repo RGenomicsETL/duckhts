@@ -1,0 +1,33 @@
+require duckhts
+
+statement ok
+COPY (SELECT replace(content, '0/0:0.1:', '0/0:0.1,0.2,0.3,0.4,0.5,0.6:') FROM read_text('test/data/score_dosage.vcf')) TO '__WORKING_DIRECTORY__/test/sql/score_bad_ds.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '');
+
+statement error
+SELECT * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_bad_ds.vcf', 'test/data/score_summary.tsv', use := 'DS', columns := 'PLINK');
+----
+FORMAT cardinality
+
+statement ok
+COPY (SELECT replace(content, ':0.05:0.05', ':0.1,0.2,0.3,0.4,0.5,0.6:0.1,0.2,0.3,0.4,0.5,0.6') FROM read_text('test/data/score_dosage.vcf')) TO '__WORKING_DIRECTORY__/test/sql/score_bad_ap.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '');
+
+statement error
+SELECT * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_bad_ap.vcf', 'test/data/score_summary.tsv', use := 'AP', columns := 'PLINK');
+----
+FORMAT cardinality
+
+statement ok
+COPY (SELECT replace(content, '0.9,0.1,0.0', '0.1,0.2,0.3,0.1,0.2,0.1') FROM read_text('test/data/score_dosage.vcf')) TO '__WORKING_DIRECTORY__/test/sql/score_bad_gp.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '');
+
+statement error
+SELECT * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_bad_gp.vcf', 'test/data/score_summary.tsv', use := 'GP', columns := 'PLINK');
+----
+FORMAT cardinality
+
+statement ok
+COPY (SELECT replace(replace(content, '0.9,0.1,0.0', '0.9,0.1'), '0.0,1.0,0.0', '0.0,1.0') FROM read_text('test/data/score_dosage.vcf')) TO '__WORKING_DIRECTORY__/test/sql/score_short_gp.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '');
+
+statement error
+SELECT * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_short_gp.vcf', 'test/data/score_summary.tsv', use := 'GP', columns := 'PLINK');
+----
+FORMAT cardinality

@@ -540,7 +540,7 @@ table
 
 ### Tags
 
-auxiliary_tags := TRUE adds the AUXILIARY_TAGS map of the non-standard tags. auxiliary_tags := ['UR', 'UB'] instead adds one VARCHAR column per named tag, after the standard tag columns, formatted like the map value (the SAM text after TYPE:, B arrays as subtype then comma-separated values) and NULL when a record lacks the tag. It builds no map, so reading a few tags from a large file costs much less. Names must match [A-Za-z][A-Za-z0-9], at most 64, unique ignoring case, and with standard_tags := TRUE not equal to a standard tag column ignoring case, since DuckDB column names ignore case while SAM tag names do not. The strings 'true'/'false' and integers are still read as the BOOLEAN form.
+standard_tags := TRUE returns NULL when a tag is absent or its stored type does not match the standard SAM tag type. Scalar integers accept all BAM integer widths; arrays require the standard subtype. auxiliary_tags := TRUE adds the AUXILIARY_TAGS map of the non-standard tags. auxiliary_tags := ['UR', 'UB'] instead adds one VARCHAR column per named tag, after the standard tag columns, formatted like the map value (the SAM text after TYPE:, B arrays as subtype then comma-separated values) and NULL when a record lacks the tag. It builds no map, so reading a few tags from a large file costs much less. Names must match [A-Za-z][A-Za-z0-9], at most 64, unique ignoring case, and with standard_tags := TRUE not equal to a standard tag column ignoring case, since DuckDB column names ignore case while SAM tag names do not. The strings 'true'/'false' and integers are still read as the BOOLEAN form.
 
 ### Map keys
 
@@ -643,7 +643,7 @@ Build COPY SQL for read_gff() output with Parquet metadata, GFF/tabix header tex
 Signature:
 
 ```sql
-duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, header := NULL, header_names := []::VARCHAR[], auto_detect := NULL, column_types := []::VARCHAR[], attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')
+duckhts_gff_convert_parquet_sql(path, output, columns := []::VARCHAR[], region := NULL, index_path := NULL, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, strict := FALSE, where_sql := NULL, compression := 'zstd', row_group_size := 100000, partition_by := []::VARCHAR[], include_metadata := TRUE, header_text := NULL, metadata := map([]::VARCHAR[], []::VARCHAR[]), metadata_json_file := NULL, overwrite := FALSE, write_format_version := '1')
 ```
 
 Returns:
@@ -711,6 +711,10 @@ Returns:
 ```
 table
 ```
+
+### Limits
+
+Uses htslib's default pileup admission limit of 8000 reads per input file, as does samtools mpileup -d 8000. At high depth, reads can be discarded before bases and qualities are emitted; this is not an uncapped depth counter. The limit is not configurable. Alignment I/O and decode failures return an error.
 
 ### Examples
 
@@ -1062,7 +1066,7 @@ SELECT * FROM duckhts_cgranges_overlaps('targets_idx', 'chr1', 100, 150);
 
 ## read_fastq
 
-Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.
+Read single-end, paired-end, or interleaved FASTQ files with optional legacy quality decoding. By default, FASTQ qualities are interpreted as modern Phred+33 input. Use sequence_encoding := 'nt16' to return SEQUENCE as UTINYINT[] and quality_representation := 'phred' to return QUALITY as UTINYINT[] instead of VARCHAR. input_quality_encoding accepts 'phred33', 'auto', 'phred64', or 'solexa64'. 'auto' samples up to 10,000 records per file and errors on ambiguous evidence; select an explicit encoding in that case. scan_mode := 'sequential' forces raw streaming/counting instead of index-backed count paths.
 
 Signature:
 
@@ -2421,7 +2425,7 @@ Read GFF annotations with optional parsed attributes, strict GFF3 validation and
 Signature:
 
 ```sql
-read_gff(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
+read_gff(path, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], strict := FALSE, region := NULL, index_path := NULL, scan_mode := 'auto')
 ```
 
 Returns:
@@ -2459,7 +2463,7 @@ Read GTF annotations with optional parsed attributes and indexed region selectio
 Signature:
 
 ```sql
-read_gtf(path, header_names := NULL, header := FALSE, column_types := NULL, auto_detect := FALSE, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], region := NULL, index_path := NULL, scan_mode := 'auto')
+read_gtf(path, attributes_map := FALSE, attributes_list := FALSE, attributes_pairs := FALSE, attributes := []::VARCHAR[], region := NULL, index_path := NULL, scan_mode := 'auto')
 ```
 
 Returns:
@@ -2690,6 +2694,10 @@ Returns:
 table
 ```
 
+### Limits
+
+min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.
+
 ### Execution
 
 The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
@@ -2716,6 +2724,10 @@ Returns:
 table
 ```
 
+### Limits
+
+min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.
+
 ### Execution
 
 The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
@@ -2741,6 +2753,10 @@ Returns:
 ```
 table
 ```
+
+### Limits
+
+min_shift must be between 0 and 30, inclusive; invalid values are rejected during binding.
 
 ### Execution
 
@@ -2904,7 +2920,7 @@ table
 
 ### Execution
 
-The scan runs when the query executes, not at bind: binding checks only that the file opens and a requested chrom exists, so EXPLAIN and PREPARE read no alignments and a prepared statement returns the same bins at every execution. With an index, DuckDB worker threads claim one reference each, heaviest first, so SET threads bounds the parallelism; the reads without coordinates are one more claim, and the streaming duplicate state is stitched across references in reference order after every claim finishes. Without an index the file is one sequential scan.
+The scan runs when the query executes, not at bind: binding checks only that the file opens and a requested chrom exists, so EXPLAIN and PREPARE read no alignments and a prepared statement returns the same bins at every execution. With an index, DuckDB worker threads claim one reference each, heaviest first, so SET threads bounds the parallelism; the reads without coordinates are one more claim. Streaming deduplication instead uses one worker visiting selected references in header order. Without an index the file is one sequential scan. Streaming deduplication preserves previous position and mate position across selected references, including empty references, and updates this state before applying the MAPQ threshold.
 
 ### Unmapped records
 
@@ -3329,7 +3345,7 @@ Compute samtools coverage-like regional summaries for BAM or CRAM input over a B
 Signature:
 
 ```sql
-duckhts_bam_bed_coverage(path, bed_path, reference := NULL, index_path := NULL, bed_index_path := NULL, mapq := 0, min_baseq := 0, min_read_len := 0, require_flags := 0, exclude_flags := 1796, min_depth := 1, max_depth := 1000000, decompression_threads := 0, fragment_mode := FALSE, strand_outputs := TRUE, processing_threads := 0)
+duckhts_bam_bed_coverage(path, bed_path, reference := NULL, index_path := NULL, mapq := 0, min_baseq := 0, min_read_len := 0, require_flags := 0, exclude_flags := 1796, min_depth := 1, max_depth := 1000000, decompression_threads := 0, strand_outputs := TRUE)
 ```
 
 Returns:
@@ -3522,7 +3538,7 @@ UBIGINT
 
 ### Chromosome code
 
-The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name becomes its number modulo 256, with no range check, so 257 shares the code of 1. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither has a number that comes to 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names.
+The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name must have a value from 1 through 31 to fit the upstream five-bit field; other numeric names return NULL instead of wrapping. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither does 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names.
 
 ### Examples
 
@@ -3964,6 +3980,10 @@ Returns:
 UBIGINT
 ```
 
+### Limits
+
+size must be between 0 and 2^32-1 inclusive; values outside that range return NULL.
+
 ### Examples
 
 ```sql
@@ -4148,7 +4168,7 @@ alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_p
 
 ### Output
 
-Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END.
+Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END. Rows containing a spanning-deletion `*` pass through with SpanningDeletion and NULL normed. REF-only rows require a valid REF matching the FASTA before returning RefOnly.
 
 ### Contig names
 

@@ -2,14 +2,9 @@
  * DuckHTS FASTA/FASTQ Reader
  *
  * Table functions for reading FASTA and FASTQ files over htslib transport.
- * htslib's sam_open() auto-detects fasta/fastq format (including .gz).
- * FASTA keeps the htslib SAM-sequence adapter; FASTQ is parsed directly into
- * projected DuckDB columns so text records do not make a temporary bam1_t
- * round trip.  The FASTA adapter gives us access to:
- *   - bam_get_qname(b)       → sequence name
- *   - bam_get_seq(b)         → packed sequence (decode with seq_nt16_str[bam_seqi()])
- *   - bam_get_qual(b)        → quality values (Phred, add 33 for ASCII)
- *   - b->core.l_qseq         → sequence length
+ * FASTA and FASTQ text is parsed directly over htslib transport (including
+ * .gz). FASTA preserves sequence spelling; FASTQ retains nt16 normalization.
+ * Recognized alignment formats use the htslib SAM-sequence adapter.
  *
  * API reference: htslib-1.23 samples/read_fast.c
  *
@@ -80,7 +75,8 @@ typedef struct {
     int interleaved;
     int paired;
     int scan_sequential;
-    int direct_fastq;    /* input was detected as FASTQ; use the text parser */
+    int direct_fastq;    /* FASTQ reader over non-alignment input */
+    int direct_fasta;    /* FASTA reader over non-alignment input */
     int seq_nt16;       /* 1 if sequence_encoding := 'nt16'; SEQUENCE → LIST(UTINYINT) */
     duckhts_quality_representation qual_repr;
     duckhts_quality_encoding input_quality_encoding;
@@ -116,6 +112,7 @@ typedef struct {
     int paired;
     int count_only;
     int direct_fastq;
+    int direct_fasta;
     int fasta_count_only;
     uint64_t count_remaining;
     int pending_mate;
@@ -451,14 +448,7 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
         return;
     }
 
-    /* Check format — sam_open auto-detects */
     enum htsExactFormat fmt = hts_get_format(fp)->format;
-    if (is_fastq && fmt != fastq_format) {
-        /* Allow it but warn — htslib will still read it */
-    }
-    if (!is_fastq && fmt != fasta_format) {
-        /* Same — allow but it may not have quality */
-    }
     sam_close(fp);
 
     seq_bind_data_t *bind = duckhts_alloc_array(1, sizeof(*bind));
@@ -469,7 +459,8 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     }
     bind->file_path = file_path;
     bind->is_fastq = is_fastq;
-    bind->direct_fastq = is_fastq && fmt == fastq_format;
+    bind->direct_fastq = is_fastq && fmt != sam && fmt != bam && fmt != cram;
+    bind->direct_fasta = !is_fastq && fmt != sam && fmt != bam && fmt != cram;
     bind->qual_repr = DUCKHTS_QUALITY_REPR_STRING;
     bind->input_quality_encoding = DUCKHTS_QUALITY_ENCODING_PHRED33;
 
@@ -609,11 +600,23 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
                 destroy_seq_bind(bind);
                 return;
             }
+            if (detect.is_ambiguous) {
+                duckdb_bind_set_error(info,
+                    "read_fastq: ambiguous quality encoding; set input_quality_encoding explicitly");
+                destroy_seq_bind(bind);
+                return;
+            }
             bind->input_quality_encoding = detect.guessed_encoding;
             if (bind->paired) {
                 duckhts_quality_detect_result mate_detect;
                 if (duckhts_detect_fastq_quality_encoding(bind->mate_path, 10000, &mate_detect, err, sizeof(err)) != 0) {
                     duckdb_bind_set_error(info, err);
+                    destroy_seq_bind(bind);
+                    return;
+                }
+                if (mate_detect.is_ambiguous) {
+                    duckdb_bind_set_error(info,
+                        "read_fastq: ambiguous quality encoding in mate; set input_quality_encoding explicitly");
                     destroy_seq_bind(bind);
                     return;
                 }
@@ -694,6 +697,7 @@ static void seq_read_init(duckdb_init_info info) {
 
     init->is_fastq = bind->is_fastq;
     init->direct_fastq = bind->direct_fastq;
+    init->direct_fasta = bind->direct_fasta && bind->n_regions == 0;
     init->paired = bind->paired;
     init->interleaved = bind->interleaved;
     init->seq_nt16 = bind->seq_nt16;
@@ -765,10 +769,10 @@ static void seq_read_init(duckdb_init_info info) {
         }
     }
 
-    if (bind->direct_fastq) {
+    if (bind->direct_fastq || init->direct_fasta) {
         init->count_fp = hts_open(bind->file_path, "r");
         if (!init->count_fp) {
-            duckdb_init_set_error(info, "Failed to open FASTQ file");
+            duckdb_init_set_error(info, "Failed to open sequence file");
             destroy_seq_init(init);
             return;
         }
@@ -785,6 +789,21 @@ static void seq_read_init(duckdb_init_info info) {
                                             DUCKHTS_HTS_IO_PROFILE_STREAMING);
         }
         init->done = 0;
+        duckdb_init_set_max_threads(info, 1);
+        duckdb_init_set_init_data(info, init, destroy_seq_init);
+        return;
+    }
+
+    if (!bind->is_fastq && bind->n_regions > 0) {
+        init->fai = fai_load3_format(bind->file_path, bind->index_path,
+                                     bind->gzi_path, 0, FAI_FASTA);
+        if (!init->fai) {
+            duckdb_init_set_error(info, "read_fasta: region query requires a FASTA index (.fai); run fasta_index(path) first");
+            destroy_seq_init(init);
+            return;
+        }
+        duckhts_apply_remote_faidx_tuning(init->fai, bind->file_path,
+                                          DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
         duckdb_init_set_max_threads(info, 1);
         duckdb_init_set_init_data(info, init, destroy_seq_init);
         return;
@@ -839,18 +858,6 @@ static void seq_read_init(duckdb_init_info info) {
         }
     }
 
-    if (!bind->is_fastq && bind->n_regions > 0) {
-        init->fai = fai_load3_format(bind->file_path, bind->index_path,
-                                     bind->gzi_path, 0, FAI_FASTA);
-        if (!init->fai) {
-            duckdb_init_set_error(info, "read_fasta: region query requires a FASTA index (.fai); run fasta_index(path) first");
-            destroy_seq_init(init);
-            return;
-        }
-        duckhts_apply_remote_faidx_tuning(init->fai, bind->file_path,
-                                          DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
-    }
-
     init->done = 0;
 
     duckdb_init_set_max_threads(info, 1);
@@ -899,6 +906,9 @@ static int seq_fastq_materialize_record(duckdb_function_info info,
                 }
                 list_data[row].offset = child_offset;
                 list_data[row].length = (idx_t)seq_len;
+            } else if (!init->is_fastq) {
+                duckdb_vector_assign_string_element_len(
+                    vec, row, record->sequence.s ? record->sequence.s : "", (idx_t)seq_len);
             } else if (seq_len > 0) {
                 if (ensure_buf(&init->seq_buf, &init->seq_buf_cap, seq_len) != 0) {
                     duckdb_function_set_error(
@@ -1088,6 +1098,64 @@ error:
     duckdb_data_chunk_set_size(output, 0);
 }
 
+/* Keep the next header in record->line while emitting the current record.
+ * Sequence whitespace is formatting; all other bytes retain their spelling. */
+static int fasta_read_record(htsFile *fp, fastq_record_t *record,
+                             int keep_name, int keep_sequence) {
+    int ret;
+    record->name.l = 0;
+    record->sequence.l = 0;
+    record->sequence_len = 0;
+    if (record->line.l == 0) {
+        do {
+            ret = hts_getline(fp, KS_SEP_LINE, &record->line);
+            if (ret == -1) return 0;
+            if (ret < -1) return -1;
+        } while (record->line.l == 0);
+    }
+    if (record->line.s[0] != '>') return -1;
+    if (fastq_extract_qname(&record->line, &record->name, keep_name) < 0) return -1;
+    while ((ret = hts_getline(fp, KS_SEP_LINE, &record->line)) >= 0) {
+        if (record->line.l > 0 && record->line.s[0] == '>') return 1;
+        for (size_t i = 0; i < record->line.l; i++) {
+            unsigned char base = (unsigned char)record->line.s[i];
+            if (isspace(base)) continue;
+            if (record->sequence_len == INT_MAX) return -1;
+            record->sequence_len++;
+            if (keep_sequence && kputc(base, &record->sequence) < 0) return -1;
+        }
+    }
+    record->line.l = 0;
+    return ret == -1 ? 1 : -1;
+}
+
+static void seq_fasta_direct_function(duckdb_function_info info,
+                                       duckdb_data_chunk output,
+                                       seq_init_data_t *init) {
+    idx_t row_count = 0;
+    while (row_count < duckdb_vector_size()) {
+        int ret = fasta_read_record(init->count_fp, &init->fastq_record,
+                                    init->fastq_need_name, init->fastq_need_sequence);
+        if (ret == 0) {
+            init->done = 1;
+            break;
+        }
+        if (ret < 0) {
+            duckdb_function_set_error(info, "read_fasta: failed while parsing FASTA record");
+            goto error;
+        }
+        if (seq_fastq_materialize_record(info, output, init, &init->fastq_record,
+                                         row_count, 0) < 0) goto error;
+        row_count++;
+    }
+    duckdb_data_chunk_set_size(output, row_count);
+    return;
+
+error:
+    init->done = 1;
+    duckdb_data_chunk_set_size(output, 0);
+}
+
 static void seq_fasta_count_only_function(duckdb_function_info info,
                                           duckdb_data_chunk output,
                                           seq_init_data_t *init,
@@ -1123,8 +1191,8 @@ static void seq_fasta_count_only_function(duckdb_function_info info,
 /* ================================================================
  * Scan
  *
- * FASTQ takes the direct projected path above.  FASTA uses sam_read1() to
- * read each record into a bam1_t and extracts fields with bam_get_* macros.
+ * Text inputs take the direct projected paths above; indexed FASTA uses
+ * faidx. Alignment inputs use sam_read1() and bam_get_* macros.
  *
  * Reference: htslib-1.23/samples/read_fast.c
  * ================================================================ */
@@ -1157,6 +1225,10 @@ static void seq_read_function(duckdb_function_info info, duckdb_data_chunk outpu
 
     if (init->fasta_count_only) {
         seq_fasta_count_only_function(info, output, init, bind);
+        return;
+    }
+    if (init->direct_fasta) {
+        seq_fasta_direct_function(info, output, init);
         return;
     }
 

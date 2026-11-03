@@ -10,8 +10,9 @@ static int region_space(char c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v';
 }
 
-/* HTSlib permits {quoted,reference}:start-end. A comma inside the initial
- * quoted reference is not a list separator. HTSlib validates the quote syntax. */
+/* HTSlib permits {quoted,reference}:start-end. Within coordinates, a comma
+ * followed by a three-digit group is a thousands separator. Separate a numeric
+ * reference after coordinates with whitespace or quote it with braces. */
 static const char *region_separator(const char *start) {
     const char *p = start;
     while (region_space(*p)) p++;
@@ -20,7 +21,22 @@ static const char *region_separator(const char *start) {
         if (!close) return NULL;
         p = close + 1;
     }
-    return strchr(p, ',');
+    int coordinate = 0;
+    for (; *p; p++) {
+        if (*p == ':') coordinate = 1;
+        if (*p != ',') continue;
+        if (coordinate && p > start && p[-1] >= '0' && p[-1] <= '9') {
+            const char *digits = p + 1;
+            while (*digits >= '0' && *digits <= '9') digits++;
+            if (digits - (p + 1) == 3 &&
+                (*digits == '\0' || *digits == ',' || *digits == '-' || region_space(*digits))) {
+                p = digits - 1;
+                continue;
+            }
+        }
+        return p;
+    }
+    return NULL;
 }
 
 int duckhts_region_list_parse(const char *text, char ***items, unsigned int *count,

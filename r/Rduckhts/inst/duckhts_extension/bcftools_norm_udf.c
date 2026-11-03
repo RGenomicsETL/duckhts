@@ -132,10 +132,6 @@ static int is_gvcf_symbolic_alt(const char *alt) {
     return alt && (strcmp(alt, "<NON_REF>") == 0 || strcmp(alt, "<*>") == 0);
 }
 
-static int is_gvcf_ignored_alt(const char *alt) {
-    return is_gvcf_symbolic_alt(alt) || is_spanning_deletion_alt(alt);
-}
-
 static duckhts_reference_entry_t *get_norm_cache_entry(const char *fasta_path,
     const char *fai_path, const char *gzi_path, char **err) {
     const char *cause = NULL;
@@ -517,11 +513,6 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
 
     original_end = has_end_pos ? end_pos_in : pos1 + (int64_t)strlen(orig_ref) - 1;
 
-    if (n_orig_alt == 0) {
-        set_result_applicable(result, 0, "RefOnly", pos1, original_end, orig_ref, orig_alt, n_orig_alt);
-        return 1;
-    }
-
     for (int i = 0; i < n_orig_alt; i++) {
         if (!orig_alt[i] || !*orig_alt[i]) {
             set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "NullInput");
@@ -536,19 +527,13 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
     int n_gvcf_ignored = 0;
     int has_gvcf_symbolic = 0;
     for (int i = 0; i < n_orig_alt; i++) {
-        if (!is_gvcf_ignored_alt(orig_alt[i])) continue;
+        if (!is_gvcf_symbolic_alt(orig_alt[i])) continue;
         n_gvcf_ignored++;
         if (is_gvcf_symbolic_alt(orig_alt[i])) has_gvcf_symbolic = 1;
     }
     if (n_gvcf_ignored > 0) {
         if (n_gvcf_ignored == n_orig_alt) {
-            if (has_gvcf_symbolic) {
-                set_result_applicable(result, 0, "GVCFReferenceBlock", pos1, original_end, orig_ref, orig_alt, n_orig_alt);
-            } else {
-                set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "SpanningDeletion");
-                free(orig_ref);
-                free_string_array(orig_alt, n_orig_alt);
-            }
+            set_result_applicable(result, 0, "GVCFReferenceBlock", pos1, original_end, orig_ref, orig_alt, n_orig_alt);
             return 1;
         }
 
@@ -564,7 +549,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
         }
         int real_i = 0;
         for (int i = 0; i < n_orig_alt; i++) {
-            if (is_gvcf_ignored_alt(orig_alt[i])) continue;
+            if (is_gvcf_symbolic_alt(orig_alt[i])) continue;
             real_alt[real_i] = dup_cstr(orig_alt[i]);
             if (!real_alt[real_i]) {
                 free_string_array(real_alt, n_real_alt);
@@ -607,7 +592,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
         real_i = 0;
         for (int i = 0; i < n_orig_alt; i++) {
             const char *src_alt = NULL;
-            if (is_gvcf_ignored_alt(orig_alt[i])) {
+            if (is_gvcf_symbolic_alt(orig_alt[i])) {
                 src_alt = orig_alt[i];
             } else {
                 src_alt = real_i < real_result.n_alt ? real_result.alts[real_i] : NULL;
@@ -670,6 +655,11 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
     }
     free(ref_fetch);
     ref_fetch = NULL;
+
+    if (n_orig_alt == 0) {
+        set_result_applicable(result, 0, "RefOnly", pos1, original_end, orig_ref, orig_alt, n_orig_alt);
+        return 1;
+    }
 
     {
         size_t ref_len = strlen(orig_ref);

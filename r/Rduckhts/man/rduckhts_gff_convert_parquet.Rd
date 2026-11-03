@@ -11,10 +11,6 @@ rduckhts_gff_convert_parquet(
   columns = NULL,
   region = NULL,
   index_path = NULL,
-  header = NULL,
-  header_names = NULL,
-  auto_detect = NULL,
-  column_types = NULL,
   attributes_map = FALSE,
   attributes_list = FALSE,
   attributes_pairs = FALSE,
@@ -43,14 +39,6 @@ rduckhts_gff_convert_parquet(
 \item{region}{Optional genomic region string for indexed inputs.}
 
 \item{index_path}{Optional explicit index path.}
-
-\item{header}{Logical; pass `header := true/false` to `read_gff(...)`.}
-
-\item{header_names}{Optional character vector of column names.}
-
-\item{auto_detect}{Logical; request type auto-detection.}
-
-\item{column_types}{Optional character vector of DuckDB column types.}
 
 \item{attributes_map}{Logical; expose GFF attributes as `MAP(VARCHAR, VARCHAR)`.}
 

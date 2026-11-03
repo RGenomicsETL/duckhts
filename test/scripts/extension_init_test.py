@@ -1,8 +1,12 @@
 """Exercise extension initialization through pinned native DuckDB runtimes."""
 
 import argparse
+import os
 from pathlib import Path
+import shlex
+import subprocess
 import sys
+import tempfile
 import unittest
 
 import duckdb
@@ -40,6 +44,31 @@ class ExtensionInitialization(unittest.TestCase):
                     (7, '"two words"'),
                 )
             self.assertEqual(connection.execute("SELECT 42").fetchone(), (42,))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "native lock probe uses Linux dlopen")
+    def test_registration_error_releases_macro_lock(self):
+        if args.expect == "unsupported":
+            self.skipTest("lock probe requires an admitted DuckDB runtime")
+        root = Path(__file__).resolve().parents[2]
+        compiler = shlex.split(os.environ.get("CC", "cc"))
+        with tempfile.TemporaryDirectory() as temporary:
+            probe = Path(temporary) / "extension_init_oom_probe.so"
+            subprocess.run(
+                compiler + [
+                    "-std=c11", "-Wall", "-Wextra", "-Werror", "-fPIC", "-shared",
+                    "-I" + str(root / "duckdb_capi"), "-I" + str(root / "src/include"),
+                    str(root / "test/scripts/extension_init_oom_probe.c"),
+                    "-ldl", "-o", str(probe),
+                ],
+                check=True,
+                timeout=30,
+            )
+            subprocess.run(
+                [sys.executable, str(root / "test/scripts/extension_init_oom_test.py"),
+                 str(args.extension), str(probe)],
+                check=True,
+                timeout=30,
+            )
 
     def test_sql_registration_failure_preserves_cause_and_connection(self):
         with duckdb.connect(config={"allow_unsigned_extensions": "true"}) as connection:

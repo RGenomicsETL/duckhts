@@ -1,0 +1,10 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=100>
+##INFO=<ID=CSQ,Number=.,Type=String,Description="Consequence annotations. Format: Allele|DISTANCE|AF|STRAND">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	1	.	A	G	.	PASS	CSQ=G|abc|0.1&0.2|3000000000
+chr1	2	.	A	G	.	PASS	CSQ=G|-2147483648|0.25|2147483647
+chr1	3	.	A	G	.	PASS	CSQ=G|2147483648|1e100|-2147483649
+chr1	4	.	A	G	.	PASS	CSQ=G|999999999999999999999999|nan|-999999999999999999999999
+chr1	5	.	A	G	.	PASS	CSQ=G|.|.|.
+chr1	6	.	A	G	.	PASS	CSQ=G|12|inf|-1

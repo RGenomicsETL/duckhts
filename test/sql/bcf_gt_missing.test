@@ -1,0 +1,37 @@
+# name: test/sql/bcf_gt_missing.test
+# description: GT integer missing sentinels format as missing alleles
+# group: [duckhts]
+
+require duckhts
+
+# Fixture reconstruction from repository root (using the built vendored htslib):
+# cc -std=c11 -Wall -Wextra -Ithird_party/htslib test/scripts/prepare_bcf_gt_missing.c third_party/htslib/libhts.a -ldeflate -llzma -lbz2 -lz -lm -lssl -lcrypto -lcurl -lpthread -ldl -o build/prepare_bcf_gt_missing
+# build/prepare_bcf_gt_missing test/data/bcf_gt_missing.vcf test/data/bcf_gt_missing.bcf
+# bcf_update_genotypes writes bcf_int32_missing values, compressed to BCF int8.
+
+query ITT
+SELECT POS, FORMAT_GT_S1, FORMAT_GT_S2
+FROM read_bcf('test/data/bcf_gt_missing.bcf') ORDER BY POS;
+----
+1	.	0/.
+2	./1	0|1
+3	.	.|.
+
+query ITT
+SELECT POS, FORMAT_GT_S1, FORMAT_GT_S2
+FROM read_bcf('test/data/bcf_gt_missing.vcf') ORDER BY POS;
+----
+1	.	0/.
+2	./1	0|1
+3	.	.|.
+
+query ITT
+SELECT POS, SAMPLE_ID, FORMAT_GT
+FROM read_bcf('test/data/bcf_gt_missing.bcf', tidy_format := true) ORDER BY POS, SAMPLE_ID;
+----
+1	S1	.
+1	S2	0/.
+2	S1	./1
+2	S2	0|1
+3	S1	.
+3	S2	.|.

@@ -4,6 +4,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1345,67 +1346,91 @@ static int score_record_passes_filter_list(const bcf_hdr_t *hdr, bcf1_t *rec, co
     return pass;
 }
 
-static int score_parse_region_token(const char *tok, char *chrom, size_t chrom_sz, int64_t *beg, int64_t *end) {
-    const char *c = strchr(tok, ':');
-    const char *d = c ? strchr(c + 1, '-') : NULL;
-    if (!tok || !*tok) return -1;
-    if (!c) {
-        snprintf(chrom, chrom_sz, "%s", tok);
-        *beg = 1;
-        *end = INT64_MAX / 2;
-        return 0;
+typedef struct {
+    const bcf_hdr_t *hdr;
+    char *missing_name; /* owned copy of the most recent name absent from the header */
+    int lookup_failed;  /* the most recent lookup found no header contig */
+    int out_of_memory;
+} score_region_lookup_t;
+
+static int score_region_name2id(void *data, const char *name) {
+    score_region_lookup_t *lookup = (score_region_lookup_t *)data;
+    int id = bcf_hdr_name2id(lookup->hdr, name);
+    lookup->lookup_failed = id < 0;
+    if (id < 0) {
+        free(lookup->missing_name);
+        lookup->missing_name = strdup(name);
+        if (!lookup->missing_name) lookup->out_of_memory = 1;
     }
-    {
-        size_t n = (size_t)(c - tok);
-        if (n >= chrom_sz) return -1;
-        memcpy(chrom, tok, n);
-        chrom[n] = '\0';
+    return id;
+}
+
+/* Resolves only the recorded missing name, so a second parse checks the
+ * coordinates of an item whose contig the header lacks. */
+static int score_region_missing_name2id(void *data, const char *name) {
+    return strcmp((const char *)data, name) == 0 ? 0 : -1;
+}
+
+/* Start of the next list item after `item`, splitting like hts_parse_region with
+ * HTS_PARSE_LIST: a braced name ends at its closing brace, then the item at the next
+ * comma. Returns NULL for an unterminated brace. */
+static const char *score_region_next_item(const char *item) {
+    const char *from = item;
+    const char *comma;
+    if (*item == '{') {
+        from = strchr(item, '}');
+        if (!from) return NULL;
     }
-    if (!d) {
-        *beg = atoll(c + 1);
-        *end = *beg;
-        return 0;
-    }
-    *beg = atoll(c + 1);
-    *end = atoll(d + 1);
-    if (*beg < 1) *beg = 1;
-    if (*end < *beg) *end = *beg;
-    return 0;
+    comma = strchr(from, ',');
+    return comma ? comma + 1 : item + strlen(item);
 }
 
 static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const char *regions, int overlap_mode) {
-    char *tmp, *tok;
-    const char *rname;
-    int64_t rec_beg, rec_end;
+    const char *cursor = regions;
+    int match = 0;
+    hts_pos_t rec_end = rec->pos + (rec->rlen > 0 ? rec->rlen : 1);
+    score_region_lookup_t lookup = { hdr, NULL, 0, 0 };
 
     if (!regions || !regions[0]) return 1;
-    rname = bcf_hdr_id2name(hdr, rec->rid);
-    rec_beg = (int64_t)rec->pos + 1;
-    rec_end = rec_beg + (int64_t)(rec->rlen > 0 ? rec->rlen - 1 : 0);
-
-    tmp = score_dup(regions);
-    if (!tmp) return 0;
-    tok = strtok(tmp, ",");
-    while (tok) {
-        char chr[256];
-        int64_t beg = 1, end = INT64_MAX / 2;
-        if (score_parse_region_token(tok, chr, sizeof(chr), &beg, &end) == 0 && strcmp(chr, rname) == 0) {
-            if (overlap_mode == 0) {
-                if (rec_beg >= beg && rec_beg <= end) {
-                    duckdb_free(tmp);
-                    return 1;
-                }
-            } else {
-                if (!(rec_end < beg || rec_beg > end)) {
-                    duckdb_free(tmp);
-                    return 1;
-                }
-            }
+    while (*cursor) {
+        int tid;
+        hts_pos_t beg, end;
+        const char *next;
+        /* Use HTSlib's bcftools-style coordinates and braced contig quoting,
+         * including names containing colons or commas. */
+        lookup.lookup_failed = 0;
+        next = hts_parse_region(cursor, &tid, &beg, &end, score_region_name2id,
+                                &lookup, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD);
+        if (lookup.out_of_memory) {
+            match = -1;
+            break;
         }
-        tok = strtok(NULL, ",");
+        if (!next) {
+            /* A contig absent from this VCF matches no record, as in the htslib
+             * synced reader. hts_parse_region stops at the failed lookup, so parse
+             * the item again with that name resolved: bad coordinates or an
+             * unterminated brace remain errors. */
+            if (tid != -1 || !lookup.lookup_failed || !lookup.missing_name ||
+                !hts_parse_region(cursor, &tid, &beg, &end, score_region_missing_name2id,
+                                  lookup.missing_name, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD)) {
+                match = -1;
+                break;
+            }
+            next = score_region_next_item(cursor);
+            if (!next) {
+                match = -1;
+                break;
+            }
+            cursor = next;
+            continue;
+        }
+        cursor = next;
+        if (tid == rec->rid && rec->pos < end && (overlap_mode == 0 ? rec->pos >= beg : rec_end > beg)) {
+            match = 1;
+        }
     }
-    duckdb_free(tmp);
-    return 0;
+    free(lookup.missing_name);
+    return match;
 }
 
 static int score_append_token(char **out, size_t *len, size_t *cap, const char *tok) {
@@ -1433,25 +1458,40 @@ static int score_append_token(char **out, size_t *len, size_t *cap, const char *
     return 0;
 }
 
-static int score_parse_region_line(const char *line, char *token, size_t token_sz) {
+static int score_parse_region_line(const char *line, int is_bed, char *token, size_t token_sz) {
     char buf[2048];
     char *fields[8];
     int n_fields;
-    if (!line) return -1;
+    if (!line || strlen(line) >= sizeof(buf)) return -1;
     snprintf(buf, sizeof(buf), "%s", line);
     n_fields = score_split_fields(buf, '\t', fields, 8);
     if (n_fields <= 0) return -1;
     if (n_fields == 1) {
+        if (is_bed || strlen(fields[0]) >= token_sz) return -1;
         snprintf(token, token_sz, "%s", fields[0]);
         return 0;
     }
     {
         const char *chr = fields[0];
-        int64_t beg = atoll(fields[1]);
-        int64_t end = (n_fields >= 3) ? atoll(fields[2]) : beg;
-        if (beg < 1) beg = 1;
-        if (end < beg) end = beg;
-        snprintf(token, token_sz, "%s:%lld-%lld", chr, (long long)beg, (long long)end);
+        char *tail;
+        int written;
+        errno = 0;
+        int64_t beg = strtoll(fields[1], &tail, 10);
+        if (errno == ERANGE || tail == fields[1] || *tail) return -1;
+        int64_t end = beg;
+        if (is_bed && n_fields < 3) return -1;
+        if (n_fields >= 3) {
+            errno = 0;
+            end = strtoll(fields[2], &tail, 10);
+            if (errno == ERANGE || tail == fields[2] || *tail) return -1;
+        }
+        if (is_bed) {
+            if (beg < 0 || beg == INT64_MAX) return -1;
+            beg++;
+        }
+        if (beg < 1 || end < beg) return -1;
+        written = snprintf(token, token_sz, "{%s}:%lld-%lld", chr, (long long)beg, (long long)end);
+        if (written < 0 || (size_t)written >= token_sz) return -1;
     }
     return 0;
 }
@@ -1463,20 +1503,27 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
     size_t len = 0;
     size_t cap = 0;
     int have = 0;
+    int ret;
+    size_t path_len;
+    int is_bed;
 
     if (!path || !path[0]) return NULL;
+    path_len = strlen(path);
+    is_bed = (path_len >= 4 && strcasecmp(path + path_len - 4, ".bed") == 0) ||
+             (path_len >= 7 && strcasecmp(path + path_len - 7, ".bed.gz") == 0);
     fp = hts_open(path, "r");
     if (!fp) {
         snprintf(err, err_sz, "bcftools_score: failed to open region/target file: %s", path);
         return NULL;
     }
 
-    while (hts_getline(fp, '\n', &str) >= 0) {
+    while ((ret = hts_getline(fp, '\n', &str)) >= 0) {
         char token[512];
         char *s = str.s;
         while (*s && isspace((unsigned char)*s)) s++;
         if (!*s || *s == '#') continue;
-        if (score_parse_region_line(s, token, sizeof(token)) != 0) {
+        int parsed = score_parse_region_line(s, is_bed, token, sizeof(token));
+        if (parsed < 0) {
             if (str.s) free(str.s);
             hts_close(fp);
             if (out) duckdb_free(out);
@@ -1496,6 +1543,11 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
     if (str.s) free(str.s);
     hts_close(fp);
 
+    if (ret < -1) {
+        if (out) duckdb_free(out);
+        snprintf(err, err_sz, "bcftools_score: failed to read region/target file: %s", path);
+        return NULL;
+    }
     if (!have) {
         if (out) duckdb_free(out);
         return score_dup("");
@@ -2228,6 +2280,7 @@ static void score_init(duckdb_init_info info) {
     int n_metrics;
     int n_prs;
     int i;
+    int scan_failed = 0;
     char err[512];
 
     memset(init, 0, sizeof(*init));
@@ -2406,28 +2459,19 @@ static void score_init(duckdb_init_info info) {
             bcf_unpack(rec, BCF_UN_ALL);
 
             if (!score_record_passes_filter_list(hdr, rec, bind->apply_filters)) continue;
-            if (!score_record_in_region_list(hdr, rec, bind->regions, bind->regions_overlap >= 0 ? bind->regions_overlap : 1)) continue;
-            if (!score_record_in_region_list(hdr, rec, bind->targets, bind->targets_overlap >= 0 ? bind->targets_overlap : 0)) continue;
+            int in_regions = score_record_in_region_list(hdr, rec, bind->regions,
+                                                         bind->regions_overlap >= 0 ? bind->regions_overlap : 1);
+            int in_targets = score_record_in_region_list(hdr, rec, bind->targets,
+                                                         bind->targets_overlap >= 0 ? bind->targets_overlap : 0);
+            if (in_regions < 0 || in_targets < 0) {
+                snprintf(err, sizeof(err), "bcftools_score: invalid region/target expression");
+                goto score_record_error;
+            }
+            if (!in_regions || !in_targets) continue;
             {
                 int expr_keep = score_record_matches_exprs(rec, &src, err, sizeof(err));
                 if (expr_keep < 0) {
-                    if (idxs) duckdb_free(idxs);
-                    if (int32_arr) free(int32_arr);
-                    if (float_arr) free(float_arr);
-                    if (aps) duckdb_free(aps);
-                    if (missing) duckdb_free(missing);
-                    if (matched_markers) duckdb_free(matched_markers);
-                    if (allele_mismatch_markers) duckdb_free(allele_mismatch_markers);
-                    score_source_destroy(&src);
-                    if (summaries) {
-                        for (i = 0; i < n_prs; i++) {
-                            if (summaries[i]) score_destroy_summary(summaries[i]);
-                        }
-                        duckdb_free(summaries);
-                    }
-                    score_destroy_init(init);
-                    duckdb_init_set_error(info, err[0] ? err : "bcftools_score: failed to evaluate include/exclude expression");
-                    return;
+                    goto score_record_error;
                 }
                 if (expr_keep == 0) continue;
             }
@@ -2453,14 +2497,22 @@ static void score_init(duckdb_init_info info) {
 
             /* Phase 2: Extract genotype/dosage into per-allele-per-sample array */
             memset(missing, 0, sizeof(float) * (size_t)n_samples);
-            if (m_aps < rec->n_allele * n_samples) {
-                int new_m = rec->n_allele * n_samples;
-                float *new_aps = (float *)realloc(aps, sizeof(float) * (size_t)new_m);
-                if (!new_aps) continue;
-                aps = new_aps;
-                m_aps = new_m;
+            /* Keep allele/sample offsets representable in the int indexing below. */
+            uint64_t n_aps = (uint64_t)rec->n_allele * (uint64_t)n_samples;
+            if (n_aps > INT_MAX || n_aps > SIZE_MAX / sizeof(float)) {
+                snprintf(err, sizeof(err), "bcftools_score: allele/sample array exceeds allocation or indexing limits");
+                goto score_record_error;
             }
-            memset(aps, 0, sizeof(float) * (size_t)(rec->n_allele * n_samples));
+            if (m_aps < (int)n_aps) {
+                float *new_aps = (float *)realloc(aps, sizeof(float) * (size_t)n_aps);
+                if (!new_aps) {
+                    snprintf(err, sizeof(err), "bcftools_score: out of memory");
+                    goto score_record_error;
+                }
+                aps = new_aps;
+                m_aps = (int)n_aps;
+            }
+            memset(aps, 0, sizeof(float) * (size_t)n_aps);
 
             switch (bind->use_tag) {
             case SCORE_USE_GT:
@@ -2489,6 +2541,11 @@ static void score_init(duckdb_init_info info) {
             case SCORE_USE_DS:
                 number = bcf_get_format_float(hdr, rec, "DS", &float_arr, &m_float);
                 if (number <= 0) continue;
+                if ((int64_t)number != (int64_t)n_samples * (rec->n_allele - 1)) {
+                    snprintf(err, sizeof(err), "bcftools_score: invalid DS FORMAT cardinality at %s:%" PRId64,
+                             bcf_hdr_id2name(hdr, rec->rid), (int64_t)rec->pos + 1);
+                    goto score_record_error;
+                }
                 number /= n_samples;
                 if (number == 1 && rec->n_allele == 2) {
                     for (k = 0; k < n_samples; k++) {
@@ -2532,6 +2589,11 @@ static void score_init(duckdb_init_info info) {
                 for (ap = 0; ap < 2; ap++) {
                     number = bcf_get_format_float(hdr, rec, ap_tags[ap], &float_arr, &m_float);
                     if (number <= 0) continue;
+                    if ((int64_t)number != (int64_t)n_samples * (rec->n_allele - 1)) {
+                        snprintf(err, sizeof(err), "bcftools_score: invalid %s FORMAT cardinality at %s:%" PRId64,
+                                 ap_tags[ap], bcf_hdr_id2name(hdr, rec->rid), (int64_t)rec->pos + 1);
+                        goto score_record_error;
+                    }
                     number /= n_samples;
                     if (number == 1 && rec->n_allele == 2) {
                         for (k = 0; k < n_samples; k++) {
@@ -2561,6 +2623,11 @@ static void score_init(duckdb_init_info info) {
             case SCORE_USE_GP:
                 number = bcf_get_format_float(hdr, rec, "GP", &float_arr, &m_float);
                 if (number <= 0) continue;
+                if ((int64_t)number != (int64_t)n_samples * rec->n_allele * (rec->n_allele + 1) / 2) {
+                    snprintf(err, sizeof(err), "bcftools_score: invalid GP FORMAT cardinality at %s:%" PRId64,
+                             bcf_hdr_id2name(hdr, rec->rid), (int64_t)rec->pos + 1);
+                    goto score_record_error;
+                }
                 number /= n_samples;
                 if (number == 3 && rec->n_allele == 2) {
                     for (k = 0; k < n_samples; k++) {
@@ -2577,7 +2644,7 @@ static void score_init(duckdb_init_info info) {
                         float *ptr = float_arr + number * k;
                         for (b = 0; b < rec->n_allele; b++) {
                             for (a = 0; a <= b; a++) {
-                                int idx = b * (b + 1) / 2 + a;
+                                int idx = (int)((int64_t)b * (b + 1) / 2 + a);
                                 if (score_is_missing(ptr[idx])) missing[k] = 1;
                                 else {
                                     aps[a * n_samples + k] += ptr[idx];
@@ -2652,8 +2719,14 @@ static void score_init(duckdb_init_info info) {
             }
         }
 
+        goto score_records_done;
+score_record_error:
+        scan_failed = 1;
+score_records_done:
         if (idxs) duckdb_free(idxs);
     }
+
+    if (scan_failed) goto score_cleanup;
 
     if (bind->log_path && bind->log_path[0]) {
         if (score_write_log(bind, summaries, matched_markers, allele_mismatch_markers, n_samples, err, sizeof(err)) != 0) {
@@ -2676,6 +2749,7 @@ static void score_init(duckdb_init_info info) {
         }
     }
 
+score_cleanup:
     if (int32_arr) free(int32_arr);
     if (float_arr) free(float_arr);
     if (aps) duckdb_free(aps);
@@ -2690,6 +2764,11 @@ static void score_init(duckdb_init_info info) {
         duckdb_free(summaries);
     }
     hdr = NULL;
+    if (scan_failed) {
+        score_destroy_init(init);
+        duckdb_init_set_error(info, err);
+        return;
+    }
 
     duckdb_init_set_init_data(info, init, score_destroy_init);
 }

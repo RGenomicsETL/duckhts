@@ -1,0 +1,25 @@
+require duckhts
+
+# Rebuild fixtures: python3 test/scripts/prepare_bam_review_fixtures.py
+# Typed standard columns return NULL for tags with incompatible stored types.
+query III
+SELECT NM IS NULL, ML IS NULL, CG IS NULL
+FROM read_bam('test/data/bam_wrong_tags.bam', standard_tags := true)
+WHERE QNAME = 'wrong';
+----
+true	true	true
+
+query III
+SELECT NM, ML = [1,255]::BIGINT[], CG = [16]::BIGINT[]
+FROM read_bam('test/data/bam_wrong_tags.bam', standard_tags := true)
+WHERE QNAME = 'valid';
+----
+2	true	true
+
+# Named raw tag projections preserve the stored values.
+query TTT
+SELECT NM, ML, CG
+FROM read_bam('test/data/bam_wrong_tags.bam', auxiliary_tags := ['NM','ML','CG'])
+WHERE QNAME = 'wrong';
+----
+abc	f,0.5	abc

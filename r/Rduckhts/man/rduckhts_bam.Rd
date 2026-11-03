@@ -36,7 +36,12 @@ rduckhts_bam(
 
 \item{standard_tags}{Logical. If TRUE, include typed standard SAMtags columns. Default FALSE.}
 
-\item{auxiliary_tags}{Logical. If TRUE, include AUXILIARY_TAGS map of non-standard tags. Default FALSE.}
+\item{auxiliary_tags}{Logical, or a character vector of two-character tag
+names. \code{TRUE} adds an \code{AUXILIARY_TAGS} map of the non-standard
+tags; tag names such as \code{c("UR", "UB")} add one \code{VARCHAR} column
+per tag instead, formatted like the map values and \code{NULL} when a
+record lacks the tag. A named tag must not be a \code{standard_tags}
+column. Default \code{FALSE}.}
 
 \item{sequence_encoding}{Character. Sequence encoding for the SEQ column:
 \code{"string"} (default) returns decoded bases as \code{VARCHAR};

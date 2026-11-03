@@ -1,0 +1,23 @@
+require duckhts
+
+query I
+SELECT count(*) FROM (
+    (SELECT * FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1,000-1,500')
+     EXCEPT ALL SELECT * FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1000-1500'))
+    UNION ALL
+    (SELECT * FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1000-1500')
+     EXCEPT ALL SELECT * FROM read_bam('test/data/range.bam', region := 'CHROMOSOME_I:1,000-1,500'))
+);
+----
+0
+
+query I
+SELECT count(*) FROM (
+    (SELECT * FROM read_bcf('test/data/region_union.bcf', region := 'chr1:0,010-0,020,chr1:80-90')
+     EXCEPT ALL SELECT * FROM read_bcf('test/data/region_union.bcf', region := 'chr1:10-20,chr1:80-90'))
+    UNION ALL
+    (SELECT * FROM read_bcf('test/data/region_union.bcf', region := 'chr1:10-20,chr1:80-90')
+     EXCEPT ALL SELECT * FROM read_bcf('test/data/region_union.bcf', region := 'chr1:0,010-0,020,chr1:80-90'))
+);
+----
+0

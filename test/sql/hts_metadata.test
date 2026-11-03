@@ -1,0 +1,142 @@
+# Index sequence IDs follow the index dictionary, not the VCF header dictionary.
+# Fixture generation (htslib bgzip/tabix):
+# bgzip -c test/data/metadata_contigs.vcf > test/data/metadata_contigs.vcf.gz
+# tabix -p vcf test/data/metadata_contigs.vcf.gz
+# tabix -C -p vcf test/data/metadata_contigs.vcf.gz
+
+require duckhts
+
+query TITI
+SELECT seqname, length, index_type, mapped
+FROM read_hts_index('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.tbi');
+----
+c2	NULL	TBI	1
+c3	NULL	TBI	1
+c4	NULL	TBI	1
+
+query TITI
+SELECT seqname, length, index_type, mapped
+FROM read_hts_index('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.csi');
+----
+c2	NULL	CSI	1
+c3	NULL	CSI	1
+c4	NULL	CSI	1
+
+query TI rowsort
+SELECT DISTINCT seqname, tid
+FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.tbi');
+----
+c2	0
+c3	1
+c4	2
+
+query TI rowsort
+SELECT DISTINCT seqname, tid
+FROM read_hts_index_spans('__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz',
+    index_path := '__WORKING_DIRECTORY__/test/data/metadata_contigs.vcf.gz.csi');
+----
+c2	0
+c3	1
+c4	2
+
+# PREPARE retains the schema; every EXECUTE reads current input metadata.
+statement ok
+COPY (SELECT '##fileformat=VCFv4.2' AS line UNION ALL
+      SELECT '##contig=<ID=first,length=4>' UNION ALL
+      SELECT concat_ws(chr(9), '#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO'))
+TO '__WORKING_DIRECTORY__/test/sql/metadata_header.vcf' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement ok
+PREPARE metadata_header AS
+SELECT id FROM read_hts_header('__WORKING_DIRECTORY__/test/sql/metadata_header.vcf')
+WHERE record_type = 'contig';
+
+statement ok
+PREPARE metadata_raw_header AS
+SELECT raw FROM read_hts_header('__WORKING_DIRECTORY__/test/sql/metadata_header.vcf', mode := 'raw')
+WHERE starts_with(raw, '##contig');
+
+query T
+EXECUTE metadata_header;
+----
+first
+
+query T
+EXECUTE metadata_raw_header;
+----
+##contig=<ID=first,length=4>
+
+statement ok
+COPY (SELECT '##fileformat=VCFv4.2' AS line UNION ALL
+      SELECT '##contig=<ID=second,length=8>' UNION ALL
+      SELECT concat_ws(chr(9), '#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO'))
+TO '__WORKING_DIRECTORY__/test/sql/metadata_header.vcf' (FORMAT CSV, HEADER false, QUOTE '');
+
+query T
+EXECUTE metadata_header;
+----
+second
+
+query T
+EXECUTE metadata_raw_header;
+----
+##contig=<ID=second,length=8>
+
+statement ok
+DEALLOCATE metadata_header;
+
+statement ok
+DEALLOCATE metadata_raw_header;
+
+foreach reader read_hts_index read_hts_index_spans
+
+statement ok
+COPY (SELECT '>first' AS line UNION ALL SELECT 'ACGT')
+TO '__WORKING_DIRECTORY__/test/sql/metadata_sequence.fa' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT concat_ws(chr(9), 'first', '4', '7', '4', '5'))
+TO '__WORKING_DIRECTORY__/test/sql/metadata_sequence.fai' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement ok
+PREPARE metadata_index AS SELECT seqname FROM ${reader}(
+    '__WORKING_DIRECTORY__/test/sql/metadata_sequence.fa',
+    index_path := '__WORKING_DIRECTORY__/test/sql/metadata_sequence.fai');
+
+query T
+EXECUTE metadata_index;
+----
+first
+
+statement ok
+COPY (SELECT '>second' AS line UNION ALL SELECT 'ACGTACGT')
+TO '__WORKING_DIRECTORY__/test/sql/metadata_sequence.fa' (FORMAT CSV, HEADER false, QUOTE '');
+
+statement ok
+COPY (SELECT concat_ws(chr(9), 'second', '8', '8', '8', '9'))
+TO '__WORKING_DIRECTORY__/test/sql/metadata_sequence.fai' (FORMAT CSV, HEADER false, QUOTE '');
+
+query T
+EXECUTE metadata_index;
+----
+second
+
+statement ok
+DEALLOCATE metadata_index;
+
+endloop
+
+foreach reader read_hts_header read_hts_index read_hts_index_spans
+
+statement ok
+EXPLAIN SELECT * FROM ${reader}('__TEST_DIR__/missing_metadata_input');
+
+statement error
+SELECT * FROM ${reader}('__TEST_DIR__/missing_metadata_input');
+----
+Failed to open file
+
+endloop

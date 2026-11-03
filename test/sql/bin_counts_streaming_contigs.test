@@ -1,0 +1,64 @@
+require duckhts
+
+# Rebuild fixtures: python3 test/scripts/prepare_bam_review_fixtures.py
+# Previous POS/PNEXT persist across contigs, empty contigs and unpaired records.
+# WisecondorX convert_tools.py at 0f637d02fc7a01ecec4c32a8bc1520b4bdd39365
+# owns this duplicate rule. MapQ is applied after updating the duplicate state.
+# Kept records: a, b2, b3. b1 matches a; c1 and c2 both match b3's state.
+statement ok
+SET threads = 3;
+
+query TIIIII rowsort
+SELECT chrom, count_total, count_pre, gc_bases_post, bases_post, mapq_sum_post
+FROM bam_bin_counts('test/data/bam_stream_contigs.bam', 100,
+  rmdup := 'streaming', mapq := 1, stats := 'gc,mq');
+----
+a	1	1	0	10	60
+b	2	3	0	20	70
+c	0	2	0	0	0
+empty	0	0	0	0	0
+
+query TIIIII rowsort
+SELECT chrom, count_total, count_pre, gc_bases_post, bases_post, mapq_sum_post
+FROM bam_bin_counts('test/data/bam_stream_contigs_noindex.bam', 100,
+  rmdup := 'streaming', mapq := 1, stats := 'gc,mq');
+----
+a	1	1	0	10	60
+b	2	3	0	20	70
+c	0	2	0	0	0
+empty	0	0	0	0	0
+
+# A selected contig starts with an empty state in both access modes.
+query TIII
+SELECT chrom, count_total, gc_bases_post, mapq_sum_post
+FROM bam_bin_counts('test/data/bam_stream_contigs.bam', 100,
+  chrom := 'c', rmdup := 'streaming', mapq := 1, stats := 'gc,mq');
+----
+c	2	20	60
+
+query TIII
+SELECT chrom, count_total, gc_bases_post, mapq_sum_post
+FROM bam_bin_counts('test/data/bam_stream_contigs_noindex.bam', 100,
+  chrom := 'c', rmdup := 'streaming', mapq := 1, stats := 'gc,mq');
+----
+c	2	20	60
+
+statement ok
+CREATE TABLE indexed_counts AS
+SELECT * FROM bam_bin_counts('test/data/bam_stream_contigs.bam', 100,
+  rmdup := 'streaming', mapq := 1, stats := 'gc,mq');
+
+statement ok
+SET threads = 1;
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM indexed_counts EXCEPT ALL
+   SELECT * FROM bam_bin_counts('test/data/bam_stream_contigs_noindex.bam', 100,
+     rmdup := 'streaming', mapq := 1, stats := 'gc,mq'))
+  UNION ALL
+  (SELECT * FROM bam_bin_counts('test/data/bam_stream_contigs.bam', 100,
+     rmdup := 'streaming', mapq := 1, stats := 'gc,mq') EXCEPT ALL SELECT * FROM indexed_counts)
+);
+----
+0

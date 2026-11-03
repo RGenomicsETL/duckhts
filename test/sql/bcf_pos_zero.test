@@ -1,0 +1,39 @@
+# name: test/sql/bcf_pos_zero.test
+# description: Indexed full scans preserve VCF telomeric POS 0 records
+# group: [duckhts]
+
+require duckhts
+
+# Fixture: bcftools 1.24 view -Ob -o test/data/bcf_pos_zero.bcf test/data/bcf_pos_zero.vcf
+#          bcftools 1.24 index test/data/bcf_pos_zero.bcf
+statement ok
+SET threads=3;
+
+query I
+SELECT count(*) FROM read_bcf('test/data/bcf_pos_zero.bcf', scan_mode := 'sequential');
+----
+4
+
+query I
+SELECT count(*) FROM read_bcf('test/data/bcf_pos_zero.bcf');
+----
+4
+
+query TI rowsort
+SELECT CHROM, POS FROM read_bcf('test/data/bcf_pos_zero.bcf');
+----
+chr1	0
+chr1	5
+chr2	0
+chr2	5
+
+query I
+SELECT count(*) FROM (
+  (SELECT * FROM read_bcf('test/data/bcf_pos_zero.bcf') EXCEPT ALL
+   SELECT * FROM read_bcf('test/data/bcf_pos_zero.bcf', scan_mode := 'sequential'))
+  UNION ALL
+  (SELECT * FROM read_bcf('test/data/bcf_pos_zero.bcf', scan_mode := 'sequential') EXCEPT ALL
+   SELECT * FROM read_bcf('test/data/bcf_pos_zero.bcf'))
+);
+----
+0

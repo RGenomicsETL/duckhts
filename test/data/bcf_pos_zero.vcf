@@ -1,0 +1,8 @@
+##fileformat=VCFv4.2
+##contig=<ID=chr1,length=100>
+##contig=<ID=chr2,length=100>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	0	zero1	A	C	.	.	.
+chr1	5	five1	A	C	.	.	.
+chr2	0	zero2	G	T	.	.	.
+chr2	5	five2	G	T	.	.	.

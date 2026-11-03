@@ -23,9 +23,18 @@ static atomic_flag macro_lock = ATOMIC_FLAG_INIT;
 /* The definition list is built under macro_lock by the first successful LOAD in the
    process and never changes afterwards. Readers use it only once it is published. */
 static atomic_bool definitions_published = false;
+static _Thread_local duckhts_registration_t *macro_lock_owner;
+
+static void macro_unlock(duckhts_registration_t *registration) {
+    if (macro_lock_owner == registration) {
+        macro_lock_owner = NULL;
+        atomic_flag_clear_explicit(&macro_lock, memory_order_release);
+    }
+}
 
 bool duckhts_registration_error(duckhts_registration_t *registration, const char *message) {
     registration->access->set_error(registration->info, message);
+    macro_unlock(registration);
     return false;
 }
 
@@ -41,6 +50,7 @@ static bool macro_is_public(const char *name) {
 bool duckhts_macro_registration_begin(duckhts_registration_t *registration) {
     while (atomic_flag_test_and_set_explicit(&macro_lock, memory_order_acquire)) {
     }
+    macro_lock_owner = registration;
     if (!atomic_load_explicit(&definitions_published, memory_order_acquire)) {
         for (size_t i = 0; i < macro_count; i++) {
             free(macros[i].name);
@@ -63,7 +73,6 @@ bool duckhts_macro_registration_begin(duckhts_registration_t *registration) {
         const char *error = duckdb_result_error(&result);
         duckhts_registration_error(registration, error != NULL ? error : "Cannot inspect default database");
         duckdb_destroy_result(&result);
-        atomic_flag_clear_explicit(&macro_lock, memory_order_release);
         return false;
     }
     duckdb_data_chunk chunk = duckdb_fetch_chunk(result);
@@ -138,7 +147,7 @@ bool duckhts_macro_registration_end(duckhts_registration_t *registration) {
             atomic_store_explicit(&definitions_published, true, memory_order_release);
         }
     }
-    atomic_flag_clear_explicit(&macro_lock, memory_order_release);
+    macro_unlock(registration);
     return ok;
 }
 
@@ -146,14 +155,12 @@ bool duckhts_register_sql(duckhts_registration_t *registration, const char *sql)
     const size_t prefix_length = sizeof(MACRO_PREFIX) - 1;
     if (strncmp(sql, MACRO_PREFIX, prefix_length) != 0) {
         duckhts_registration_error(registration, "Expected CREATE OR REPLACE MACRO statement");
-        atomic_flag_clear_explicit(&macro_lock, memory_order_release);
         return false;
     }
     const char *name_end = strchr(sql + prefix_length, '(');
     if (name_end == NULL || name_end == sql + prefix_length ||
         registration->macro_index >= DUCKHTS_MAX_MACROS) {
         duckhts_registration_error(registration, "Invalid DuckHTS macro name or count");
-        atomic_flag_clear_explicit(&macro_lock, memory_order_release);
         return false;
     }
     size_t name_length = (size_t)(name_end - sql - prefix_length);
@@ -167,7 +174,6 @@ bool duckhts_register_sql(duckhts_registration_t *registration, const char *sql)
             macros[index].name = NULL;
             macros[index].sql = NULL;
             duckhts_registration_error(registration, "Cannot allocate macro definition");
-            atomic_flag_clear_explicit(&macro_lock, memory_order_release);
             return false;
         }
         memcpy(macros[index].name, sql + prefix_length, name_length);
@@ -177,7 +183,6 @@ bool duckhts_register_sql(duckhts_registration_t *registration, const char *sql)
         macro_count++;
     } else if (strcmp(macros[index].sql, sql) != 0) {
         duckhts_registration_error(registration, "Inconsistent DuckHTS macro definition");
-        atomic_flag_clear_explicit(&macro_lock, memory_order_release);
         return false;
     }
 
@@ -192,9 +197,6 @@ bool duckhts_register_sql(duckhts_registration_t *registration, const char *sql)
             error != NULL && *error != '\0' ? error : "DuckHTS SQL registration failed");
     }
     duckdb_destroy_result(&result);
-    if (state != DuckDBSuccess) {
-        atomic_flag_clear_explicit(&macro_lock, memory_order_release);
-    }
     return state == DuckDBSuccess;
 }
 
@@ -205,7 +207,6 @@ bool duckhts_register_sql_parts(duckhts_registration_t *registration,
         size_t part_length = strlen(parts[i]);
         if (part_length > SIZE_MAX - length - 1) {
             duckhts_registration_error(registration, "DuckHTS SQL registration text is too large");
-            atomic_flag_clear_explicit(&macro_lock, memory_order_release);
             return false;
         }
         length += part_length;
@@ -214,7 +215,6 @@ bool duckhts_register_sql_parts(duckhts_registration_t *registration,
     char *sql = malloc(length + 1);
     if (sql == NULL) {
         duckhts_registration_error(registration, "DuckHTS could not allocate SQL registration text");
-        atomic_flag_clear_explicit(&macro_lock, memory_order_release);
         return false;
     }
     size_t offset = 0;

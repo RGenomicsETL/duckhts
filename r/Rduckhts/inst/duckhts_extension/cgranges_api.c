@@ -670,16 +670,27 @@ static void cgranges_destroy_scalar(duckdb_function_info info, duckdb_data_chunk
     }
 }
 
+/* duckdb_vector_get_column_type returns an owned logical type. */
+static duckdb_type vector_type_id(duckdb_vector vec) {
+    duckdb_logical_type type = duckdb_vector_get_column_type(vec);
+    duckdb_type id = duckdb_get_type_id(type);
+    duckdb_destroy_logical_type(&type);
+    return id;
+}
+
 static void cgranges_add_scalar(duckdb_function_info info, duckdb_data_chunk input, duckdb_vector output) {
     duckhts_cgranges_registry_t *reg = get_registry_from_function(info);
     idx_t n = duckdb_data_chunk_get_size(input), i;
+    duckdb_vector start_vec = duckdb_data_chunk_get_vector(input, 2);
+    duckdb_vector end_vec = duckdb_data_chunk_get_vector(input, 3);
+    duckdb_type start_type = vector_type_id(start_vec);
+    duckdb_type end_type = vector_type_id(end_vec);
+    int has_label = duckdb_data_chunk_get_column_count(input) > 4;
+    duckdb_vector label_vec = has_label ? duckdb_data_chunk_get_vector(input, 4) : NULL;
+    duckdb_type label_type = has_label ? vector_type_id(label_vec) : DUCKDB_TYPE_INVALID;
     for (i = 0; i < n; i++) {
         char *name = chunk_cell_strdup(input, 0, i);
         char *chrom = chunk_cell_strdup(input, 1, i);
-        duckdb_vector start_vec = duckdb_data_chunk_get_vector(input, 2);
-        duckdb_vector end_vec = duckdb_data_chunk_get_vector(input, 3);
-        duckdb_type start_type = duckdb_get_type_id(duckdb_vector_get_column_type(start_vec));
-        duckdb_type end_type = duckdb_get_type_id(duckdb_vector_get_column_type(end_vec));
         duckhts_cgranges_entry_t *entry;
         int64_t start, end;
         bool label_valid = false;
@@ -702,9 +713,7 @@ static void cgranges_add_scalar(duckdb_function_info info, duckdb_data_chunk inp
         start = chunk_cell_to_int64(start_vec, i, start_type);
         end = chunk_cell_to_int64(end_vec, i, end_type);
 
-        if (duckdb_data_chunk_get_column_count(input) > 4) {
-            duckdb_vector label_vec = duckdb_data_chunk_get_vector(input, 4);
-            duckdb_type label_type = duckdb_get_type_id(duckdb_vector_get_column_type(label_vec));
+        if (has_label) {
             if (!row_is_null(label_vec, i)) {
                 label_valid = true;
                 label_kind = normalized_label_kind_from_type(label_type);

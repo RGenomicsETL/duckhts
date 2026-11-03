@@ -263,6 +263,11 @@ static void bam_pileup_execute(duckdb_function_info info,
         const bam_pileup1_t *plp = bam_plp64_auto(local->plp, &tid, &pos, &n_plp);
         if (!plp) {
             local->done = 1;
+            if (n_plp < 0) {
+                duckdb_function_set_error(info, "read_pileup: error while reading alignments");
+                duckdb_data_chunk_set_size(output, 0);
+                return;
+            }
             break;
         }
 

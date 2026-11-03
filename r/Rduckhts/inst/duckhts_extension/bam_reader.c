@@ -128,6 +128,17 @@ static duckdb_logical_type bam_std_tag_type(const bam_std_tag_t *t) {
     }
 }
 
+static bool bam_std_tag_matches(const bam_std_tag_t *tag, const uint8_t *aux) {
+    if (!aux) return false;
+    if (tag->type == 'i') {
+        /* BAM stores scalar SAM integers in the narrowest available width. */
+        return aux[0] == 'c' || aux[0] == 'C' || aux[0] == 's' ||
+               aux[0] == 'S' || aux[0] == 'i' || aux[0] == 'I';
+    }
+    if (tag->type == 'B') return aux[0] == 'B' && aux[1] == tag->subtype;
+    return aux[0] == tag->type;
+}
+
 static int bam_assign_list_int(duckdb_vector vec, idx_t row, const uint8_t *aux) {
     uint32_t len = bam_auxB_len(aux);
     duckdb_list_entry entry;
@@ -1287,6 +1298,12 @@ static int claim_next_contig(bam_local_init_data_t *local,
      * that optional count, and CRAI does not supply it. */
     errno = 0;
     local->itr = sam_itr_queryi(local->idx, tid, beg, end);
+    if (local->itr && tid >= 0 && beg == 0 && !local->fp->is_cram) {
+        /* BAM indexing places pos=-1 records in the first bin. htslib clamps
+         * query starts to zero; full scans must also accept their end=0. */
+        local->itr->beg = -1;
+        local->part_beg = -1;
+    }
     if (!local->itr) {
         /* Without a mapped chunk or optional count, HTSlib cannot distinguish
          * an empty BAM from an all-unplaced BAM. No named-contig iterator can
@@ -1623,7 +1640,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                         int std_idx = (int)(col_id - BAM_COL_CORE_COUNT);
                         const bam_std_tag_t *st = &BAM_STD_TAGS[std_idx];
                         uint8_t *aux = bam_aux_get(b, st->tag);
-                        if (!aux) {
+                        if (!bam_std_tag_matches(st, aux)) {
                             set_null(vec, row_count);
                             break;
                         }
@@ -1651,8 +1668,7 @@ static void bam_read_function(duckdb_function_info info, duckdb_data_chunk outpu
                                 break;
                             }
                             case 'B': {
-                                char subtype = aux[1];
-                                if (subtype == 'f' || subtype == 'd') {
+                                if (st->subtype == 'f') {
                                     if (!bam_assign_list_double(vec, row_count, aux)) goto list_error;
                                 } else {
                                     if (!bam_assign_list_int(vec, row_count, aux)) goto list_error;

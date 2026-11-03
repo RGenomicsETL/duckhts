@@ -153,8 +153,8 @@ run_symlink_case() {
             grep -q $'CHROMOSOME_I\t' "$dir/output"
         fi
     else
-        if [[ $status -eq 0 || -e $dir/output || -L $dir/output ]]; then
-            echo "$name: failed overwrite must remove only its own output" >&2
+        if [[ $status -eq 0 || ! -L $dir/output || $(readlink "$dir/output") != referent ]]; then
+            echo "$name: failed overwrite must preserve the destination symlink" >&2
             return 1
         fi
         if [[ $name == idxstats ]]; then
@@ -163,7 +163,11 @@ run_symlink_case() {
             grep -q 'read error' "$dir/query.log"
         fi
     fi
-    if [[ -L $dir/output ]] || ! cmp -s "$dir/referent" <(printf 'referent must survive\n'); then
+    if compgen -G "$dir/output.duckhts-*.tmp" > /dev/null; then
+        echo "$name: overwrite left a temporary output" >&2
+        return 1
+    fi
+    if ! cmp -s "$dir/referent" <(printf 'referent must survive\n'); then
         echo "$name: overwrite touched the symlink referent" >&2
         return 1
     fi

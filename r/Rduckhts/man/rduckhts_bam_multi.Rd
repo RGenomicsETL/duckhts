@@ -37,7 +37,8 @@ rduckhts_bam_multi(
 
 \item{standard_tags}{Logical; include standard SAM tag columns.}
 
-\item{auxiliary_tags}{Logical; include auxiliary tag map column.}
+\item{auxiliary_tags}{Logical, or a character vector of tag names; see
+[rduckhts_bam()].}
 
 \item{sequence_encoding}{Optional sequence encoding (e.g. \code{"nt16"}).}
 

@@ -4,6 +4,78 @@
 
 require duckhts
 
+# Reversible allele fields must encode two nonempty alleles totaling at most 11 bases.
+statement error
+SELECT reverse_variantkey(2139095040::UBIGINT);
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(encode_variantkey(1, 0, ((11 << 27) | (1 << 23))::UINTEGER));
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(parse_variantkey_hex('0000000060800000'));
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(encode_variantkey(1, 0, ((6 << 27) | (6 << 23))::UINTEGER));
+----
+invalid reversible REF/ALT lengths
+
+statement error
+SELECT reverse_variantkey(0::UBIGINT);
+----
+invalid reversible REF/ALT lengths
+
+query TT
+SELECT rv.ref, rv.alt
+FROM (SELECT reverse_variantkey(variantkey('1', 1, 'AAAAAAAAAA', 'T')) AS rv);
+----
+AAAAAAAAAA	T
+
+# Extension sizes must fit the upstream uint32 parameter without wrapping.
+query III
+SELECT extend_regionkey(regionkey('1', 10, 20), 4294967296) IS NULL,
+       extend_regionkey(regionkey('1', 10, 20), 9223372036854775807) IS NULL,
+       extend_regionkey(regionkey('1', 10, 20), -1) IS NULL;
+----
+1	1	1
+
+query II
+SELECT extract_regionkey_startpos(extend_regionkey(regionkey('1', 10, 20), 4294967295)),
+       extract_regionkey_endpos(extend_regionkey(regionkey('1', 10, 20), 4294967295));
+----
+0	268435455
+
+# Chromosome codes must fit the upstream five-bit field without wrapping.
+query IIIIII
+SELECT count(*) FILTER (WHERE variantkey(chrom, 100, 'A', 'T') IS NULL),
+       count(*) FILTER (WHERE regionkey(chrom, 0, 100) IS NULL),
+       count(*) FILTER (WHERE variantkey_range(chrom, 1, 100) IS NULL),
+       count(*) FILTER (WHERE are_overlapping_regions(chrom, 0, 10, '1', 0, 10) IS NULL),
+       count(*) FILTER (WHERE are_overlapping_region_regionkey(chrom, 0, 10, regionkey('1', 0, 10)) IS NULL),
+       count(*)
+FROM (VALUES ('chr32'), ('chr33'), ('38'), ('257'), ('999999999999999999999999')) t(chrom);
+----
+5	5	5	5	5	5
+
+query II
+SELECT encode_variantkey(33, 0, 145752064) IS NULL,
+       encode_regionkey(33, 0, 10, 0) IS NULL;
+----
+1	1
+
+query IIII
+SELECT extract_variantkey_chrom(variantkey('CHR00031', 1, 'A', 'T')),
+       extract_variantkey_chrom(variantkey('chrX', 1, 'A', 'T')),
+       extract_regionkey_chrom(regionkey('mT', 0, 10)),
+       variantkey('unknown', 1, 'A', 'T') IS NULL;
+----
+31	23	25	1
+
 query TTTTTTTTTTTTT
 SELECT duckhts_contig_key('chr1'),
        duckhts_contig_key('1'),

@@ -197,12 +197,12 @@ int duckhts_detect_fastq_quality_encoding(const char *path, int64_t max_records,
         }
 
         seq_len = seq.l;
-        while (qual_len < seq_len) {
+        do {
             ret = hts_getline(fp, KS_SEP_LINE, &line);
             if (ret < 0) break;
             qual_len += line.l;
             update_ascii_range(out, line.s, line.l);
-        }
+        } while (qual_len < seq_len);
         if (ret < 0 || qual_len != seq_len) {
             if (errbuf && errbuf_len > 0) {
                 snprintf(errbuf, errbuf_len,

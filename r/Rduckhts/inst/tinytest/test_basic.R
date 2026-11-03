@@ -148,7 +148,6 @@ expect_identical(
     "bed_path",
     "reference",
     "index_path",
-    "bed_index_path",
     "mapq",
     "min_baseq",
     "min_read_len",
@@ -157,9 +156,7 @@ expect_identical(
     "min_depth",
     "max_depth",
     "decompression_threads",
-    "fragment_mode",
-    "strand_outputs",
-    "processing_threads"
+    "strand_outputs"
   )
 )
 expect_identical(
@@ -249,10 +246,6 @@ expect_identical(
     "path",
     "region",
     "index_path",
-    "header",
-    "header_names",
-    "auto_detect",
-    "column_types",
     "scan_mode",
     "attributes_map",
     "attributes_list",
@@ -270,10 +263,6 @@ expect_identical(
     "path",
     "region",
     "index_path",
-    "header",
-    "header_names",
-    "auto_detect",
-    "column_types",
     "scan_mode",
     "attributes_map",
     "attributes_list",
@@ -414,10 +403,6 @@ expect_identical(
     "columns",
     "region",
     "index_path",
-    "header",
-    "header_names",
-    "auto_detect",
-    "column_types",
     "attributes_map",
     "attributes_list",
     "attributes_pairs",

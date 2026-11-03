@@ -1,0 +1,24 @@
+require duckhts
+
+statement ok
+COPY (SELECT * FROM (VALUES (3000000000::BIGINT), (-3000000000), (2147483647), (-2147483648), (2147483648), (-2147483649)) AS t(value)) TO '__WORKING_DIRECTORY__/test/sql/integer_range.tsv' (FORMAT CSV, HEADER false);
+
+query I
+SELECT * FROM read_tabix('__WORKING_DIRECTORY__/test/sql/integer_range.tsv', column_types := ['INTEGER']);
+----
+NULL
+NULL
+2147483647
+-2147483648
+NULL
+NULL
+
+query I
+SELECT * FROM read_tabix('__WORKING_DIRECTORY__/test/sql/integer_range.tsv', column_types := ['BIGINT']);
+----
+3000000000
+-3000000000
+2147483647
+-2147483648
+2147483648
+-2147483649
