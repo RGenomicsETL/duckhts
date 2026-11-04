@@ -43,14 +43,35 @@ summaries AS (
                '(\.(txt|tsv|ssf|gz|bgz))+$', '') AS prs
     FROM unnest(getvariable('score_summaries')) AS files(path)
 ),
+-- The header is the first line that is not a '#' comment; as in native, a line starting
+-- with #CHR or #ID is the header with its '#' removed. read_tabix skips every '#' line,
+-- so the header line is read as whole lines through read_csv.
+summary_headers AS MATERIALIZED (
+    SELECT path, starts_with(line, '#') AS hashed,
+           string_split(CASE WHEN starts_with(line, '#') THEN substr(line, 2) ELSE line END, chr(9)) AS header_fields
+    FROM query(array_to_string(list_transform(getvariable('score_summaries'),
+        lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ' AS path, line FROM (SELECT line FROM read_csv(' ||
+             chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ', columns := {''line'': ''VARCHAR''}, header := false, delim := chr(1), quote := '''', ' ||
+             'escape := '''', comment := '''', auto_detect := false, compression := ' ||
+             CASE WHEN regexp_matches(p, '\.(gz|bgz)$') THEN '''gzip''' ELSE '''none''' END ||
+             ') WHERE NOT starts_with(line, ''#'') OR starts_with(line, ''#CHR'') OR starts_with(line, ''#ID'') LIMIT 1)'),
+        ' UNION ALL '))
+),
 -- Each scan has its own ordinal: UNION scheduling cannot decide which duplicate wins.
 -- Fields stay VARCHAR (auto_detect := false) so parsing starts from the original text, as native does.
+-- read_tabix, rather than read_csv, reads the data rows so truncated compressed input is an error.
 summary_rows AS MATERIALIZED (
-    SELECT * FROM query(array_to_string(list_transform(getvariable('score_summaries'),
+    SELECT r.path, r.ordinal, r.field_values
+    FROM query(array_to_string(list_transform(getvariable('score_summaries'),
         lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
-             ' AS path, row_number() OVER () AS ordinal, to_json(t) AS fields FROM read_tabix(' ||
+             ' AS path, row_number() OVER () AS ordinal, list_value(*COLUMNS(*)) AS field_values FROM read_tabix(' ||
              chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
-             ', header := true, auto_detect := false) t'), ' UNION ALL '))
+             ', header := false, auto_detect := false)'), ' UNION ALL ')) r
+    JOIN summary_headers h USING (path)
+    -- Without a '#' header, read_tabix returns the header line as its first row.
+    WHERE h.hashed OR r.ordinal > 1
 ),
 -- Alias order follows the pinned native presets.
 aliases(preset, role, names) AS (
@@ -85,16 +106,17 @@ aliases(preset, role, names) AS (
 selected_aliases AS (
     SELECT role, names FROM aliases, options WHERE aliases.preset = options.preset
 ),
+-- Each role maps to the 1-based position of its header field; the last preset alias present wins.
 header_mapping AS (
     SELECT path, map_from_entries(list({'key': role, 'value':
-        '/' || list_first(list_filter(json_keys(fields), lambda k: lower(k) = lower(
-            list_last(list_filter(names, lambda a: list_contains(list_transform(json_keys(fields), lambda k: lower(k)), lower(a)))))))})) AS mapping
-    FROM summary_rows CROSS JOIN selected_aliases WHERE ordinal = 1
+        list_position(list_transform(header_fields, lambda k: lower(k)), lower(
+            list_last(list_filter(names, lambda a: list_contains(list_transform(header_fields, lambda k: lower(k)), lower(a))))))})) AS mapping
+    FROM summary_headers CROSS JOIN selected_aliases
     GROUP BY path
 ),
 fields AS (
     SELECT path, ordinal, map_from_entries(list_transform(map_entries(mapping), lambda m:
-        {'key': m['key'], 'value': json_extract_string(fields, m['value'])})) AS f,
+        {'key': m['key'], 'value': field_values[m['value']]})) AS f,
         mapping['CHR'] IS NULL OR mapping['BP'] IS NULL AS lack_position
     FROM summary_rows JOIN header_mapping USING (path)
     WHERE CASE WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
@@ -264,7 +286,8 @@ matched AS (
                     getvariable('score_path') || ':' || c.CHROM || ':' || c.POS)
                 ELSE true END AS available,
            CASE WHEN mode = 'GT' THEN alleles[1] IS NULL OR (len(alleles) >= 2 AND alleles[2] IS NULL)
-                ELSE len(list_filter(dosage, lambda x: x IS NOT NULL)) <> len(ALT) END AS missing,
+                -- Native score_is_missing() also treats an ordinary NaN dosage as missing.
+                ELSE len(list_filter(dosage, lambda x: x IS NOT NULL AND NOT isnan(x))) <> len(ALT) END AS missing,
            CASE WHEN mode = 'GT' THEN len(list_filter(alleles[1:2], lambda x: x = allele))::FLOAT
                 WHEN allele > 0 THEN dosage[allele]
                 ELSE list_reduce(list_prepend(2::FLOAT, dosage), lambda a, b: (a - b)::FLOAT) END AS dose

@@ -148,7 +148,7 @@ SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
 statement ok
 SET VARIABLE score_use = 'DS';
 
-foreach fixture score_dosage score_missing_ds
+foreach fixture score_dosage score_missing_ds score_sql_nan_ds
 
 statement ok
 SET VARIABLE score_path = 'test/data/${fixture}.vcf';
@@ -262,6 +262,35 @@ SELECT SAMPLE, "score_sql_lp_plink2_CNT_p0.1", "score_sql_lp_plink2_CNT_p1" FROM
 ----
 S1	2	3
 S2	2	3
+
+# A header line starting with #CHR or #ID is the header with its '#' removed; other
+# '#' lines before it are comments. Plain and BGZF summaries.
+statement ok
+SET VARIABLE score_q_score_thr = NULL;
+
+foreach summary score_sql_hash_header.tsv score_sql_hash_header_bgzf.tsv.gz score_sql_hash_id.tsv
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/${summary}'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK2', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+query TI
+SELECT SAMPLE, score_sql_hash_id_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	3
+S2	3
 
 statement ok
 SET VARIABLE score_columns = 'PLINK';
