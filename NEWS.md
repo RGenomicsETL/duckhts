@@ -2,6 +2,16 @@
 
 # duckhts (development version)
 
+- `test/sql/score_reference.sql` computes `bcftools_score`'s GT and DS scores as one SQL
+  query over `read_geno`, `read_bcf_samples`, `read_hts_header` and `read_tabix`, taking its
+  inputs through session variables. `test/sql/score_sql_parity.test` compares it with the
+  native function on 119 cases: the eight column presets, ID and position matching,
+  thresholds, samples, FILTER selection, region and target strings and BED files with
+  their overlap modes, and the upstream multiallelic behaviour. Counts must match exactly;
+  scores within a float32 summation bound derived for each case. HDS/AP/GP/AS, GWAS-VCF
+  summaries and include/exclude expressions are outside the reference.
+  `benchmarks/benchmark_score.md` times it beside the native function and `bcftools +score`:
+  at 500,000 variants × 100 samples, 37.6 s against 0.99 s native and 1.16 s upstream.
 - `read_bcf` parses only the VCF fields that selected columns read, by setting htslib's
   `max_unpack` from the projection. A site-only scan of the 2,504-sample 1000 Genomes
   chr22 VCF parses no genotypes; results are unchanged. A text VCF field that no selected
