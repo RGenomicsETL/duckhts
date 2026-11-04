@@ -27,7 +27,7 @@ FROM query(CASE
          ('PLINK', 'PLINK2', 'REGENIE', 'SAIGE', 'BOLT', 'BOLT_LMM', 'METAL', 'PGS', 'SSF', 'GWAS-SSF')
         THEN error('score_reference: unsupported columns preset')
     WHEN len(list_distinct(list_transform(getvariable('score_summaries'), lambda p:
-         lower(regexp_replace(regexp_extract(p, '[^/]+$'), '(\.(txt|tsv|ssf|gz|bgz))+$', '')))))
+         lower(regexp_replace(regexp_extract(p, '[^/]+$'), '(\.(gz|txt|tsv|vcf|bcf))+$', '')))))
          <> len(getvariable('score_summaries'))
         THEN error('score_reference: duplicate PRS names')
     ELSE $score$
@@ -40,7 +40,7 @@ options AS NOT MATERIALIZED (
 ),
 summaries AS (
     SELECT path, regexp_replace(regexp_extract(path, '[^/]+$'),
-               '(\.(txt|tsv|ssf|gz|bgz))+$', '') AS prs
+               '(\.(gz|txt|tsv|vcf|bcf))+$', '') AS prs
     FROM unnest(getvariable('score_summaries')) AS files(path)
 ),
 -- The header is the first line that is not a '#' comment; as in native, a line starting
@@ -107,7 +107,7 @@ header_mapping AS (
     SELECT path, map_from_entries(list({'key': role, 'value':
         list_position(list_transform(header_fields, lambda k: lower(k)), lower(
             list_last(list_filter(names, lambda a: list_contains(list_transform(header_fields, lambda k: lower(k)), lower(a))))))})) AS mapping,
-           bool_or(hashed) AS hashed
+           bool_or(hashed) AS hashed, any_value(header_fields) AS header_fields
     FROM summary_headers CROSS JOIN selected_aliases
     GROUP BY path
 ),
@@ -116,10 +116,11 @@ fields AS (
         {'key': m['key'], 'value': field_values[m['value']]})) AS f,
         mapping['CHR'] IS NULL OR mapping['BP'] IS NULL AS lack_position
     FROM summary_rows JOIN header_mapping USING (path)
-    -- Without a '#' header, read_tabix returns the header line as its first row. This filter
-    -- stays here: joining summary_headers into summary_rows changed DuckDB's estimates so the
-    -- marker hash join built over the V x S calls instead of the markers (9 GiB at 4 PRS).
-    WHERE (hashed OR ordinal > 1)
+    -- Without a '#' header, read_tabix returns the header line as its first row, unless a
+    -- tabix index with line_skip already skipped it. This filter stays here: joining
+    -- summary_headers into summary_rows changed DuckDB's estimates so the marker hash join
+    -- built over the V x S calls instead of the markers (9 GiB at 4 PRS).
+    WHERE NOT (ordinal = 1 AND NOT hashed AND field_values = header_fields)
       AND CASE WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
                THEN error('score_reference: missing effect allele/weight columns in summary header: ' || path)
                WHEN (coalesce(getvariable('score_use_variant_id'), false) OR lack_position) AND mapping['SNP'] IS NULL
@@ -137,6 +138,17 @@ parsed_markers AS (
                 THEN (-log10(try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT))::FLOAT -
                       coalesce(try_cast(nullif(split_part(lower(f['P']), 'e', 2), '') AS FLOAT), 0))::FLOAT
                 ELSE NULL END AS lp,
+           -- Native computes -log10f(mantissa) in float32. Its last bit depends on the platform
+           -- libm (glibc 2.39 log10f is not correctly rounded), which SQL cannot reproduce.
+           -- lp_exact is the double-precision value, and lp_tol allows two float32 ulps of the
+           -- logarithm and two of the result. Both are NULL when the LP column was read directly.
+           CASE WHEN NOT isnan(coalesce(try_cast(f['LP'] AS FLOAT), 'NaN'::FLOAT)) THEN NULL
+                WHEN try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT) > 0
+                THEN -log10(try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT)::DOUBLE) -
+                     coalesce(try_cast(nullif(split_part(lower(f['P']), 'e', 2), '') AS FLOAT), 0)
+                ELSE NULL END AS lp_exact,
+           2 * (pow(2, floor(log2(greatest(abs(lp_exact + coalesce(try_cast(nullif(split_part(lower(f['P']), 'e', 2), '') AS FLOAT), 0)), pow(2, -126)))) - 23) +
+                pow(2, floor(log2(greatest(abs(lp_exact), pow(2, -126)))) - 23)) AS lp_tol,
            by_id OR lack_position AS match_id
     FROM fields CROSS JOIN options
 ),
@@ -279,7 +291,7 @@ $score$ || CASE WHEN coalesce(getvariable('score_regions')::VARCHAR, '') = ''
 $selection$ END || $score$
 ),
 matched AS (
-    SELECT c.*, m.path, m.beta, m.lp,
+    SELECT c.*, m.path, m.beta, m.lp, m.lp_exact, m.lp_tol,
            list_position(list_prepend(REF, ALT), effect) - 1 AS allele,
            CASE WHEN mode = 'GT' THEN gt_width >= 2
                 WHEN ds_width IS NULL THEN false
@@ -300,7 +312,11 @@ terms AS (
     SELECT sample_index, path, t.suffix, (beta * dose)::FLOAT::DOUBLE AS term
     FROM matched CROSS JOIN thresholds t
     WHERE available AND NOT missing AND allele >= 0
-      AND (getvariable('score_q_score_thr') IS NULL OR matched.lp IS NULL OR isnan(matched.lp) OR matched.lp >= t.lp)
+      AND (getvariable('score_q_score_thr') IS NULL OR matched.lp IS NULL OR isnan(matched.lp) OR
+           CASE WHEN abs(matched.lp_exact - t.lp) <= matched.lp_tol
+                THEN error('score_reference: a p-value is within float32 log10 rounding of a q_score_thr ' ||
+                           'threshold; the native selection depends on the platform log10f')
+                ELSE matched.lp >= t.lp END)
 ),
 reductions AS (
     SELECT sample_index, path, suffix, sum(term) AS score, count(*)::BIGINT AS n, sum(abs(term)) AS magnitude
@@ -321,7 +337,7 @@ SELECT SAMPLE,
 $score$ || array_to_string(list_transform(
     flatten(list_transform(
         list_transform(getvariable('score_summaries'), lambda p: regexp_replace(regexp_extract(p, '[^/]+$'),
-            '(\.(txt|tsv|ssf|gz|bgz))+$', '')),
+            '(\.(gz|txt|tsv|vcf|bcf))+$', '')),
         lambda p: list_transform(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0]), lambda q:
             {'metric': p || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END,
              'count_metric': p || '_CNT' || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END}))),

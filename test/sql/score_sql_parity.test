@@ -292,6 +292,82 @@ SELECT SAMPLE, score_sql_hash_id_CNT FROM sql_score ORDER BY SAMPLE;
 S1	3
 S2	3
 
+# PRS names strip only gz, txt, tsv, vcf and bcf, as native does: study.ssf keeps .ssf.
+statement ok
+SET VARIABLE score_columns = 'SSF';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_study.ssf'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'SSF', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query I
+SELECT count(*) FROM pragma_table_info('sql_score') WHERE name = 'score_sql_study.ssf';
+----
+1
+
+# A tabix index with line_skip = 1 makes read_tabix skip the header line itself; the
+# first marker must stay.
+statement ok
+SET VARIABLE score_columns = 'PLINK';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_indexed.tsv.gz'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query TI
+SELECT SAMPLE, score_sql_indexed_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	3
+S2	3
+
+# Native computes -log10(p) with float32 log10f, whose last bit depends on the platform
+# libm. rs1 (P = 0.00000000095) lies within that rounding of the 9.5e-10 threshold, so the
+# reference rejects it; at 1e-9 the selection is decided and matches native.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_lp_adjacent.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [9.5e-10, 1e-9];
+
+statement error
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+----
+within float32 log10 rounding of a q_score_thr threshold
+
+statement ok
+SET VARIABLE score_q_score_thr = [1e-9];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '1e-9', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
 statement ok
 SET VARIABLE score_columns = 'PLINK';
 
