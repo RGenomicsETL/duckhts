@@ -61,7 +61,8 @@ This follows the RBCFTools pattern of creating a table that can be queried.</p>
 <span>  overwrite <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  samples <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  regions_var <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  include_file_offset <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  include_file_offset <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  duplicate_names <span class="op">=</span> <span class="st">"error"</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -151,6 +152,12 @@ increases strictly in file order and is the same for every scan mode, so
 ordering by it restores file order, also among records at one position.
 Input that is not BGZF-compressed gives `NA`. The default keeps the
 existing schema.</p></dd>
+
+
+<dt id="arg-duplicate-names">duplicate_names<a class="anchor" aria-label="anchor" href="#arg-duplicate-names"></a></dt>
+<dd><p>`"error"` (default) or `"suffix"`. VCF keys and sample
+IDs may differ only in case, while DuckDB column names ignore case; `"suffix"`
+keeps the first name in header order and renames later ones `name__2`, `name__3`.</p></dd>
 
 </dl></div>
     <div class="section level2">

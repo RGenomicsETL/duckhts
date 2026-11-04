@@ -21,7 +21,8 @@ rduckhts_bcf(
   overwrite = FALSE,
   samples = NULL,
   regions_var = NULL,
-  include_file_offset = FALSE
+  include_file_offset = FALSE,
+  duplicate_names = "error"
 )
 ```
 
@@ -114,6 +115,13 @@ rduckhts_bcf(
   ordering by it restores file order, also among records at one
   position. Input that is not BGZF-compressed gives \`NA\`. The default
   keeps the existing schema.
+
+- duplicate_names:
+
+  \`"error"\` (default) or \`"suffix"\`. VCF keys and sample IDs may
+  differ only in case, while DuckDB column names ignore case;
+  \`"suffix"\` keeps the first name in header order and renames later
+  ones \`name\_\_2\`, \`name\_\_3\`.
 
 ## Value
 
