@@ -201,12 +201,18 @@ test-error-handling:
 	sh test/scripts/run_error_handling_tests.sh
 
 test-fasta-nuc-alloc:
+	@if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
+		cmake --build cmake_build/release --target duckhts_fasta_nuc_alloc_test; \
+	fi
 	bash test/scripts/fasta_nuc_alloc_test.sh
 
 test-bam-open-error:
 	bash test/scripts/bam_open_error_test.sh
 
 test-score-summary-errors:
+	@if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
+		cmake --build cmake_build/release --target duckhts_score_summary_error_test; \
+	fi
 	bash test/scripts/score_summary_error_test.sh
 
 .PHONY: test-extension-symbols

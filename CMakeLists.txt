@@ -546,6 +546,23 @@ if(NOT DUCKDB_WASM_EXTENSION)
         target_link_libraries(duckhts_somalier_native_test PRIVATE m)
     endif()
 
+    # Fault-injection tests that compile production units directly; unused code is
+    # dropped at link time, as in the extension's own native tests.
+    foreach(fault_test fasta_nuc_alloc_test score_summary_error_test)
+        set(fault_sources test/scripts/${fault_test}.c)
+        if(fault_test STREQUAL "fasta_nuc_alloc_test")
+            list(APPEND fault_sources src/bed_line.c)
+        endif()
+        add_executable(duckhts_${fault_test} EXCLUDE_FROM_ALL ${fault_sources})
+        target_compile_features(duckhts_${fault_test} PRIVATE c_std_11)
+        target_compile_definitions(duckhts_${fault_test} PRIVATE _POSIX_C_SOURCE=200809L)
+        target_include_directories(duckhts_${fault_test} PRIVATE
+            duckdb_capi src/include ${HTSLIB_SRC_DIR})
+        target_compile_options(duckhts_${fault_test} PRIVATE -O1 -UNDEBUG -ffunction-sections -fdata-sections)
+        target_link_options(duckhts_${fault_test} PRIVATE -Wl,--gc-sections)
+        target_link_libraries(duckhts_${fault_test} PRIVATE ${HTSLIB_LINK_LIBS} m)
+    endforeach()
+
     add_executable(duckhts_bam_partition_test EXCLUDE_FROM_ALL
         test/scripts/bam_partition_test.c src/bam_partition.c)
     target_compile_features(duckhts_bam_partition_test PRIVATE c_std_11)
