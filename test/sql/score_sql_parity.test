@@ -500,7 +500,9 @@ endloop
 statement ok
 SET VARIABLE score_samples = NULL;
 
-foreach region 1:100-200 2,1 1:100-100,chrZ:5-9 1:300-300,1:1-400,1:100-100,1:100-100,1:101-199,1:200-200 1:300-300,1:100-100 chrZ:1-1000,chrY
+# Coordinates follow hts_parse_region: chr:-N is 1-N, chr:0 and chr: are the whole contig,
+# chr:N- runs to the end, and numbers take fractions, exponents and k/M/G suffixes.
+foreach region 1:100-200 2,1 1:100-100,chrZ:5-9 1:300-300,1:1-400,1:100-100,1:100-100,1:101-199,1:200-200 1:300-300,1:100-100 chrZ:1-1000,chrY 1:-200 1:0.1k-0.2k,1:3e2 1:0 1: 1:250- 1:1.5-2.5e2
 
 foreach kind regions targets
 
@@ -588,8 +590,9 @@ statement ok
 SET VARIABLE score_apply_filters = NULL;
 
 # BED is zero-based half-open; plain TSV is one-based inclusive. In a non-BED file a
-# one-field row is a region expression; runs of tabs collapse, as in native.
-foreach fixture score_sql_selection.bed score_sql_selection.tsv score_sql_anchor.bed score_sql_selection_expr.txt
+# one-field row is a region expression; runs of tabs collapse, as in native. A file with
+# only comments and blank lines leaves the selection inactive.
+foreach fixture score_sql_selection.bed score_sql_selection.tsv score_sql_anchor.bed score_sql_selection_expr.txt score_sql_selection_empty.txt
 
 foreach kind regions targets
 
@@ -806,10 +809,16 @@ invalid interval in test/data/score_sql_bad_interval.bed at data row 1
 statement ok
 SET VARIABLE score_regions_file = NULL;
 
-foreach invalid_region 1:bad chrZ:abc chrZ:7-3 {chrZ
+# Native rejects each of these through hts_parse_region; the reference must reject them too.
+foreach invalid_region 1:bad chrZ:abc chrZ:7-3 {chrZ 1:-5-10 1:100-200x
 
 statement ok
 SET VARIABLE score_regions = '${invalid_region}';
+
+statement error
+SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', regions := '${invalid_region}', counts := true);
+----
+invalid region/target expression
 
 statement error
 FROM query(getvariable('score_sql'));

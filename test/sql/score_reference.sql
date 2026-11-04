@@ -273,16 +273,67 @@ interval_items AS (
     CROSS JOIN unnest(regexp_extract_all(expression, '(\{[^}]*\}[^,]*|[^,]+)')) AS items(item)
     LEFT JOIN contigs ON item = contigs.id
 ),
-text_intervals AS (
-    SELECT kind, mode, contig,
-           ltrim(substr(item, len(contig) + 1), ':') AS span,
-           trim(contig, '{}') AS chrom,
-           CASE WHEN span = '' THEN 1 ELSE try_cast(split_part(span, '-', 1) AS BIGINT) END AS lo,
-           CASE WHEN span = '' THEN 9223372036854775807
-                WHEN ends_with(span, '-') THEN 9223372036854775807
-                WHEN contains(span, '-') THEN try_cast(split_part(span, '-', 2) AS BIGINT)
-                ELSE lo END AS hi
+-- Region coordinates follow htslib hts_parse_region with HTS_PARSE_LIST | HTS_PARSE_ONE_COORD
+-- (third_party/htslib/hts.c), as native score_parse_region_list uses it. Each number is
+-- read as hts_parse_decimal reads it: leading whitespace, a sign, digits, an optional
+-- fraction, then an exponent or a k/M/G suffix; without digits the text is left unread.
+-- The same pattern parses the start and, after a '-', the end.
+region_starts AS (
+    SELECT kind, mode, contig, trim(contig, '{}') AS chrom,
+           substr(item, len(contig) + 1) AS after_contig,
+           CASE WHEN starts_with(after_contig, ':') THEN substr(after_contig, 2) END AS coordinates,
+           regexp_extract(coordinates,
+               '^[ \t\n\v\f\r]*([+-]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]*)|([kKmMgG]))?(.*)$',
+               ['sign', 'whole', 'fraction', 'exponent', 'suffix', 'rest']) AS start_number,
+           CASE WHEN start_number['whole'] || start_number['fraction'] = '' THEN coordinates
+                ELSE start_number['rest'] END AS after_start
     FROM interval_items
+),
+region_numbers AS (
+    SELECT *,
+           CASE WHEN starts_with(after_start, '-') THEN substr(after_start, 2) END AS end_text,
+           regexp_extract(end_text,
+               '^[ \t\n\v\f\r]*([+-]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]*)|([kKmMgG]))?(.*)$',
+               ['sign', 'whole', 'fraction', 'exponent', 'suffix', 'rest']) AS end_number,
+           CASE WHEN end_number['whole'] || end_number['fraction'] = '' THEN end_text
+                ELSE end_number['rest'] END AS after_end,
+           -- hts_parse_decimal: the digits scaled by 10^(exponent - fraction digits),
+           -- truncated toward zero. Values beyond int64 are outside the reference.
+           list_transform([start_number, end_number], lambda g: CASE WHEN g IS NULL THEN NULL ELSE
+               list_transform([{'digits': ltrim(g['whole'] || g['fraction'], '0'),
+                                'scale': CASE lower(g['suffix']) WHEN 'k' THEN 3 WHEN 'm' THEN 6 WHEN 'g' THEN 9
+                                         WHEN '' THEN CASE WHEN len(g['exponent']) > 6
+                                             THEN error('score_reference: region coordinate exponent is outside the reference')
+                                             ELSE coalesce(try_cast(g['exponent'] AS INTEGER), 0) END END
+                                         - len(g['fraction'])}],
+                   lambda n: CASE WHEN n['digits'] = '' THEN 0::HUGEINT
+                                  WHEN len(n['digits']) + greatest(n['scale'], 0) > 18
+                                      THEN error('score_reference: region coordinate is outside the int64 range of the reference')
+                                  WHEN n['scale'] >= 0 THEN (n['digits'] || repeat('0', n['scale']))::HUGEINT
+                                  WHEN len(n['digits']) + n['scale'] <= 0 THEN 0::HUGEINT
+                                  ELSE left(n['digits'], len(n['digits']) + n['scale'])::HUGEINT END
+                             * CASE WHEN g['sign'] = '-' THEN -1 ELSE 1 END)[1] END) AS number_values
+    FROM region_starts
+),
+text_intervals AS (
+    SELECT kind, mode, chrom,
+           number_values[1] - 1 AS start0,
+           CASE WHEN number_values[2] = 0 THEN 9223372036854775807 ELSE number_values[2] END AS end_value,
+           CASE WHEN contains(contig, '{') AND NOT contains(contig, '}')
+                     OR after_contig <> '' AND coordinates IS NULL
+                    THEN error('score_reference: invalid region/target expression')
+                WHEN coordinates IS NULL THEN [1, 9223372036854775807]
+                -- chr:-N is chr:1-N, and chr:0 or chr: is the whole contig.
+                WHEN start0 < 0 AND start0 <> -1 AND starts_with(after_start, '-') AND coordinates <> ''
+                    THEN error('score_reference: invalid region/target expression')
+                WHEN start0 < 0 AND (after_start = '' OR regexp_matches(after_start, '^[0-9]'))
+                    THEN [1, CASE WHEN start0 = -1 THEN 9223372036854775807 ELSE -(start0 + 1) END]
+                WHEN start0 < -1 THEN error('score_reference: invalid region/target expression')
+                WHEN after_start = '' THEN [start0 + 1, start0 + 1]
+                WHEN NOT starts_with(after_start, '-') OR after_end <> '' OR start0 >= end_value
+                    THEN error('score_reference: invalid region/target expression')
+                ELSE [start0 + 1, end_value] END::BIGINT[] AS bounds
+    FROM region_numbers
 ),
 file_intervals AS (
     SELECT kind, mode, fields[1] AS chrom,
@@ -298,9 +349,7 @@ file_intervals AS (
     WHERE len(fields) > 1 OR is_bed
 ),
 intervals AS (
-    SELECT kind, mode, chrom,
-           CASE WHEN lo IS NULL OR hi IS NULL OR lo < 1 OR hi < lo OR contains(contig, '{') AND NOT contains(contig, '}')
-                THEN error('score_reference: invalid region/target expression') ELSE lo END AS lo, hi
+    SELECT kind, mode, chrom, bounds[1] AS lo, bounds[2] AS hi
     FROM text_intervals
     UNION ALL
     SELECT * FROM file_intervals
@@ -314,7 +363,9 @@ $score$ || CASE WHEN coalesce(getvariable('score_regions')::VARCHAR, '') = ''
                THEN 'true' ELSE $selection$
        NOT EXISTS (
         SELECT 1 FROM selection s
-        WHERE (coalesce(s.spec, '') <> '' OR s.path IS NOT NULL)
+        -- A file without data rows gives native an empty region string, and
+        -- score_parse_region_list leaves an empty string inactive: every record stays.
+        WHERE (coalesce(s.spec, '') <> '' OR EXISTS (SELECT 1 FROM file_rows f WHERE f.kind = s.kind))
           AND (EXISTS (SELECT 1 FROM intervals i WHERE i.kind = s.kind AND i.chrom = c.CHROM
                        -- Native modes 1 and 2 both use the record reference span, including its anchor.
                        AND c.POS <= i.hi
