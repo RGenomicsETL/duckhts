@@ -64,14 +64,14 @@ stopifnot(!compare_outputs(control, transform(control, SAMPLE = "other"))$output
     #>   variants samples multi_prs_files runs threads memory_limit spill_limit
     #> 1   500000     100               4    3       1          4GB         3GB
     #>                            source_revision
-    #> 1 2801319c4187037e65a11cc1a375223a71f61472
+    #> 1 26f33a6da748da8b78beba05b7109a2f7ec0747c
 
 ## Synthetic Single-PRS Case
 
     #>               engine runs median_sec min_sec max_sec variants samples
-    #> 1     duckhts_native    3      0.969   0.964   0.982   500000     100
-    #> 2        duckhts_sql    3     19.719  19.641  19.721   500000     100
-    #> 3 bcftools_RBCFTools    3      1.166   1.151   1.166   500000     100
+    #> 1     duckhts_native    3      0.968   0.965   0.969   500000     100
+    #> 2        duckhts_sql    3     19.221  19.195  19.279   500000     100
+    #> 3 bcftools_RBCFTools    3      1.170   1.157   1.179   500000     100
     #>   genotype_cells output_samples score_columns score_cells
     #> 1       50000000            100             1         100
     #> 2       50000000            100             1         100
@@ -91,9 +91,9 @@ stopifnot(!compare_outputs(control, transform(control, SAMPLE = "other"))$output
 ## Synthetic Multi-PRS TSV Case
 
     #>               engine runs median_sec min_sec max_sec variants samples
-    #> 1     duckhts_native    3      1.523   1.520   1.561   500000     100
-    #> 2        duckhts_sql    3     52.189  52.069  52.490   500000     100
-    #> 3 bcftools_RBCFTools    3      1.629   1.620   1.630   500000     100
+    #> 1     duckhts_native    3      1.519   1.514   1.533   500000     100
+    #> 2        duckhts_sql    3     50.914  50.877  50.998   500000     100
+    #> 3 bcftools_RBCFTools    3      1.629   1.617   1.638   500000     100
     #>   genotype_cells output_samples score_columns score_cells
     #> 1       50000000            100             4         400
     #> 2       50000000            100             4         400
@@ -153,38 +153,38 @@ for the shape, report finite scores and stay under the ceiling.
 
 | ladder   | scale | variants | samples | prs | engine         | threads | status | median_sec | range_sec   | peak_rss_mib | ceiling_mib | peak_buffer_mib | peak_spill_mib |
 |:---------|:------|---------:|--------:|----:|:---------------|--------:|:-------|-----------:|:------------|-------------:|------------:|----------------:|---------------:|
-| base     | 1x    |   250000 |     100 |   1 | duckhts_native |       1 | PASS   |       0.48 | 0.48-0.50   |           58 |         348 |               0 |              0 |
-| base     | 1x    |   250000 |     100 |   1 | duckhts_native |       4 | PASS   |       0.50 | 0.49-0.50   |           59 |         348 |               0 |              0 |
-| base     | 1x    |   250000 |     100 |   1 | duckhts_sql    |       1 | PASS   |       8.20 | 8.15-8.46   |          217 |         805 |             339 |              0 |
-| base     | 1x    |   250000 |     100 |   1 | duckhts_sql    |       4 | PASS   |       7.99 | 7.99-8.02   |          284 |         805 |             364 |              0 |
-| variants | 2x    |   500000 |     100 |   1 | duckhts_native |       1 | PASS   |       0.98 | 0.98-1.04   |           76 |         439 |               0 |              0 |
-| variants | 2x    |   500000 |     100 |   1 | duckhts_native |       4 | PASS   |       1.00 | 0.98-1.01   |           76 |         439 |               0 |              0 |
-| variants | 2x    |   500000 |     100 |   1 | duckhts_sql    |       1 | PASS   |      16.02 | 15.99-16.28 |          373 |        1355 |             654 |              0 |
-| variants | 2x    |   500000 |     100 |   1 | duckhts_sql    |       4 | PASS   |      15.87 | 15.85-15.98 |          466 |        1355 |             714 |              0 |
-| variants | 4x    |  1000000 |     100 |   1 | duckhts_native |       1 | PASS   |       1.96 | 1.96-1.97   |          111 |         622 |               0 |              0 |
-| variants | 4x    |  1000000 |     100 |   1 | duckhts_native |       4 | PASS   |       2.00 | 1.98-2.01   |          111 |         622 |               0 |              0 |
-| variants | 4x    |  1000000 |     100 |   1 | duckhts_sql    |       1 | PASS   |      32.07 | 32.05-32.23 |          687 |        2453 |            1296 |              0 |
-| variants | 4x    |  1000000 |     100 |   1 | duckhts_sql    |       4 | PASS   |      31.77 | 31.67-32.50 |          739 |        2453 |            1386 |              0 |
-| samples  | 2x    |   250000 |     200 |   1 | duckhts_native |       1 | PASS   |       0.81 | 0.81-0.81   |           58 |         348 |               0 |              0 |
+| base     | 1x    |   250000 |     100 |   1 | duckhts_native |       1 | PASS   |       0.50 | 0.48-0.50   |           58 |         348 |               0 |              0 |
+| base     | 1x    |   250000 |     100 |   1 | duckhts_native |       4 | PASS   |       0.49 | 0.48-0.50   |           58 |         348 |               0 |              0 |
+| base     | 1x    |   250000 |     100 |   1 | duckhts_sql    |       1 | PASS   |       7.97 | 7.94-7.99   |          238 |         805 |             400 |              0 |
+| base     | 1x    |   250000 |     100 |   1 | duckhts_sql    |       4 | PASS   |       7.17 | 7.16-7.20   |          292 |         805 |             368 |              0 |
+| variants | 2x    |   500000 |     100 |   1 | duckhts_native |       1 | PASS   |       0.98 | 0.97-0.98   |           76 |         439 |               0 |              0 |
+| variants | 2x    |   500000 |     100 |   1 | duckhts_native |       4 | PASS   |       1.00 | 0.98-1.02   |           76 |         439 |               0 |              0 |
+| variants | 2x    |   500000 |     100 |   1 | duckhts_sql    |       1 | PASS   |      15.69 | 15.61-15.71 |          406 |        1355 |             716 |              0 |
+| variants | 2x    |   500000 |     100 |   1 | duckhts_sql    |       4 | PASS   |      14.33 | 14.32-14.38 |          448 |        1355 |             715 |              0 |
+| variants | 4x    |  1000000 |     100 |   1 | duckhts_native |       1 | PASS   |       1.97 | 1.96-1.99   |          111 |         622 |               0 |              0 |
+| variants | 4x    |  1000000 |     100 |   1 | duckhts_native |       4 | PASS   |       1.99 | 1.99-2.02   |          111 |         622 |               0 |              0 |
+| variants | 4x    |  1000000 |     100 |   1 | duckhts_sql    |       1 | PASS   |      31.49 | 31.18-31.77 |          739 |        2453 |            1358 |              0 |
+| variants | 4x    |  1000000 |     100 |   1 | duckhts_sql    |       4 | PASS   |      29.25 | 29.23-29.28 |          779 |        2453 |            1454 |              0 |
+| samples  | 2x    |   250000 |     200 |   1 | duckhts_native |       1 | PASS   |       0.81 | 0.80-0.81   |           58 |         348 |               0 |              0 |
 | samples  | 2x    |   250000 |     200 |   1 | duckhts_native |       4 | PASS   |       0.83 | 0.82-0.83   |           59 |         348 |               0 |              0 |
-| samples  | 2x    |   250000 |     200 |   1 | duckhts_sql    |       1 | PASS   |      15.14 | 15.11-15.22 |          235 |         805 |             368 |              0 |
-| samples  | 2x    |   250000 |     200 |   1 | duckhts_sql    |       4 | PASS   |      15.09 | 14.69-15.25 |          299 |         805 |             383 |              0 |
-| samples  | 4x    |   250000 |     400 |   1 | duckhts_native |       1 | PASS   |       1.47 | 1.46-1.56   |           58 |         348 |               0 |              0 |
-| samples  | 4x    |   250000 |     400 |   1 | duckhts_native |       4 | PASS   |       1.50 | 1.48-1.54   |           59 |         348 |               0 |              0 |
-| samples  | 4x    |   250000 |     400 |   1 | duckhts_sql    |       1 | PASS   |      29.39 | 29.28-29.53 |          272 |         805 |             422 |              0 |
-| samples  | 4x    |   250000 |     400 |   1 | duckhts_sql    |       4 | PASS   |      29.34 | 28.90-30.20 |          337 |         805 |             435 |              0 |
-| prs      | 2x    |   250000 |     100 |   2 | duckhts_native |       1 | PASS   |       0.58 | 0.58-0.59   |           76 |         439 |               0 |              0 |
-| prs      | 2x    |   250000 |     100 |   2 | duckhts_native |       4 | PASS   |       0.59 | 0.58-0.60   |           76 |         439 |               0 |              0 |
-| prs      | 2x    |   250000 |     100 |   2 | duckhts_sql    |       1 | PASS   |      12.52 | 12.47-12.66 |          370 |        1355 |             656 |              0 |
-| prs      | 2x    |   250000 |     100 |   2 | duckhts_sql    |       4 | PASS   |      11.11 | 10.90-11.23 |          441 |        1355 |             707 |              0 |
-| prs      | 4x    |   250000 |     100 |   4 | duckhts_native |       1 | PASS   |       0.78 | 0.77-0.79   |          111 |         622 |               0 |              0 |
-| prs      | 4x    |   250000 |     100 |   4 | duckhts_native |       4 | PASS   |       0.77 | 0.77-0.79   |          111 |         622 |               0 |              0 |
-| prs      | 4x    |   250000 |     100 |   4 | duckhts_sql    |       1 | PASS   |      22.22 | 22.12-22.25 |          685 |        2453 |            1290 |              0 |
-| prs      | 4x    |   250000 |     100 |   4 | duckhts_sql    |       4 | PASS   |      18.78 | 18.73-19.23 |          733 |        2453 |            1393 |              0 |
-| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_native |       1 | PASS   |       1.88 | 1.88-1.91   |          111 |         622 |               0 |              0 |
-| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_native |       4 | PASS   |       1.92 | 1.89-1.92   |          111 |         622 |               0 |              0 |
-| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_sql    |       1 | PASS   |      45.78 | 45.33-45.99 |          696 |        2453 |            1287 |              0 |
-| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_sql    |       4 | PASS   |      42.85 | 42.74-43.56 |          748 |        2453 |            1387 |              0 |
+| samples  | 2x    |   250000 |     200 |   1 | duckhts_sql    |       1 | PASS   |      14.91 | 14.82-15.01 |          254 |         805 |             427 |              0 |
+| samples  | 2x    |   250000 |     200 |   1 | duckhts_sql    |       4 | PASS   |      13.90 | 13.88-14.00 |          277 |         805 |             383 |              0 |
+| samples  | 4x    |   250000 |     400 |   1 | duckhts_native |       1 | PASS   |       1.46 | 1.45-1.49   |           58 |         348 |               0 |              0 |
+| samples  | 4x    |   250000 |     400 |   1 | duckhts_native |       4 | PASS   |       1.49 | 1.49-1.53   |           59 |         348 |               0 |              0 |
+| samples  | 4x    |   250000 |     400 |   1 | duckhts_sql    |       1 | PASS   |      28.98 | 28.96-29.03 |          295 |         805 |             481 |              0 |
+| samples  | 4x    |   250000 |     400 |   1 | duckhts_sql    |       4 | PASS   |      27.60 | 27.57-27.61 |          349 |         805 |             438 |              0 |
+| prs      | 2x    |   250000 |     100 |   2 | duckhts_native |       1 | PASS   |       0.59 | 0.58-0.59   |           76 |         439 |               0 |              0 |
+| prs      | 2x    |   250000 |     100 |   2 | duckhts_native |       4 | PASS   |       0.58 | 0.58-0.59   |           76 |         439 |               0 |              0 |
+| prs      | 2x    |   250000 |     100 |   2 | duckhts_sql    |       1 | PASS   |      12.19 | 12.16-12.29 |          407 |        1355 |             778 |              0 |
+| prs      | 2x    |   250000 |     100 |   2 | duckhts_sql    |       4 | PASS   |      10.77 | 10.73-10.79 |          473 |        1355 |             698 |              0 |
+| prs      | 4x    |   250000 |     100 |   4 | duckhts_native |       1 | PASS   |       0.78 | 0.78-0.79   |          111 |         622 |               0 |              0 |
+| prs      | 4x    |   250000 |     100 |   4 | duckhts_native |       4 | PASS   |       0.79 | 0.78-0.79   |          111 |         622 |               0 |              0 |
+| prs      | 4x    |   250000 |     100 |   4 | duckhts_sql    |       1 | PASS   |      21.38 | 21.31-21.39 |          754 |        2453 |            1537 |              0 |
+| prs      | 4x    |   250000 |     100 |   4 | duckhts_sql    |       4 | PASS   |      18.66 | 18.51-18.76 |          771 |        2453 |            1404 |              0 |
+| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_native |       1 | PASS   |       1.88 | 1.87-1.90   |          111 |         622 |               0 |              0 |
+| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_native |       4 | PASS   |       1.91 | 1.87-1.92   |          111 |         622 |               0 |              0 |
+| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_sql    |       1 | PASS   |      45.23 | 44.41-45.45 |          763 |        2453 |            1412 |              0 |
+| joint    | 2x2x2 |   500000 |     200 |   2 | duckhts_sql    |       4 | PASS   |      41.75 | 41.72-41.83 |          785 |        2453 |            1367 |              0 |
 
 ### Exponents
 
@@ -193,11 +193,11 @@ case.
 
 | threads | ladder   | seconds              | exponents  |
 |--------:|:---------|:---------------------|:-----------|
-|       1 | variants | 8.2 / 16.02 / 32.07  | 0.97, 1    |
-|       1 | samples  | 8.2 / 15.14 / 29.39  | 0.88, 0.96 |
-|       1 | prs      | 8.2 / 12.52 / 22.22  | 0.61, 0.83 |
-|       1 | joint    | 8.2 / 45.78          | 0.83       |
-|       4 | variants | 7.99 / 15.87 / 31.77 | 0.99, 1    |
-|       4 | samples  | 7.99 / 15.09 / 29.34 | 0.92, 0.96 |
-|       4 | prs      | 7.99 / 11.11 / 18.78 | 0.48, 0.76 |
-|       4 | joint    | 7.99 / 42.85         | 0.81       |
+|       1 | variants | 7.97 / 15.69 / 31.49 | 0.98, 1.01 |
+|       1 | samples  | 7.97 / 14.91 / 28.98 | 0.9, 0.96  |
+|       1 | prs      | 7.97 / 12.19 / 21.38 | 0.61, 0.81 |
+|       1 | joint    | 7.97 / 45.23         | 0.83       |
+|       4 | variants | 7.17 / 14.33 / 29.25 | 1, 1.03    |
+|       4 | samples  | 7.17 / 13.9 / 27.6   | 0.96, 0.99 |
+|       4 | prs      | 7.17 / 10.77 / 18.66 | 0.59, 0.79 |
+|       4 | joint    | 7.17 / 41.75         | 0.85       |
