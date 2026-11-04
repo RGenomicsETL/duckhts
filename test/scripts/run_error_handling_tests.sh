@@ -2,8 +2,8 @@
 # Run native fault-injection tests against the production translation units.
 set -eu
 cd "$(dirname "$0")/../.."
-mkdir -p build
-tmp=$(mktemp -d build/error-tests.XXXXXX)
+# The system temporary directory: in CI the build tree belongs to the container user.
+tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 if [ "$#" -eq 0 ]; then
     set -- registration_errors_test bigwig_errors_test norm_errors_test

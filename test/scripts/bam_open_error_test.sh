@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 cd "$(dirname "$0")/../.."
-work=$(mktemp -d "${PWD}/test/scripts/bam-open.XXXXXX")
+work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 "${CC:-cc}" -std=gnu11 -O1 -ffunction-sections -fdata-sections \
     -Iduckdb_capi -Isrc/include -Ithird_party/htslib \

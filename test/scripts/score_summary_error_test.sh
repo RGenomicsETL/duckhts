@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # Built by CMake with the extension's htslib link libraries (Makefile test target).
-work=$(mktemp -d test/score-summary-error-test-XXXXXX)
+work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cp cmake_build/release/duckhts_score_summary_error_test "$work/test"
 if [ "$#" -gt 0 ]; then
