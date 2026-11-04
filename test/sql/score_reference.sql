@@ -63,15 +63,11 @@ summary_headers AS MATERIALIZED (
 -- Fields stay VARCHAR (auto_detect := false) so parsing starts from the original text, as native does.
 -- read_tabix, rather than read_csv, reads the data rows so truncated compressed input is an error.
 summary_rows AS MATERIALIZED (
-    SELECT r.path, r.ordinal, r.field_values
-    FROM query(array_to_string(list_transform(getvariable('score_summaries'),
+    SELECT * FROM query(array_to_string(list_transform(getvariable('score_summaries'),
         lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
              ' AS path, row_number() OVER () AS ordinal, list_value(*COLUMNS(*)) AS field_values FROM read_tabix(' ||
              chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
-             ', header := false, auto_detect := false)'), ' UNION ALL ')) r
-    JOIN summary_headers h USING (path)
-    -- Without a '#' header, read_tabix returns the header line as its first row.
-    WHERE h.hashed OR r.ordinal > 1
+             ', header := false, auto_detect := false)'), ' UNION ALL '))
 ),
 -- Alias order follows the pinned native presets.
 aliases(preset, role, names) AS (
@@ -110,7 +106,8 @@ selected_aliases AS (
 header_mapping AS (
     SELECT path, map_from_entries(list({'key': role, 'value':
         list_position(list_transform(header_fields, lambda k: lower(k)), lower(
-            list_last(list_filter(names, lambda a: list_contains(list_transform(header_fields, lambda k: lower(k)), lower(a))))))})) AS mapping
+            list_last(list_filter(names, lambda a: list_contains(list_transform(header_fields, lambda k: lower(k)), lower(a))))))})) AS mapping,
+           bool_or(hashed) AS hashed
     FROM summary_headers CROSS JOIN selected_aliases
     GROUP BY path
 ),
@@ -119,7 +116,11 @@ fields AS (
         {'key': m['key'], 'value': field_values[m['value']]})) AS f,
         mapping['CHR'] IS NULL OR mapping['BP'] IS NULL AS lack_position
     FROM summary_rows JOIN header_mapping USING (path)
-    WHERE CASE WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
+    -- Without a '#' header, read_tabix returns the header line as its first row. This filter
+    -- stays here: joining summary_headers into summary_rows changed DuckDB's estimates so the
+    -- marker hash join built over the V x S calls instead of the markers (9 GiB at 4 PRS).
+    WHERE (hashed OR ordinal > 1)
+      AND CASE WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
                THEN error('score_reference: missing effect allele/weight columns in summary header: ' || path)
                WHEN (coalesce(getvariable('score_use_variant_id'), false) OR lack_position) AND mapping['SNP'] IS NULL
                THEN error('score_reference: missing marker name column in summary header: ' || path)
