@@ -457,7 +457,225 @@ multi_case$compare
 multi_case$sql_compare
 ```
 
+## Scaling
+
+The growth dimensions are variants (V), samples (S) and PRS files (P). The base
+case is V = 125,000, S = 100, P = 1. Each ladder doubles one dimension twice,
+holding the others at the base, and a joint case doubles all three. Every
+process is a fresh DuckDB CLI (`DUCKDB`, default `duckdb`) with a 4 GB memory
+limit and a 3 GB spill limit. Three processes run per engine, shape and thread count
+(`SCORE_SCALING_REPS`). Seconds are the CLI `.timer` wall time of the measured
+statement. Peak RSS comes from GNU `time` and covers the whole process. DuckDB's
+peak buffer memory and peak spill come from its profiler.
+
+- **Output consumed:** each query returns the row count, the sum of every count
+  column and whether every score is finite. The SQL reference result must equal
+  the native result for the same shape exactly. Score values are checked against
+  native within the float32 bound in the sections above.
+- **Work model:** `read_geno` streams V records and unnests V × S calls. The calls
+  probe a hash join whose build side is the V × P first-per-key markers. The
+  aggregate has S × P groups. The live state is the materialized summary rows
+  (V × P), the window that keeps the first marker per key (V × P) and the hash
+  build (V × P). None of it grows with S. Native keeps one marker hash per
+  summary (V × P) and decodes one record at a time.
+- **Memory ceiling, set before measuring:** 256 MiB of fixed runtime overhead plus
+  three times the live state. The live state is taken as 768 bytes per marker
+  per PRS for SQL: a summary row of about 200 bytes, a window row of about 250
+  bytes and a hash-build row of about 275 bytes, each with its path string. For
+  native it is 128 bytes: a 16-byte marker, the allele string, and the growth
+  slack of the khash table and marker array. A process above its ceiling fails
+  its cell.
+- **Exponents:** `log2(t(2x) / t(x))` per doubling, and the per-doubling mean
+  for the joint case. SQL work grows with the V × S × P matched calls, so each
+  ladder should stay near 1. Native runs take less than 5 s at every shape, so they
+  get a memory verdict only.
+
+```{r scaling-setup, include = FALSE}
+duckdb_cli <- Sys.getenv("DUCKDB", unset = "duckdb")
+scaling_reps <- as.integer(Sys.getenv("SCORE_SCALING_REPS", unset = "3"))
+if (is.na(scaling_reps) || scaling_reps < 1L) stop("SCORE_SCALING_REPS must be positive")
+scaling_threads <- c(1L, 4L)
+wall_limit_s <- 900
+fixed_overhead_mib <- 256
+live_bytes_per_marker <- c(duckhts_native = 128, duckhts_sql = 768)
+reference_path <- normalizePath("test/sql/score_reference.sql", mustWork = TRUE)
+
+shapes <- data.frame(
+  ladder = c("base", "variants", "variants", "samples", "samples", "prs", "prs", "joint"),
+  scale = c("1x", "2x", "4x", "2x", "4x", "2x", "4x", "2x2x2"),
+  variants = 125000L * c(1L, 2L, 4L, 1L, 1L, 1L, 1L, 2L),
+  samples = 100L * c(1L, 1L, 1L, 2L, 4L, 1L, 1L, 2L),
+  prs = c(1L, 1L, 1L, 1L, 1L, 2L, 4L, 2L),
+  stringsAsFactors = FALSE
+)
+shapes$key <- paste(shapes$ladder, shapes$scale)
+shapes$fixture <- sprintf("v%d_s%d", shapes$variants, shapes$samples)
+
+ceiling_mib <- function(engine, variants, prs) {
+  fixed_overhead_mib + 3 * live_bytes_per_marker[[engine]] * variants * prs / 2^20
+}
+
+scaling_query <- function(engine, fixture, prs) {
+  summaries <- fixture$summary_paths[seq_len(prs)]
+  measured <- paste(
+    "SELECT count(*), sum(COLUMNS('_CNT')),",
+    "bool_and(isfinite(COLUMNS('^score_summary_[0-9]+$')))",
+    if (engine == "duckhts_native") {
+      sprintf("FROM bcftools_score(%s, %s, use := 'GT', columns := 'PLINK', counts := true);",
+              sql_string(fixture$vcf_gz), sql_summary_arg(summaries))
+    } else {
+      "FROM query(getvariable('score_sql'));"
+    })
+  inputs <- if (engine == "duckhts_sql") c(
+    sprintf("SET VARIABLE score_path = %s;", sql_string(fixture$vcf_gz)),
+    sprintf("SET VARIABLE score_summaries = [%s];", paste(sql_string(summaries), collapse = ", ")),
+    "SET VARIABLE score_use = 'GT';",
+    "SET VARIABLE score_counts = true;",
+    sprintf("SET VARIABLE score_sql = (SELECT content FROM read_text(%s));", sql_string(reference_path)))
+  c(inputs, measured)
+}
+
+# One fresh CLI process: statement wall seconds, whole-process peak RSS, DuckDB
+# peak buffer memory and spill, and the result row.
+run_scaling_process <- function(threads, statements) {
+  work <- tempfile("score_scaling_")
+  dir.create(work)
+  on.exit(unlink(work, recursive = TRUE), add = TRUE)
+  script <- file.path(work, "run.sql")
+  timing <- file.path(work, "time.txt")
+  profile <- file.path(work, "profile.json")
+  n <- length(statements)
+  writeLines(c(
+    "SET allow_extensions_metadata_mismatch = true;",
+    sprintf("LOAD %s;", sql_string(ext_path)),
+    sprintf("SET threads = %d;", threads),
+    "SET memory_limit = '4GB';",
+    "SET max_temp_directory_size = '3GB';",
+    sprintf("SET temp_directory = %s;", sql_string(file.path(work, "spill"))),
+    statements[-n],
+    "SET enable_profiling = 'json';",
+    sprintf("SET profiling_output = %s;", sql_string(profile)),
+    "SET custom_profiling_settings = '{\"SYSTEM_PEAK_BUFFER_MEMORY\": \"true\", \"SYSTEM_PEAK_TEMP_DIR_SIZE\": \"true\"}';",
+    ".timer on",
+    statements[[n]]), script)
+  out <- suppressWarnings(system2(
+    "timeout", c(wall_limit_s, "/usr/bin/time", "-f", shQuote("%M"), "-o", timing,
+                 duckdb_cli, "-unsigned", "-csv", "-noheader", "-bail"),
+    stdin = script, stdout = TRUE, stderr = TRUE))
+  status <- attr(out, "status")
+  times <- as.numeric(sub("^Run Time \\(s\\): real ([0-9.]+).*$", "\\1",
+                          grep("^Run Time", out, value = TRUE)))
+  results <- grep("^Run Time|^$|^\\[", out, value = TRUE, invert = TRUE)
+  rss_kib <- if (file.exists(timing)) suppressWarnings(as.numeric(utils::tail(readLines(timing), 1L))) else NA_real_
+  metrics <- if (file.exists(profile)) jsonlite::fromJSON(profile) else list()
+  list(
+    ok = (is.null(status) || status == 0L) && length(times) == 1L,
+    seconds = if (length(times)) times[[length(times)]] else NA_real_,
+    rss_bytes = if (length(rss_kib) == 1L && is.finite(rss_kib)) rss_kib * 1024 else NA_real_,
+    buffer_bytes = if (is.null(metrics$system_peak_buffer_memory)) NA_real_ else metrics$system_peak_buffer_memory,
+    spill_bytes = if (is.null(metrics$system_peak_temp_dir_size)) NA_real_ else metrics$system_peak_temp_dir_size,
+    result = if (length(results)) utils::tail(results, 1L) else NA_character_)
+}
+```
+
+```{r scaling-run, include = FALSE}
+fixture_keys <- unique(shapes[c("fixture", "variants", "samples")])
+scaling_fixtures <- list()
+for (i in seq_len(nrow(fixture_keys))) {
+  k <- fixture_keys[i, ]
+  set.seed(7000L + i)
+  scaling_fixtures[[k$fixture]] <- write_score_fixture(
+    file.path(tempdir(), paste0("duckhts_score_scaling_", k$fixture)),
+    n_variants = k$variants, n_samples = k$samples,
+    n_prs = max(shapes$prs[shapes$fixture == k$fixture]))
+}
+
+engines <- c("duckhts_native", "duckhts_sql")
+scaling_rows <- list()
+for (rep in seq_len(scaling_reps)) for (threads in scaling_threads) {
+  for (i in seq_len(nrow(shapes))) for (engine in engines) {
+    s <- shapes[i, ]
+    got <- run_scaling_process(threads, scaling_query(engine, scaling_fixtures[[s$fixture]], s$prs))
+    scaling_rows[[length(scaling_rows) + 1L]] <- data.frame(
+      s[c("ladder", "scale", "variants", "samples", "prs", "key")], engine = engine,
+      threads = threads, rep = rep, got, ceiling_mib = ceiling_mib(engine, s$variants, s$prs),
+      stringsAsFactors = FALSE)
+  }
+}
+scaling_raw <- do.call(rbind, scaling_rows)
+
+# The native result at one thread in the first repeat is each shape's expectation.
+expected <- scaling_raw[scaling_raw$engine == "duckhts_native" & scaling_raw$threads == 1L &
+                          scaling_raw$rep == 1L & scaling_raw$ok, c("key", "result")]
+scaling_raw$expected <- expected$result[match(scaling_raw$key, expected$key)]
+scaling_raw$passed <- scaling_raw$ok & !is.na(scaling_raw$expected) &
+  scaling_raw$result == scaling_raw$expected &
+  grepl(",true$", scaling_raw$result) &
+  is.finite(scaling_raw$rss_bytes) & scaling_raw$rss_bytes <= scaling_raw$ceiling_mib * 2^20
+
+cell_keys <- c("ladder", "scale", "variants", "samples", "prs", "engine", "threads")
+scaling_cells <- do.call(rbind, lapply(split(scaling_raw, scaling_raw[cell_keys], drop = TRUE), function(rows) {
+  passed <- nrow(rows) == scaling_reps && all(rows$passed)
+  data.frame(
+    rows[1L, cell_keys],
+    status = if (passed) "PASS" else sprintf("FAIL (%d/%d)", sum(rows$passed), nrow(rows)),
+    median_sec = if (passed) round(stats::median(rows$seconds), 2) else NA_real_,
+    range_sec = sprintf("%.2f-%.2f", min(rows$seconds), max(rows$seconds)),
+    peak_rss_mib = round(max(rows$rss_bytes) / 2^20),
+    ceiling_mib = round(rows$ceiling_mib[[1L]]),
+    peak_buffer_mib = round(max(rows$buffer_bytes) / 2^20),
+    peak_spill_mib = round(max(rows$spill_bytes) / 2^20),
+    row.names = NULL, stringsAsFactors = FALSE)
+}))
+scaling_cells <- scaling_cells[order(match(paste(scaling_cells$ladder, scaling_cells$scale), shapes$key),
+                                     scaling_cells$engine, scaling_cells$threads), ]
+```
+
+### Cells
+
+A cell passes when all its processes finish, return the native result for the
+shape, report finite scores and stay under the ceiling.
+
+```{r scaling-cells, echo = FALSE}
+knitr::kable(scaling_cells, format = "pipe", row.names = FALSE)
+```
+
+### Exponents
+
+SQL reference median seconds along each ladder, starting from the base case.
+
+```{r scaling-exponents, echo = FALSE}
+sql_cells <- scaling_cells[scaling_cells$engine == "duckhts_sql", ]
+seconds_at <- function(threads, ladder, scale) {
+  key <- if (scale == "1x") "base 1x" else paste(ladder, scale)
+  sql_cells$median_sec[sql_cells$threads == threads &
+                         paste(sql_cells$ladder, sql_cells$scale) == key]
+}
+scaling_exponents <- do.call(rbind, lapply(scaling_threads, function(threads) {
+  rbind(
+    do.call(rbind, lapply(c("variants", "samples", "prs"), function(ladder) {
+      t <- vapply(c("1x", "2x", "4x"), function(s) seconds_at(threads, ladder, s), numeric(1))
+      data.frame(threads = threads, ladder = ladder,
+                 seconds = paste(t, collapse = " / "),
+                 exponents = paste(round(log2(t[-1L] / t[-3L]), 2), collapse = ", "))
+    })),
+    data.frame(threads = threads, ladder = "joint",
+               seconds = paste(seconds_at(threads, "joint", "1x"), seconds_at(threads, "joint", "2x2x2"),
+                               sep = " / "),
+               exponents = as.character(round(
+                 log2(seconds_at(threads, "joint", "2x2x2") / seconds_at(threads, "joint", "1x")) / 3, 2))))
+}))
+knitr::kable(scaling_exponents, format = "pipe", row.names = FALSE)
+```
+
+```{r scaling-failures, echo = FALSE}
+failed <- scaling_raw[!scaling_raw$passed, c("key", "engine", "threads", "rep", "ok", "seconds",
+                                             "rss_bytes", "ceiling_mib", "result", "expected")]
+if (nrow(failed)) knitr::kable(failed, format = "pipe", row.names = FALSE, caption = "Failed processes")
+```
+
 ```{r cleanup, include = FALSE}
 DBI::dbDisconnect(con, shutdown = TRUE)
 unlink(c(fixture_dir, spill_dir), recursive = TRUE)
+unlink(file.path(tempdir(), paste0("duckhts_score_scaling_", names(scaling_fixtures))), recursive = TRUE)
 ```

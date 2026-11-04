@@ -234,6 +234,35 @@ FROM query(getvariable('score_compare'));
 ----
 0
 
+# A log-p field that parses to NaN or fails to parse (NA, ., nan, x) falls back to P.
+foreach preset METAL PLINK2
+
+statement ok
+SET VARIABLE score_columns = '${preset}';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_lp_' || lower('${preset}') || '.tsv'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := '${preset}', q_score_thr := '0.1,1', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+# METAL keeps only rs2 (P 0.01) at 0.1; PLINK2 keeps rs2 (LOG10_P 2) and rs3 (P 0.01).
+query TII
+SELECT SAMPLE, "score_sql_lp_plink2_CNT_p0.1", "score_sql_lp_plink2_CNT_p1" FROM sql_score ORDER BY SAMPLE;
+----
+S1	2	3
+S2	2	3
+
 statement ok
 SET VARIABLE score_columns = 'PLINK';
 
@@ -319,6 +348,40 @@ FROM query(getvariable('score_compare'));
 0
 
 endloop
+
+# FILTER=. records pass only with '.'; PASS selects records whose FILTER is PASS
+# (bcftools +score 1.24 gives the same counts). Lists naming no header filter are
+# outside the reference.
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_filters.vcf';
+
+foreach filters PASS . q10 q10,PASS .,PASS
+
+statement ok
+SET VARIABLE score_apply_filters = '${filters}';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', apply_filters := '${filters}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+# .,PASS keeps the FILTER=. and PASS records.
+query TI
+SELECT SAMPLE, score_summary_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	2
+S2	2
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
 
 statement ok
 SET VARIABLE score_apply_filters = NULL;

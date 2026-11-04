@@ -44,12 +44,13 @@ summaries AS (
     FROM unnest(getvariable('score_summaries')) AS files(path)
 ),
 -- Each scan has its own ordinal: UNION scheduling cannot decide which duplicate wins.
+-- Fields stay VARCHAR (auto_detect := false) so parsing starts from the original text, as native does.
 summary_rows AS MATERIALIZED (
     SELECT * FROM query(array_to_string(list_transform(getvariable('score_summaries'),
         lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
              ' AS path, row_number() OVER () AS ordinal, to_json(t) AS fields FROM read_tabix(' ||
              chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
-             ', header := true) t'), ' UNION ALL '))
+             ', header := true, auto_detect := false) t'), ' UNION ALL '))
 ),
 -- Alias order follows the pinned native presets.
 aliases(preset, role, names) AS (
@@ -107,7 +108,8 @@ parsed_markers AS (
            f['SNP'] AS id, upper(f['A1']) AS effect,
            coalesce(nullif(try_cast(f['BETA'] AS FLOAT), 'NaN'::FLOAT),
                CASE WHEN try_cast(f['OR'] AS FLOAT) > 0 THEN ln(try_cast(f['OR'] AS FLOAT))::FLOAT END) AS beta,
-           CASE WHEN f['LP'] IS NOT NULL THEN try_cast(f['LP'] AS FLOAT)
+           -- Native parses LP first and falls back to P when LP is missing, unparsable or NaN.
+           CASE WHEN NOT isnan(coalesce(try_cast(f['LP'] AS FLOAT), 'NaN'::FLOAT)) THEN try_cast(f['LP'] AS FLOAT)
                 WHEN try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT) > 0
                 THEN (-log10(try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT))::FLOAT -
                       coalesce(try_cast(nullif(split_part(lower(f['P']), 'e', 2), '') AS FLOAT), 0))::FLOAT
@@ -175,6 +177,8 @@ calls AS (
 filtered_calls AS (
     SELECT * FROM calls
     WHERE coalesce(getvariable('score_apply_filters')::VARCHAR, '') = ''
+       -- htslib's synced reader (has_filter): '.' selects records without FILTER entries;
+       -- PASS selects only records whose FILTER is PASS. Filter names are header IDs.
        OR len(list_intersect(coalesce(FILTER, ['.']), string_split(getvariable('score_apply_filters')::VARCHAR, ','))) > 0
 ),
 selection(kind, spec, path, mode) AS (
