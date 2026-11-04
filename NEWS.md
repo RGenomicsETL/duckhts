@@ -15,7 +15,9 @@
   rounding of a `q_score_thr` threshold is an error, because native's choice there depends
   on the platform libm; weights converted from odds ratios widen the bound by native
   `logf`'s rounding. Under ID matching, a summary row without an ID is an error when the
-  VCF also has records without IDs, because native matches a literal `.`. `benchmarks/benchmark_score.md` times it beside the native function
+  VCF also has records without IDs, because native matches a literal `.`. Like native, it
+  rejects thresholds that repeat or format to the same column-name suffix.
+  `benchmarks/benchmark_score.md` times it beside the native function
   and `bcftools +score`: at 500,000 variants × 100 samples, 19.4 s against 0.98 s native
   and 1.17 s upstream. Its 1×/2×/4× ladders of variants, samples and PRS files have time
   exponents of at most 1.0, and SQL peak RSS grows with variants × PRS files, not samples

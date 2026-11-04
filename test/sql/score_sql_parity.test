@@ -391,6 +391,25 @@ SELECT count(*) FROM pragma_table_info('sql_score') WHERE name = 'score_sql_thre
 ----
 1
 
+# A repeated threshold, or two thresholds that format to the same %.6g suffix, would name
+# the same column twice; native rejects both, and the reference must not merge them.
+foreach thresholds 0.1,0.1 0.1234565,0.1234567
+
+statement ok
+SET VARIABLE score_q_score_thr = string_split('${thresholds}', ',')::DOUBLE[];
+
+statement error
+SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '${thresholds}', counts := true);
+----
+duplicate generated output column name
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+duplicate generated output column names
+
+endloop
+
 # One heterozygous marker weighted by OR 1.00076: native logf and SQL's double ln differ in
 # the last float32 bits, so the bound includes the conversion error.
 statement ok

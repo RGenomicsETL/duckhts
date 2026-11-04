@@ -356,13 +356,26 @@ results AS (
     LEFT JOIN reductions r ON samples.sample_index = r.sample_index AND summaries.path = r.path AND t.suffix = r.suffix
 )
 SELECT SAMPLE,
-$score$ || array_to_string(list_transform(
+$score$ ||
+-- The one-element list binds the generated metric names once for the name check and the
+-- projection. Native rejects any repeated generated column name, ignoring case
+-- (score_validate_prs_names); here a repeated threshold would count each term twice.
+list_transform([
     flatten(list_transform(
         list_transform(getvariable('score_summaries'), lambda p: regexp_replace(regexp_extract(p, '[^/]+$'),
             '(\.(gz|txt|tsv|vcf|bcf))+$', '')),
         lambda p: list_transform(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0]), lambda q:
             {'metric': p || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', pow(10, log10(CASE WHEN q::FLOAT = 0 THEN q ELSE q::FLOAT::DOUBLE END))) END,
-             'count_metric': p || '_CNT' || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', pow(10, log10(CASE WHEN q::FLOAT = 0 THEN q ELSE q::FLOAT::DOUBLE END))) END}))),
+             'count_metric': p || '_CNT' || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', pow(10, log10(CASE WHEN q::FLOAT = 0 THEN q ELSE q::FLOAT::DOUBLE END))) END})))],
+  lambda metrics: CASE
+    WHEN len(list_distinct(list_transform(
+             ['SAMPLE'] || list_transform(metrics, lambda m: m['metric']) ||
+             CASE WHEN coalesce(getvariable('score_counts'), false)
+                  THEN list_transform(metrics, lambda m: m['count_metric']) ELSE []::VARCHAR[] END,
+             lambda name: lower(name))))
+         <> 1 + len(metrics) * CASE WHEN coalesce(getvariable('score_counts'), false) THEN 2 ELSE 1 END
+        THEN error('score_reference: duplicate generated output column names')
+    ELSE array_to_string(list_transform(metrics,
     lambda m: 'max(score) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
          ') AS "' || replace(m['metric'], '"', '""') || '"' ||
          CASE WHEN coalesce(getvariable('score_counts'), false) THEN
@@ -370,7 +383,7 @@ $score$ || array_to_string(list_transform(
              ') AS "' || replace(m['count_metric'], '"', '""') || '"' ELSE '' END ||
          CASE WHEN coalesce(getvariable('score_bounds'), false) THEN
              ', max(bound) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
-             ') AS "' || replace(m['metric'], '"', '""') || '_BOUND"' ELSE '' END), ', ') ||
+             ') AS "' || replace(m['metric'], '"', '""') || '_BOUND"' ELSE '' END), ', ') END)[1] ||
 $score$
 FROM results GROUP BY SAMPLE ORDER BY SAMPLE
 $score$ END)
