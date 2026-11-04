@@ -410,6 +410,32 @@ duplicate generated output column names
 
 endloop
 
+# The first data row omits P. Native splits each row and excludes rs2 (P=0.5) at 0.1;
+# read_tabix would take five columns from that row and drop P everywhere, so the
+# reference rejects the summary rather than admit rs2.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_ragged.tsv'];
+
+statement ok
+SET VARIABLE score_columns = 'PLINK2';
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1];
+
+query I
+SELECT "score_sql_ragged_CNT_p0.1" FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK2', q_score_thr := '0.1', counts := true) ORDER BY SAMPLE;
+----
+2
+2
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+summary scan is narrower than its mapped header fields
+
+statement ok
+SET VARIABLE score_columns = NULL;
+
 # One heterozygous marker weighted by OR 1.00076: native logf and SQL's double ln differ in
 # the last float32 bits, so the bound includes the conversion error.
 statement ok
@@ -533,6 +559,51 @@ SET VARIABLE score_${kind} = NULL;
 endloop
 
 endloop
+
+# A contig name with colons: hts_parse_region splits an unbraced item at its last colon.
+statement ok
+SET VARIABLE score_path = 'test/data/score_hla.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_hla_summary.tsv'];
+
+foreach region HLA-A*01:01:100-100 {HLA-A*01:01}:200 HLA-A*01:01 HLA-A*01:01:150-
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '${region}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '${region}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
 
 foreach filters PASS q10
 

@@ -123,7 +123,12 @@ fields AS (
     -- summary_headers into summary_rows changed DuckDB's estimates so the marker hash join
     -- built over the V x S calls instead of the markers (9 GiB at 4 PRS).
     WHERE NOT (ordinal = 1 AND NOT hashed AND field_values = header_fields)
-      AND CASE WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
+      -- read_tabix takes its column count from the first scanned row, so a short first data
+      -- row truncates later rows; native splits each row separately (score_load_summary).
+      AND CASE WHEN list_max(map_values(mapping)) > len(field_values)
+               THEN error('score_reference: summary scan is narrower than its mapped header fields ' ||
+                          '(a short first data row); outside the reference: ' || path)
+               WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
                THEN error('score_reference: missing effect allele/weight columns in summary header: ' || path)
                WHEN (coalesce(getvariable('score_use_variant_id'), false) OR lack_position) AND mapping['SNP'] IS NULL
                THEN error('score_reference: missing marker name column in summary header: ' || path)
@@ -265,13 +270,24 @@ file_rows AS (
     LATERAL (SELECT regexp_matches(lower(path), '\.bed(\.gz)?$') AS is_bed)
 ),
 -- A one-field row of a non-BED file is a region expression, parsed like the string option.
+-- As in hts_parse_region, an item that names a contig whole is that contig, unless the part
+-- before its last colon also names one (ambiguous). Otherwise a braced name ends at '}',
+-- and an unbraced name ends at the last colon.
 interval_items AS (
-    SELECT kind, mode, item, coalesce(contigs.id, regexp_extract(item, '^(\{[^}]+\}|[^:]+)', 1)) AS contig
+    SELECT kind, mode, item,
+           CASE WHEN whole_name.id IS NOT NULL THEN
+                    CASE WHEN contains(item, ':') AND EXISTS (SELECT 1 FROM contigs c
+                                                              WHERE c.id = regexp_extract(item, '^(.*):', 1))
+                         THEN error('score_reference: ambiguous region/target expression: ' || item)
+                         ELSE item END
+                WHEN starts_with(item, '{') THEN coalesce(nullif(regexp_extract(item, '^(\{[^}]*\})', 1), ''), item)
+                WHEN contains(item, ':') THEN regexp_extract(item, '^(.*):', 1)
+                ELSE item END AS contig
     FROM (SELECT kind, mode, spec AS expression FROM selection WHERE coalesce(spec, '') <> ''
           UNION ALL
           SELECT kind, mode, fields[1] FROM file_rows WHERE len(fields) = 1 AND NOT is_bed) AS expressions
     CROSS JOIN unnest(regexp_extract_all(expression, '(\{[^}]*\}[^,]*|[^,]+)')) AS items(item)
-    LEFT JOIN contigs ON item = contigs.id
+    LEFT JOIN contigs AS whole_name ON item = whole_name.id
 ),
 -- Region coordinates follow htslib hts_parse_region with HTS_PARSE_LIST | HTS_PARSE_ONE_COORD
 -- (third_party/htslib/hts.c), as native score_parse_region_list uses it. Each number is
