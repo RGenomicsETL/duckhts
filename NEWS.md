@@ -2,6 +2,10 @@
 
 # duckhts (development version)
 
+- The optional GitHub mirror of R-universe R package binaries is now manual-only.
+  Existing release assets are retained; the mirror is not a per-commit archive.
+  Normal CRAN/R-universe installation and signed DuckDB extension distribution
+  are unchanged.
 - `benchmarks/benchmark_fragment_bin_counts.md` counts BED fragments by tile and cell
   barcode in SQL, with barcode selection, blacklisting and a sparse tile by cell matrix, on
   simulated single-cell fragments. Its queries match `bedtools intersect` plus `data.table`
@@ -2353,3 +2357,4 @@ compound prediction remains in https://github.com/RGenomicsETL/duckhts/issues/92
 - standard_tags + auxiliary_tags demo added to README R examples
 - read_tabix supports auto_detect for basic numeric inference and column_types overrides
 - added SQL/R demos and tests for tabix type inference and column overrides
+

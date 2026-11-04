@@ -1,9 +1,10 @@
-name: Sync R-universe artifacts (nightly)
+name: Sync R-universe artifacts (manual)
 
+# Optional mirror of the latest available R package binaries, not a per-commit
+# archive or the signed DuckDB extension distribution pipeline. Normal R package
+# installation uses CRAN or R-universe directly; this mirror is not auto-refreshed.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * *"
 
 permissions:
   contents: write
@@ -149,7 +150,7 @@ jobs:
             dist/zips/*.zip
             dist/latest-version.txt
 
-      - name: Publish nightly release assets
+      - name: Publish manual release assets
         if: steps.sync.outputs.publish == 'yes'
         uses: softprops/action-gh-release@v2
         with:
@@ -159,3 +160,4 @@ jobs:
           files: |
             dist/zips/*.zip
             dist/latest-version.txt
+

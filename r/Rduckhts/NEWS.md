@@ -1,5 +1,8 @@
 # Rduckhts (development version)
 
+- The optional GitHub mirror of R-universe package binaries no longer refreshes
+  nightly. Use CRAN or R-universe directly for normal installation; previously
+  mirrored bundles remain available, with manual refreshes only.
 - Region queries on tabix-indexed VCFs no longer scan every sample column to locate each
   record (backport of htslib d24ed09).
 - The bundled extension reads VCF/BCF sites without parsing genotypes when no FORMAT or
@@ -1308,3 +1311,4 @@ Circular annotation and mapped MANE-on-GRCh37 enrichment are not provided.
 - Initial development release.
 - Bundles the DuckHTS DuckDB extension and htslib for HTS file readers.
 - Adds table-creation helpers for VCF/BCF, BAM/CRAM, FASTA/FASTQ, GFF/GTF, and tabix.
+

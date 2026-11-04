@@ -742,8 +742,14 @@ export HTS_PATH=$(Rscript --quiet -e 'Rduckhts::setup_hts_env(); cat(Sys.getenv(
 
 If htslib has already opened a file in the process, restart the process after changing `HTS_PATH`; plugin discovery has already occurred.
 
-If you don’t have htslib plugins installed locally, download the prebuilt binaries from the r-universe-binaries GitHub release and point `HTS_PATH` at the extracted htslib/libexec/htslib directory inside the package bundle.
-https://github.com/RGenomicsETL/duckhts/releases/tag/r-universe-binaries
+If you don’t have htslib plugins installed locally, the
+[r-universe-binaries GitHub release](https://github.com/RGenomicsETL/duckhts/releases/tag/r-universe-binaries)
+is an optional source of previously mirrored R package bundles. It is refreshed only
+manually, not nightly or for every commit; check the available assets and their package,
+OS, architecture, and R versions before using one. Point `HTS_PATH` at the extracted
+htslib/libexec/htslib directory inside a compatible package bundle. This mirror is
+separate from signed DuckDB extension distribution. For normal R package installation,
+use CRAN or R-universe directly as shown above.
 
 ### Browser wasm/webR HTTP backend
 
@@ -1015,3 +1021,4 @@ The GenBank reader and FASTA converter were contributed by
 Thanks to all [contributors](https://github.com/RGenomicsETL/duckhts/graphs/contributors).
 See the [package author credits](r/Rduckhts/DESCRIPTION) and
 [third-party notices](r/Rduckhts/inst/COPYRIGHT) for upstream acknowledgements.
+
