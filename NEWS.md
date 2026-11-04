@@ -5,7 +5,7 @@
 - `test/sql/score_reference.sql` computes `bcftools_score`'s GT and DS scores as one SQL
   query over `read_geno`, `read_bcf_samples`, `read_hts_header`, `read_tabix` and, for the
   summary header line, `read_csv`, taking its inputs through session variables.
-  `test/sql/score_sql_parity.test` compares it with the native function on 135 cases: the
+  `test/sql/score_sql_parity.test` compares it with the native function on 136 cases: the
   eight column presets, `#CHR`/`#ID` summary headers, indexed summaries, PRS file names, ID
   and position matching, thresholds with the log-p to P fallback, NaN dosages, samples,
   FILTER selection, region and target strings and BED files with their overlap modes, and
@@ -14,9 +14,10 @@
   include/exclude expressions are outside the reference. A p-value within float32 `log10f`
   rounding of a `q_score_thr` threshold is an error, because native's choice there depends
   on the platform libm; weights converted from odds ratios widen the bound by native
-  `logf`'s rounding. `benchmarks/benchmark_score.md` times it beside the native function
+  `logf`'s rounding. Under ID matching, a summary row without an ID is an error when the
+  VCF also has records without IDs, because native matches a literal `.`. `benchmarks/benchmark_score.md` times it beside the native function
   and `bcftools +score`: at 500,000 variants × 100 samples, 19.4 s against 0.98 s native
-  and 1.16 s upstream. Its 1×/2×/4× ladders of variants, samples and PRS files have time
+  and 1.17 s upstream. Its 1×/2×/4× ladders of variants, samples and PRS files have time
   exponents of at most 1.0, and SQL peak RSS grows with variants × PRS files, not samples
   (739 MiB at 1,000,000 variants).
 - `read_bcf` parses only the VCF fields that selected columns read, by setting htslib's
