@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# Link libhts.a with the libraries htslib was configured with (curl only when enabled).
+hts_libs=$(make -s -C third_party/htslib print-config | sed -n 's/^LIBS = //p')
 work=$(mktemp -d test/score-summary-errors-XXXXXX)
 trap 'rm -rf "$work"' EXIT
 "${CC:-cc}" -std=c11 -D_POSIX_C_SOURCE=200809L -O1 \
@@ -8,7 +10,7 @@ trap 'rm -rf "$work"' EXIT
     -Iduckdb_capi -Isrc/include -Ithird_party/htslib \
     test/scripts/score_summary_error_test.c -Wl,--gc-sections \
     third_party/htslib/libhts.a \
-    -lz -lbz2 -llzma -lcurl -ldeflate -lcrypto -lpthread -lm \
+    $hts_libs -lm \
     -o "$work/test"
 if [ "$#" -gt 0 ]; then
     "$work/test" "$@"

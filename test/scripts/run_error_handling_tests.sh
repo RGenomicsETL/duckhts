@@ -11,7 +11,7 @@ fi
 for name in "$@"; do
     "${CC:-cc}" -std=gnu11 -Wall -Wextra -Werror \
         -ffunction-sections -fdata-sections \
-        -Iduckdb_capi -Isrc/include -Ithird_party/htslib -Ithird_party/libBigWig \
+        -DNOCURL=1 -Iduckdb_capi -Isrc/include -Ithird_party/htslib -Ithird_party/libBigWig \
         "test/scripts/$name.c" -Wl,--gc-sections -pthread -o "$tmp/$name"
     timeout 30 "$tmp/$name"
     printf '%s: PASS\n' "$name"
