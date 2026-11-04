@@ -160,4 +160,3 @@ jobs:
           files: |
             dist/zips/*.zip
             dist/latest-version.txt
-

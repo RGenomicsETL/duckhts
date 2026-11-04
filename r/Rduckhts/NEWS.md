@@ -1311,4 +1311,3 @@ Circular annotation and mapped MANE-on-GRCh37 enrichment are not provided.
 - Initial development release.
 - Bundles the DuckHTS DuckDB extension and htslib for HTS file readers.
 - Adds table-creation helpers for VCF/BCF, BAM/CRAM, FASTA/FASTQ, GFF/GTF, and tabix.
-

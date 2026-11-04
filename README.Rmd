@@ -1021,4 +1021,3 @@ The GenBank reader and FASTA converter were contributed by
 Thanks to all [contributors](https://github.com/RGenomicsETL/duckhts/graphs/contributors).
 See the [package author credits](r/Rduckhts/DESCRIPTION) and
 [third-party notices](r/Rduckhts/inst/COPYRIGHT) for upstream acknowledgements.
-
