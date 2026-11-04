@@ -114,27 +114,33 @@ static bool macro_digest(duckhts_registration_t *registration) {
     if (state == DuckDBSuccess) {
         state = duckdb_bind_varchar_length(prepared, 1, joined, length);
     }
-    if (state == DuckDBSuccess) {
+    if (state != DuckDBSuccess) {
+        const char *error = duckdb_prepare_error(prepared);
+        duckhts_registration_error(registration,
+            error != NULL && *error != '\0' ? error : "Cannot prepare macro digest");
+    } else {
         state = duckdb_execute_prepared(prepared, &result);
-        if (state == DuckDBSuccess) {
+        if (state != DuckDBSuccess) {
+            const char *error = duckdb_result_error(&result);
+            duckhts_registration_error(registration,
+                error != NULL && *error != '\0' ? error : "Cannot execute macro digest");
+        } else {
             duckdb_data_chunk chunk = duckdb_fetch_chunk(result);
             duckdb_string_t *values = duckdb_vector_get_data(duckdb_data_chunk_get_vector(chunk, 0));
             if (duckdb_string_t_length(values[0]) != 64) {
                 state = DuckDBError;
+                duckhts_registration_error(registration, "Cannot hash macro definitions");
             } else {
                 memcpy(definitions_sha256, duckdb_string_t_data(&values[0]), 64);
                 definitions_sha256[64] = '\0';
             }
             duckdb_destroy_data_chunk(&chunk);
-            duckdb_destroy_result(&result);
         }
+        duckdb_destroy_result(&result);
     }
     duckdb_destroy_prepare(&prepared);
     free(joined);
-    if (state != DuckDBSuccess) {
-        return duckhts_registration_error(registration, "Cannot hash macro definitions");
-    }
-    return true;
+    return state == DuckDBSuccess;
 }
 
 bool duckhts_macro_registration_end(duckhts_registration_t *registration) {

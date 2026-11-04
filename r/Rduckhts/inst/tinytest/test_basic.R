@@ -72,7 +72,8 @@ expect_identical(
     "overwrite",
     "samples",
     "regions_var",
-    "include_file_offset" # opt-in FILE_OFFSET column of read_bcf()
+    "include_file_offset", # opt-in FILE_OFFSET column of read_bcf()
+    "duplicate_names"
   )
 )
 expect_identical(

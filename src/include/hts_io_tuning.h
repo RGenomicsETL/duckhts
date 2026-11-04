@@ -4,6 +4,7 @@
 #include <htslib/faidx.h>
 #include <htslib/hfile.h>
 #include <htslib/hts.h>
+#include <htslib/sam.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -194,6 +195,16 @@ static inline void duckhts_apply_remote_faidx_tuning(faidx_t *fai,
     if (cache_size > 0) {
         fai_set_cache_size(fai, cache_size);
     }
+}
+
+/* Restrict CRAM decoding to `fields` (SAM_* bits); other formats are unaffected.
+ * CRAM 1.x reconstructs mate flag bits from the mate data series (htslib
+ * cram/cram_io.c), so those fields are kept for it. Returns hts_set_opt's status. */
+static inline int duckhts_cram_require_fields(htsFile *fp, int fields) {
+    const htsFormat *format = hts_get_format(fp);
+    if (format->format != cram) return 0;
+    if (format->version.major == 1) fields |= SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
+    return hts_set_opt(fp, CRAM_OPT_REQUIRED_FIELDS, fields);
 }
 
 #endif

@@ -20,6 +20,8 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "bcftools_shim.h"
 #include "filter.h"
+#include "duckhts_column_names.h"
+#include "duckhts_bind_params.h"
 
 #ifndef duckdb_malloc
 #define duckdb_malloc malloc
@@ -123,7 +125,21 @@ typedef struct {
 } score_summary_t;
 
 typedef struct {
+    int rid;
+    hts_pos_t beg;
+    hts_pos_t end;
+} score_interval_t;
+
+typedef struct {
+    score_interval_t *intervals;
+    size_t count;
+    int active;
+} score_region_list_t;
+
+typedef struct {
     bcf_srs_t *sr;
+    score_region_list_t regions;
+    score_region_list_t targets;
     filter_t *include_filt;
     filter_t *exclude_filt;
 } score_scan_source_t;
@@ -877,7 +893,9 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
     int mapping_owns = 0;
     int idx_snp = -1, idx_chr = -1, idx_bp = -1, idx_a1 = -1, idx_beta = -1, idx_or = -1, idx_p = -1, idx_lp = -1;
     score_summary_t *summary = NULL;
-    void *unused_alleles = NULL;
+    char *pending_allele = NULL;
+    uint64_t line_no = 0;
+    int read_status;
 
     if (bind->columns_file && bind->columns_file[0]) {
         mapping = score_mapping_file(bind->columns_file, &mapping_n);
@@ -903,10 +921,15 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         return NULL;
     }
 
-    while (hts_getline(fp, '\n', &str) >= 0) {
+    for (;;) {
+        errno = 0;
+        read_status = hts_getline(fp, '\n', &str);
+        if (read_status < 0) break;
+        line_no++;
         if (str.s[0] == '#' && strncmp(str.s, "#CHR", 4) != 0 && strncmp(str.s, "#ID", 3) != 0) continue;
         break;
     }
+    if (read_status < -1) goto read_error;
     if (!str.s || str.l == 0) {
         snprintf(err, err_sz, "bcftools_score: empty summary file '%s'", summary_path);
         hts_close(fp);
@@ -937,6 +960,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
     }
 
     summary = (score_summary_t *)duckdb_malloc(sizeof(score_summary_t));
+    if (!summary) goto oom;
     memset(summary, 0, sizeof(*summary));
     summary->use_snp = bind->use_variant_id || idx_chr < 0 || idx_bp < 0;
     summary->snp_ok = idx_snp >= 0;
@@ -972,13 +996,16 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
 
     if (summary->use_snp) {
         summary->id2idx = khash_str2int_init();
+        if (!summary->id2idx) goto oom;
     } else {
         summary->rid_pos2idx = kh_init(score64);
+        if (!summary->rid_pos2idx) goto oom;
     }
 
-    (void)unused_alleles;
-
-    while (hts_getline(fp, '\n', &str) >= 0) {
+    for (;;) {
+        errno = 0;
+        read_status = hts_getline(fp, '\n', &str);
+        if (read_status < 0) break;
         int n_fields;
         float es = NAN;
         float lp = NAN;
@@ -987,19 +1014,14 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         int rid = -1;
         int64_t pos = -1;
 
+        line_no++;
         marker.a1 = NULL;
         if (str.s[0] == '#') continue;
         summary->all_markers++;
         n_fields = score_split_fields(str.s, delimiter, fields, 512);
         if (n_fields == 0) continue;
 
-        if (idx_a1 < n_fields) {
-            marker.a1 = score_dup(fields[idx_a1]);
-            if (!marker.a1) continue;
-            score_strtoupper(marker.a1);
-        } else {
-            continue;
-        }
+        if (idx_a1 >= n_fields) continue;
 
         if (idx_beta >= 0 && idx_beta < n_fields) {
             if (score_parse_float(fields[idx_beta], &es) != 0) es = NAN;
@@ -1009,10 +1031,7 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
             if (score_parse_float(fields[idx_or], &orv) == 0 && !isnan(orv) && orv > 0.0f)
                 es = logf(orv);
         }
-        if (isnan(es)) {
-            duckdb_free(marker.a1);
-            continue;
-        }
+        if (isnan(es)) continue;
 
         if (idx_lp >= 0 && idx_lp < n_fields) {
             if (score_parse_float(fields[idx_lp], &lp) != 0) lp = NAN;
@@ -1021,13 +1040,30 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
             if (score_parse_pvalue_lp(fields[idx_p], &lp) != 0) lp = NAN;
         }
 
+        if (summary->use_snp) {
+            if (idx_snp < 0 || idx_snp >= n_fields || fields[idx_snp][0] == '\0') continue;
+        } else {
+            char *end;
+            if (idx_chr < 0 || idx_chr >= n_fields || idx_bp < 0 || idx_bp >= n_fields) continue;
+            rid = score_hdr_name2id_flexible(bcf_hdr, fields[idx_chr]);
+            if (rid < 0) continue;
+            pos = strtoll(fields[idx_bp], &end, 10) - 1;
+            if (end == fields[idx_bp] || *end != '\0' || pos < 0) continue;
+        }
+
+        pending_allele = score_dup(fields[idx_a1]);
+        if (!pending_allele) goto oom;
+        score_strtoupper(pending_allele);
+        marker.a1 = pending_allele;
         marker.es = es;
         marker.lp = lp;
 
         if (summary->n_markers == summary->m_markers) {
+            if (summary->m_markers > INT_MAX / 2) goto oom;
             int new_m = summary->m_markers ? summary->m_markers * 2 : 1024;
+            if ((size_t)new_m > SIZE_MAX / sizeof(score_marker_t)) goto oom;
             score_marker_t *new_markers = (score_marker_t *)realloc(summary->markers, sizeof(score_marker_t) * (size_t)new_m);
-            if (!new_markers) continue;
+            if (!new_markers) goto oom;
             summary->markers = new_markers;
             summary->m_markers = new_m;
         }
@@ -1035,11 +1071,14 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
         if (summary->use_snp) {
             int size;
             int ret;
-            if (idx_snp < 0 || idx_snp >= n_fields || fields[idx_snp][0] == '\0') continue;
             id = score_dup(fields[idx_snp]);
-            if (!id) continue;
+            if (!id) goto oom;
             size = khash_str2int_size(summary->id2idx);
             ret = khash_str2int_inc(summary->id2idx, id);
+            if (ret < 0) {
+                duckdb_free(id);
+                goto oom;
+            }
             if (ret == size) {
                 summary->markers[summary->n_markers++] = marker;
             } else {
@@ -1048,19 +1087,14 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
                 if (marker.a1) duckdb_free(marker.a1);
             }
         } else {
-            char *end = NULL;
             khash_t(score64) *hash;
             khiter_t it;
             int ret;
             uint64_t key;
-            if (idx_chr < 0 || idx_chr >= n_fields || idx_bp < 0 || idx_bp >= n_fields) continue;
-            rid = score_hdr_name2id_flexible(bcf_hdr, fields[idx_chr]);
-            if (rid < 0) continue;
-            pos = strtoll(fields[idx_bp], &end, 10) - 1;
-            if (end == fields[idx_bp] || *end != '\0' || pos < 0) continue;
             key = (((uint64_t)(uint32_t)rid) << 44) | (uint64_t)pos;
             hash = (khash_t(score64) *)summary->rid_pos2idx;
             it = kh_put(score64, hash, key, &ret);
+            if (ret < 0) goto oom;
             if (ret > 0) {
                 kh_val(hash, it) = summary->n_markers;
                 summary->markers[summary->n_markers++] = marker;
@@ -1069,12 +1103,30 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
                 if (marker.a1) duckdb_free(marker.a1);
             }
         }
+        pending_allele = NULL;
     }
 
+    if (read_status < -1) goto read_error;
     hts_close(fp);
     free(str.s);
     if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
     return summary;
+
+read_error:
+    snprintf(err, err_sz, "bcftools_score: failed reading summary '%s' after line %llu (htslib status %d)%s%s",
+             summary_path, (unsigned long long)line_no, read_status,
+             errno ? ": " : "", errno ? strerror(errno) : "");
+    goto fail;
+oom:
+    snprintf(err, err_sz, "bcftools_score: out of memory loading summary '%s' at line %llu",
+             summary_path, (unsigned long long)line_no);
+fail:
+    duckdb_free(pending_allele);
+    score_destroy_summary(summary);
+    hts_close(fp);
+    free(str.s);
+    if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
+    return NULL;
 }
 
 /* Load GWAS-VCF summary: reads FORMAT/ES and FORMAT/LP per-sample from a VCF/BCF
@@ -1093,8 +1145,13 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     bcf1_t *rec = NULL;
     score_summary_t **summaries = NULL;
     float *float_arr = NULL;
+    float *lp_arr = NULL;
+    char *pending_allele = NULL;
     int m_float = 0;
-    int i, j;
+    int m_lp = 0;
+    uint64_t record_no = 0;
+    int read_status;
+    int i;
 
     sfp = hts_open(summary_path, "r");
     if (!sfp) {
@@ -1138,22 +1195,11 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
 
     /* Allocate per-PRS summaries */
     summaries = (score_summary_t **)duckdb_malloc(sizeof(score_summary_t *) * (size_t)n_prs);
-    if (!summaries) {
-        snprintf(err, err_sz, "bcftools_score: out of memory");
-        bcf_hdr_destroy(shdr);
-        hts_close(sfp);
-        return NULL;
-    }
+    if (!summaries) goto oom;
+    memset(summaries, 0, sizeof(score_summary_t *) * (size_t)n_prs);
     for (i = 0; i < n_prs; i++) {
         summaries[i] = (score_summary_t *)duckdb_malloc(sizeof(score_summary_t));
-        if (!summaries[i]) {
-            for (j = 0; j < i; j++) score_destroy_summary(summaries[j]);
-            duckdb_free(summaries);
-            bcf_hdr_destroy(shdr);
-            hts_close(sfp);
-            snprintf(err, err_sz, "bcftools_score: out of memory");
-            return NULL;
-        }
+        if (!summaries[i]) goto oom;
         memset(summaries[i], 0, sizeof(score_summary_t));
         summaries[i]->use_snp = 0; /* match by chr:pos */
         summaries[i]->chr_ok = 1;
@@ -1162,15 +1208,21 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
         summaries[i]->beta_ok = 1;
         summaries[i]->p_ok = bind->q_thr_lp ? 1 : 0;
         summaries[i]->rid_pos2idx = kh_init(score64);
+        if (!summaries[i]->rid_pos2idx) goto oom;
     }
 
     rec = bcf_init1();
-    while (bcf_read(sfp, shdr, rec) == 0) {
+    if (!rec) goto oom;
+    for (;;) {
+        errno = 0;
+        read_status = bcf_read(sfp, shdr, rec);
+        if (read_status != 0) break;
         int n_es, n_lp = 0;
         int rid;
         uint64_t key;
         const char *chrom;
 
+        record_no++;
         bcf_unpack(rec, BCF_UN_ALL);
         for (i = 0; i < n_prs; i++) summaries[i]->all_markers++;
         if (rec->n_allele < 2) continue;
@@ -1181,16 +1233,16 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
 
         key = (((uint64_t)(uint32_t)rid) << 44) | (uint64_t)rec->pos;
 
-        /* Read FORMAT/ES */
+        /* htslib 1.24 returns -4 when a FORMAT buffer allocation fails. */
         n_es = bcf_get_format_float(shdr, rec, "ES", &float_arr, &m_float);
+        if (n_es == -4) goto oom;
         if (n_es < n_prs) continue;
 
         /* Read FORMAT/LP if needed */
-        float *lp_arr = NULL;
-        int m_lp = 0;
         if (bind->q_thr_lp) {
             n_lp = bcf_get_format_float(shdr, rec, "LP", &lp_arr, &m_lp);
-            if (n_lp < n_prs) { free(lp_arr); continue; }
+            if (n_lp == -4) goto oom;
+            if (n_lp < n_prs) continue;
         }
 
         /* Add marker to each PRS summary */
@@ -1206,24 +1258,28 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
             if (bind->q_thr_lp && score_is_missing(lp)) continue;
 
             /* Effect allele = ALT (allele index 1) — upstream convention */
-            marker.a1 = score_dup(rec->d.allele[1]);
-            if (!marker.a1) continue;
-            score_strtoupper(marker.a1);
+            pending_allele = score_dup(rec->d.allele[1]);
+            if (!pending_allele) goto oom;
+            score_strtoupper(pending_allele);
+            marker.a1 = pending_allele;
             marker.es = es;
             marker.lp = lp;
 
             /* Grow markers array if needed */
             if (summaries[i]->n_markers == summaries[i]->m_markers) {
+                if (summaries[i]->m_markers > INT_MAX / 2) goto oom;
                 int new_m = summaries[i]->m_markers ? summaries[i]->m_markers * 2 : 1024;
+                if ((size_t)new_m > SIZE_MAX / sizeof(score_marker_t)) goto oom;
                 score_marker_t *new_mk = (score_marker_t *)realloc(summaries[i]->markers,
                                                                      sizeof(score_marker_t) * (size_t)new_m);
-                if (!new_mk) { duckdb_free(marker.a1); continue; }
+                if (!new_mk) goto oom;
                 summaries[i]->markers = new_mk;
                 summaries[i]->m_markers = new_m;
             }
 
             hash = (khash_t(score64) *)summaries[i]->rid_pos2idx;
             it = kh_put(score64, hash, key, &ret);
+            if (ret < 0) goto oom;
             if (ret > 0) {
                 kh_val(hash, it) = summaries[i]->n_markers;
                 summaries[i]->markers[summaries[i]->n_markers++] = marker;
@@ -1231,15 +1287,38 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
                 summaries[i]->duplicate_markers++;
                 duckdb_free(marker.a1);
             }
+            pending_allele = NULL;
         }
-        if (lp_arr) free(lp_arr);
     }
 
+    if (read_status < -1) goto read_error;
     bcf_destroy1(rec);
     free(float_arr);
+    free(lp_arr);
     bcf_hdr_destroy(shdr);
     hts_close(sfp);
     return summaries;
+
+read_error:
+    snprintf(err, err_sz, "bcftools_score: failed reading GWAS-VCF summary '%s' after record %llu (htslib status %d)%s%s",
+             summary_path, (unsigned long long)record_no, read_status,
+             errno ? ": " : "", errno ? strerror(errno) : "");
+    goto fail;
+oom:
+    snprintf(err, err_sz, "bcftools_score: out of memory loading GWAS-VCF summary '%s' at record %llu",
+             summary_path, (unsigned long long)record_no);
+fail:
+    duckdb_free(pending_allele);
+    if (summaries) {
+        for (i = 0; i < n_prs; i++) score_destroy_summary(summaries[i]);
+        duckdb_free(summaries);
+    }
+    bcf_destroy1(rec);
+    free(float_arr);
+    free(lp_arr);
+    bcf_hdr_destroy(shdr);
+    hts_close(sfp);
+    return NULL;
 }
 
 static int score_resolve_use_tag(score_bind_t *bind, bcf_hdr_t *hdr, char *err, size_t err_sz) {
@@ -1385,13 +1464,25 @@ static const char *score_region_next_item(const char *item) {
     return comma ? comma + 1 : item + strlen(item);
 }
 
-static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const char *regions, int overlap_mode) {
-    const char *cursor = regions;
-    int match = 0;
-    hts_pos_t rec_end = rec->pos + (rec->rlen > 0 ? rec->rlen : 1);
-    score_region_lookup_t lookup = { hdr, NULL, 0, 0 };
+static int score_interval_compare(const void *a, const void *b) {
+    const score_interval_t *left = (const score_interval_t *)a;
+    const score_interval_t *right = (const score_interval_t *)b;
+    if (left->rid != right->rid) return left->rid < right->rid ? -1 : 1;
+    if (left->beg != right->beg) return left->beg < right->beg ? -1 : 1;
+    return (left->end > right->end) - (left->end < right->end);
+}
 
-    if (!regions || !regions[0]) return 1;
+/* Store disjoint half-open intervals ordered by header RID and start. Merging
+ * also makes their ends increasing within each contig. */
+static int score_parse_region_list(const bcf_hdr_t *hdr, const char *regions, score_region_list_t *list) {
+    const char *cursor = regions;
+    score_region_lookup_t lookup = { hdr, NULL, 0, 0 };
+    size_t capacity = 0;
+    size_t merged = 0;
+    int status = 0;
+
+    if (!regions || !regions[0]) return 0;
+    list->active = 1;
     while (*cursor) {
         int tid;
         hts_pos_t beg, end;
@@ -1402,7 +1493,7 @@ static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const 
         next = hts_parse_region(cursor, &tid, &beg, &end, score_region_name2id,
                                 &lookup, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD);
         if (lookup.out_of_memory) {
-            match = -1;
+            status = -1;
             break;
         }
         if (!next) {
@@ -1413,24 +1504,71 @@ static int score_record_in_region_list(const bcf_hdr_t *hdr, bcf1_t *rec, const 
             if (tid != -1 || !lookup.lookup_failed || !lookup.missing_name ||
                 !hts_parse_region(cursor, &tid, &beg, &end, score_region_missing_name2id,
                                   lookup.missing_name, HTS_PARSE_LIST | HTS_PARSE_ONE_COORD)) {
-                match = -1;
+                status = -1;
                 break;
             }
             next = score_region_next_item(cursor);
             if (!next) {
-                match = -1;
+                status = -1;
                 break;
             }
             cursor = next;
             continue;
         }
-        cursor = next;
-        if (tid == rec->rid && rec->pos < end && (overlap_mode == 0 ? rec->pos >= beg : rec_end > beg)) {
-            match = 1;
+        if (list->count == capacity) {
+            size_t new_capacity = capacity ? capacity * 2 : 16;
+            score_interval_t *intervals;
+            if (new_capacity < capacity || new_capacity > SIZE_MAX / sizeof(*intervals)) {
+                status = -1;
+                break;
+            }
+            intervals = (score_interval_t *)realloc(list->intervals, new_capacity * sizeof(*intervals));
+            if (!intervals) {
+                status = -1;
+                break;
+            }
+            list->intervals = intervals;
+            capacity = new_capacity;
         }
+        list->intervals[list->count++] = (score_interval_t){tid, beg, end};
+        cursor = next;
     }
     free(lookup.missing_name);
-    return match;
+    if (status < 0 || list->count == 0) return status;
+
+    qsort(list->intervals, list->count, sizeof(*list->intervals), score_interval_compare);
+    for (size_t i = 0; i < list->count; i++) {
+        score_interval_t *current = &list->intervals[i];
+        if (merged && list->intervals[merged - 1].rid == current->rid &&
+            list->intervals[merged - 1].end >= current->beg) {
+            if (list->intervals[merged - 1].end < current->end) {
+                list->intervals[merged - 1].end = current->end;
+            }
+        } else {
+            list->intervals[merged++] = *current;
+        }
+    }
+    list->count = merged;
+    return 0;
+}
+
+static int score_record_in_regions(const bcf1_t *rec, const score_region_list_t *list, int overlap_mode) {
+    hts_pos_t end;
+    size_t lo = 0, hi = list->count;
+    if (!list->active) return 1;
+    end = rec->pos + (overlap_mode == 0 ? 1 : (rec->rlen > 0 ? rec->rlen : 1));
+    /* The last interval starting before the record's exclusive end is the only
+     * candidate needed: earlier disjoint intervals also have earlier ends. */
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        const score_interval_t *interval = &list->intervals[mid];
+        if (interval->rid < rec->rid || (interval->rid == rec->rid && interval->beg < end)) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo > 0 && list->intervals[lo - 1].rid == rec->rid && list->intervals[lo - 1].end > rec->pos;
 }
 
 static int score_append_token(char **out, size_t *len, size_t *cap, const char *tok) {
@@ -1693,6 +1831,8 @@ static int score_source_next(score_scan_source_t *src, bcf1_t **out_rec) {
 
 static void score_source_destroy(score_scan_source_t *src) {
     if (!src) return;
+    free(src->regions.intervals);
+    free(src->targets.intervals);
     if (src->include_filt) filter_destroy(src->include_filt);
     if (src->exclude_filt) filter_destroy(src->exclude_filt);
     if (src->sr) {
@@ -1731,69 +1871,39 @@ static int score_format_metric_name(const score_bind_t *bind,
 }
 
 static int score_validate_prs_names(const score_bind_t *bind, char *err, size_t err_sz) {
-    char **seen = NULL;
-    int n_seen = 0;
-    int max_seen;
-    int i, j, k;
+    duckhts_column_names columns;
+    char detail[300];
+    int rc = 0;
     if (!bind || !bind->prs_names) return 0;
 
-    max_seen = 1 + bind->n_prs * bind->n_q_thr * (bind->counts ? 2 : 1);
-    seen = (char **)duckdb_malloc(sizeof(char *) * (size_t)max_seen);
-    if (!seen) {
-        snprintf(err, err_sz, "bcftools_score: out of memory");
-        return -1;
+    duckhts_column_names_init(&columns, 0);
+    if (duckhts_column_names_claim(&columns, "SAMPLE", NULL, detail, sizeof(detail)) != 0) {
+        snprintf(err, err_sz, "bcftools_score: %s", detail);
+        rc = -1;
     }
-    memset(seen, 0, sizeof(char *) * (size_t)max_seen);
-    seen[n_seen++] = score_dup("SAMPLE");
-    if (!seen[0]) {
-        duckdb_free(seen);
-        snprintf(err, err_sz, "bcftools_score: out of memory");
-        return -1;
-    }
-
-    for (i = 0; i < bind->n_prs; i++) {
+    for (int i = 0; rc == 0 && i < bind->n_prs; i++) {
         if (!bind->prs_names[i] || !bind->prs_names[i][0]) {
             snprintf(err, err_sz, "bcftools_score: summary PRS name must not be empty");
-            goto fail;
+            rc = -1;
         }
-        for (j = 0; j < bind->n_q_thr; j++) {
-            for (k = 0; k < (bind->counts ? 2 : 1); k++) {
+        for (int j = 0; rc == 0 && j < bind->n_q_thr; j++) {
+            for (int k = 0; rc == 0 && k < (bind->counts ? 2 : 1); k++) {
                 char metric_name[256];
-                int m;
                 if (score_format_metric_name(bind, bind->prs_names[i], j, k == 1, metric_name, sizeof(metric_name)) != 0) {
                     snprintf(err, err_sz, "bcftools_score: generated output column name for PRS '%s' is too long", bind->prs_names[i]);
-                    goto fail;
-                }
-                if (!metric_name[0]) {
+                    rc = -1;
+                } else if (!metric_name[0]) {
                     snprintf(err, err_sz, "bcftools_score: generated output column name must not be empty");
-                    goto fail;
+                    rc = -1;
+                } else if (duckhts_column_names_claim(&columns, metric_name, NULL, detail, sizeof(detail)) != 0) {
+                    snprintf(err, err_sz, "bcftools_score: duplicate generated output column name: %s; use unique summary filenames or GWAS-VCF samples", detail);
+                    rc = -1;
                 }
-                for (m = 0; m < n_seen; m++) {
-                    if (strcmp(seen[m], metric_name) == 0) {
-                        snprintf(err, err_sz, "bcftools_score: duplicate generated output column name '%s'; use unique summary filenames or GWAS-VCF samples", metric_name);
-                        goto fail;
-                    }
-                }
-                seen[n_seen] = score_dup(metric_name);
-                if (!seen[n_seen]) {
-                    snprintf(err, err_sz, "bcftools_score: out of memory");
-                    goto fail;
-                }
-                n_seen++;
             }
         }
     }
-
-    for (i = 0; i < n_seen; i++) duckdb_free(seen[i]);
-    duckdb_free(seen);
-    return 0;
-
-fail:
-    for (i = 0; i < n_seen; i++) {
-        if (seen[i]) duckdb_free(seen[i]);
-    }
-    duckdb_free(seen);
-    return -1;
+    duckhts_column_names_destroy(&columns);
+    return rc;
 }
 
 static int score_write_log(const score_bind_t *bind,
@@ -1840,21 +1950,6 @@ static int score_write_log(const score_bind_t *bind,
 static void score_bind(duckdb_bind_info info) {
     duckdb_value bcf_val = duckdb_bind_get_parameter(info, 0);
     duckdb_value summary_val = duckdb_bind_get_parameter(info, 1);
-    duckdb_value use_val;
-    duckdb_value columns_val;
-    duckdb_value columns_file_val;
-    duckdb_value variant_id_val;
-    duckdb_value q_thr_val;
-    duckdb_value counts_val;
-    duckdb_value regions_val;
-    duckdb_value regions_file_val;
-    duckdb_value regions_overlap_val;
-    duckdb_value targets_val;
-    duckdb_value targets_file_val;
-    duckdb_value targets_overlap_val;
-    duckdb_value apply_filters_val;
-    duckdb_value include_val;
-    duckdb_value exclude_val;
     duckdb_logical_type varchar_type;
     duckdb_logical_type bool_type;
     duckdb_logical_type dbl_type;
@@ -1887,149 +1982,63 @@ static void score_bind(duckdb_bind_info info) {
     }
     if (summary_val) duckdb_destroy_value(&summary_val);
 
-    use_val = duckdb_bind_get_named_parameter(info, "use");
-    if (use_val && !duckdb_is_null_value(use_val)) {
-        char *use_str = duckdb_get_varchar(use_val);
-        if (use_str) {
-            if (strcasecmp(use_str, "GT") == 0) bind->use_tag = SCORE_USE_GT;
-            else if (strcasecmp(use_str, "DS") == 0) bind->use_tag = SCORE_USE_DS;
-            else if (strcasecmp(use_str, "HDS") == 0) bind->use_tag = SCORE_USE_HDS;
-            else if (strcasecmp(use_str, "AP") == 0) bind->use_tag = SCORE_USE_AP;
-            else if (strcasecmp(use_str, "GP") == 0) bind->use_tag = SCORE_USE_GP;
-            else if (strcasecmp(use_str, "AS") == 0) bind->use_tag = SCORE_USE_AS;
-            else {
-                duckdb_bind_set_error(info, "bcftools_score: use must be one of GT,DS,HDS,AP,GP,AS");
-                duckdb_free(use_str);
-                duckdb_destroy_value(&use_val);
-                score_destroy_bind(bind);
-                return;
-            }
-            duckdb_free(use_str);
-        }
+    static const char *const use_names[] = {"GT", "DS", "HDS", "AP", "GP", "AS", NULL};
+    static const int use_tags[] = {SCORE_USE_GT, SCORE_USE_DS, SCORE_USE_HDS,
+                                   SCORE_USE_AP, SCORE_USE_GP, SCORE_USE_AS};
+    char *use_str = NULL;
+    char *columns_preset = NULL;
+    char *q_str = NULL;
+    int read_ok = duckhts_bind_varchar(info, "use", &use_str) &&
+                  duckhts_bind_varchar(info, "columns", &columns_preset) &&
+                  duckhts_bind_varchar(info, "columns_file", &bind->columns_file) &&
+                  duckhts_bind_varchar(info, "q_score_thr", &q_str) &&
+                  duckhts_bind_varchar(info, "samples", &bind->samples) &&
+                  duckhts_bind_varchar(info, "regions", &bind->regions) &&
+                  duckhts_bind_varchar(info, "regions_file", &bind->regions_file) &&
+                  duckhts_bind_varchar(info, "targets", &bind->targets) &&
+                  duckhts_bind_varchar(info, "targets_file", &bind->targets_file) &&
+                  duckhts_bind_varchar(info, "apply_filters", &bind->apply_filters) &&
+                  duckhts_bind_varchar(info, "include", &bind->include_expr) &&
+                  duckhts_bind_varchar(info, "exclude", &bind->exclude_expr) &&
+                  duckhts_bind_varchar(info, "summaries_list_file", &bind->summaries_list_file) &&
+                  duckhts_bind_varchar(info, "log_path", &bind->log_path);
+    bind->use_variant_id = duckhts_bind_bool(info, "use_variant_id", false);
+    bind->counts = duckhts_bind_bool(info, "counts", false);
+    bind->force_samples = duckhts_bind_bool(info, "force_samples", false);
+    /* INT64_MIN marks an absent overlap mode; the bind keeps -1 for "use the default". */
+    int64_t regions_overlap = duckhts_bind_int64(info, "regions_overlap", INT64_MIN);
+    int64_t targets_overlap = duckhts_bind_int64(info, "targets_overlap", INT64_MIN);
+    const char *error = NULL;
+    if (columns_preset) {
+        duckdb_free(bind->columns_preset);
+        bind->columns_preset = columns_preset;
     }
-    if (use_val) duckdb_destroy_value(&use_val);
-
-    columns_val = duckdb_bind_get_named_parameter(info, "columns");
-    if (columns_val && !duckdb_is_null_value(columns_val)) {
-        char *p = duckdb_get_varchar(columns_val);
-        if (p) {
-            if (bind->columns_preset) duckdb_free(bind->columns_preset);
-            bind->columns_preset = p;
-        }
+    if (!read_ok) {
+        error = "bcftools_score: out of memory reading parameters";
+    } else if (use_str) {
+        int i = 0;
+        while (use_names[i] && strcasecmp(use_str, use_names[i]) != 0) i++;
+        if (use_names[i]) bind->use_tag = use_tags[i];
+        else error = "bcftools_score: use must be one of GT,DS,HDS,AP,GP,AS";
     }
-    if (columns_val) duckdb_destroy_value(&columns_val);
-
-    columns_file_val = duckdb_bind_get_named_parameter(info, "columns_file");
-    if (columns_file_val && !duckdb_is_null_value(columns_file_val)) {
-        bind->columns_file = duckdb_get_varchar(columns_file_val);
+    if (!error && q_str && score_parse_q_thresholds(q_str, &bind->q_thr_lp, &bind->n_q_thr) != 0) {
+        error = "bcftools_score: q_score_thr must be a comma-separated list of p-values in (0,1]";
     }
-    if (columns_file_val) duckdb_destroy_value(&columns_file_val);
-
-    variant_id_val = duckdb_bind_get_named_parameter(info, "use_variant_id");
-    if (variant_id_val && !duckdb_is_null_value(variant_id_val)) bind->use_variant_id = duckdb_get_bool(variant_id_val) ? 1 : 0;
-    if (variant_id_val) duckdb_destroy_value(&variant_id_val);
-
-    q_thr_val = duckdb_bind_get_named_parameter(info, "q_score_thr");
-    if (q_thr_val && !duckdb_is_null_value(q_thr_val)) {
-        char *q_str = duckdb_get_varchar(q_thr_val);
-        if (score_parse_q_thresholds(q_str, &bind->q_thr_lp, &bind->n_q_thr) != 0) {
-            duckdb_bind_set_error(info, "bcftools_score: q_score_thr must be a comma-separated list of p-values in (0,1]");
-            duckdb_free(q_str);
-            duckdb_destroy_value(&q_thr_val);
-            score_destroy_bind(bind);
-            return;
-        }
-        if (q_str) duckdb_free(q_str);
+    if (!error && regions_overlap != INT64_MIN && (regions_overlap < 0 || regions_overlap > 2)) {
+        error = "bcftools_score: regions_overlap must be 0, 1, or 2";
     }
-    if (q_thr_val) duckdb_destroy_value(&q_thr_val);
-
-    counts_val = duckdb_bind_get_named_parameter(info, "counts");
-    if (counts_val && !duckdb_is_null_value(counts_val)) bind->counts = duckdb_get_bool(counts_val) ? 1 : 0;
-    if (counts_val) duckdb_destroy_value(&counts_val);
-
-    {
-        duckdb_value samples_val = duckdb_bind_get_named_parameter(info, "samples");
-        if (samples_val && !duckdb_is_null_value(samples_val)) {
-            bind->samples = duckdb_get_varchar(samples_val);
-        }
-        if (samples_val) duckdb_destroy_value(&samples_val);
+    if (!error && targets_overlap != INT64_MIN && (targets_overlap < 0 || targets_overlap > 2)) {
+        error = "bcftools_score: targets_overlap must be 0, 1, or 2";
     }
-    {
-        duckdb_value force_samples_val = duckdb_bind_get_named_parameter(info, "force_samples");
-        if (force_samples_val && !duckdb_is_null_value(force_samples_val)) {
-            bind->force_samples = duckdb_get_bool(force_samples_val) ? 1 : 0;
-        }
-        if (force_samples_val) duckdb_destroy_value(&force_samples_val);
+    if (use_str) duckdb_free(use_str);
+    if (q_str) duckdb_free(q_str);
+    if (error) {
+        duckdb_bind_set_error(info, error);
+        score_destroy_bind(bind);
+        return;
     }
-
-    regions_val = duckdb_bind_get_named_parameter(info, "regions");
-    if (regions_val && !duckdb_is_null_value(regions_val)) bind->regions = duckdb_get_varchar(regions_val);
-    if (regions_val) duckdb_destroy_value(&regions_val);
-
-    regions_file_val = duckdb_bind_get_named_parameter(info, "regions_file");
-    if (regions_file_val && !duckdb_is_null_value(regions_file_val)) bind->regions_file = duckdb_get_varchar(regions_file_val);
-    if (regions_file_val) duckdb_destroy_value(&regions_file_val);
-
-    regions_overlap_val = duckdb_bind_get_named_parameter(info, "regions_overlap");
-    if (regions_overlap_val && !duckdb_is_null_value(regions_overlap_val)) {
-        int64_t v = duckdb_get_int64(regions_overlap_val);
-        if (v < 0 || v > 2) {
-            duckdb_bind_set_error(info, "bcftools_score: regions_overlap must be 0, 1, or 2");
-            if (regions_overlap_val) duckdb_destroy_value(&regions_overlap_val);
-            score_destroy_bind(bind);
-            return;
-        }
-        bind->regions_overlap = (int)v;
-    }
-    if (regions_overlap_val) duckdb_destroy_value(&regions_overlap_val);
-
-    targets_val = duckdb_bind_get_named_parameter(info, "targets");
-    if (targets_val && !duckdb_is_null_value(targets_val)) bind->targets = duckdb_get_varchar(targets_val);
-    if (targets_val) duckdb_destroy_value(&targets_val);
-
-    targets_file_val = duckdb_bind_get_named_parameter(info, "targets_file");
-    if (targets_file_val && !duckdb_is_null_value(targets_file_val)) bind->targets_file = duckdb_get_varchar(targets_file_val);
-    if (targets_file_val) duckdb_destroy_value(&targets_file_val);
-
-    targets_overlap_val = duckdb_bind_get_named_parameter(info, "targets_overlap");
-    if (targets_overlap_val && !duckdb_is_null_value(targets_overlap_val)) {
-        int64_t v = duckdb_get_int64(targets_overlap_val);
-        if (v < 0 || v > 2) {
-            duckdb_bind_set_error(info, "bcftools_score: targets_overlap must be 0, 1, or 2");
-            if (targets_overlap_val) duckdb_destroy_value(&targets_overlap_val);
-            score_destroy_bind(bind);
-            return;
-        }
-        bind->targets_overlap = (int)v;
-    }
-    if (targets_overlap_val) duckdb_destroy_value(&targets_overlap_val);
-
-    apply_filters_val = duckdb_bind_get_named_parameter(info, "apply_filters");
-    if (apply_filters_val && !duckdb_is_null_value(apply_filters_val)) bind->apply_filters = duckdb_get_varchar(apply_filters_val);
-    if (apply_filters_val) duckdb_destroy_value(&apply_filters_val);
-
-    include_val = duckdb_bind_get_named_parameter(info, "include");
-    if (include_val && !duckdb_is_null_value(include_val)) bind->include_expr = duckdb_get_varchar(include_val);
-    if (include_val) duckdb_destroy_value(&include_val);
-
-    exclude_val = duckdb_bind_get_named_parameter(info, "exclude");
-    if (exclude_val && !duckdb_is_null_value(exclude_val)) bind->exclude_expr = duckdb_get_varchar(exclude_val);
-    if (exclude_val) duckdb_destroy_value(&exclude_val);
-
-    {
-        duckdb_value summaries_list_file_val = duckdb_bind_get_named_parameter(info, "summaries_list_file");
-        if (summaries_list_file_val && !duckdb_is_null_value(summaries_list_file_val)) {
-            bind->summaries_list_file = duckdb_get_varchar(summaries_list_file_val);
-        }
-        if (summaries_list_file_val) duckdb_destroy_value(&summaries_list_file_val);
-    }
-    {
-        duckdb_value log_path_val = duckdb_bind_get_named_parameter(info, "log_path");
-        if (log_path_val && !duckdb_is_null_value(log_path_val)) {
-            bind->log_path = duckdb_get_varchar(log_path_val);
-        }
-        if (log_path_val) duckdb_destroy_value(&log_path_val);
-    }
+    if (regions_overlap != INT64_MIN) bind->regions_overlap = (int)regions_overlap;
+    if (targets_overlap != INT64_MIN) bind->targets_overlap = (int)targets_overlap;
 
     if (bind->include_expr && bind->exclude_expr) {
         duckdb_bind_set_error(info, "bcftools_score: only one of include or exclude may be set");
@@ -2264,6 +2273,8 @@ static void score_init(duckdb_init_info info) {
     score_bind_t *bind = (score_bind_t *)duckdb_init_get_bind_data(info);
     score_init_t *init = (score_init_t *)duckdb_malloc(sizeof(score_init_t));
     score_scan_source_t src = {0};
+    int regions_parsed = 0;
+    int parsed_contigs = 0; /* contig dictionary size when the regions were parsed */
     bcf_hdr_t *hdr = NULL;
     score_summary_t **summaries = NULL;    /* one summary index per PRS */
     int64_t *matched_markers = NULL;
@@ -2459,14 +2470,28 @@ static void score_init(duckdb_init_info info) {
             bcf_unpack(rec, BCF_UN_ALL);
 
             if (!score_record_passes_filter_list(hdr, rec, bind->apply_filters)) continue;
-            int in_regions = score_record_in_region_list(hdr, rec, bind->regions,
-                                                         bind->regions_overlap >= 0 ? bind->regions_overlap : 1);
-            int in_targets = score_record_in_region_list(hdr, rec, bind->targets,
-                                                         bind->targets_overlap >= 0 ? bind->targets_overlap : 0);
-            if (in_regions < 0 || in_targets < 0) {
-                snprintf(err, sizeof(err), "bcftools_score: invalid region/target expression");
-                goto score_record_error;
+            /* Parse on the first FILTER-passing record; empty or fully FILTER-
+             * excluded inputs do not evaluate region expressions. A VCF without
+             * ##contig lines gains contigs as records are read (htslib vcf.c
+             * fix_chromosome), so parse again when the contig dictionary grows:
+             * a named contig absent so far may now resolve. */
+            if (!regions_parsed || hdr->n[BCF_DT_CTG] != parsed_contigs) {
+                free(src.regions.intervals);
+                free(src.targets.intervals);
+                memset(&src.regions, 0, sizeof(src.regions));
+                memset(&src.targets, 0, sizeof(src.targets));
+                if (score_parse_region_list(hdr, bind->regions, &src.regions) < 0 ||
+                    score_parse_region_list(hdr, bind->targets, &src.targets) < 0) {
+                    snprintf(err, sizeof(err), "bcftools_score: invalid region/target expression");
+                    goto score_record_error;
+                }
+                regions_parsed = 1;
+                parsed_contigs = hdr->n[BCF_DT_CTG];
             }
+            int in_regions = score_record_in_regions(rec, &src.regions,
+                                                     bind->regions_overlap >= 0 ? bind->regions_overlap : 1);
+            int in_targets = score_record_in_regions(rec, &src.targets,
+                                                     bind->targets_overlap >= 0 ? bind->targets_overlap : 0);
             if (!in_regions || !in_targets) continue;
             {
                 int expr_keep = score_record_matches_exprs(rec, &src, err, sizeof(err));

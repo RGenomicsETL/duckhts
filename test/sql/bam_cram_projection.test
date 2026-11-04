@@ -4,10 +4,10 @@
 
 require duckhts
 
-# read_bam asks htslib for SEQ and QUAL only when SEQ, QUAL, MD, NM or
-# AUXILIARY_TAGS is projected, and for tag data only when a tag column,
-# READ_GROUP_ID or SAMPLE_ID is projected. The oracle is a scan of the same
-# file that projects every column, so htslib decodes every field for it.
+# Read names and mate columns follow projection, with mate data retained for
+# CRAM 1.x flag reconstruction. SEQ, QUAL, CIGAR, MD, NM and AUXILIARY_TAGS
+# retain sequence decoding; CIGAR also retains tags for CG restoration.
+# The oracle projects every column, so htslib decodes every field for it.
 #
 # bam_mismatch and fixture_mixed store MD and NM as reference-derived values;
 # range has read groups, samples and other tags; the bam_scan files have
@@ -81,7 +81,66 @@ SELECT count(*) AS differing_rows FROM (
   (SELECT file, COLUMNS(cols) FROM cram_full
    EXCEPT ALL SELECT file, COLUMNS(cols) FROM cram_scan_all()));
 
-# Fixed fields only: no SEQ, QUAL or tag data is decoded.
+# Each fixed column can be decoded independently of names and mate fields.
+query I
+SELECT * FROM cram_projection_diff('^QNAME$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^FLAG$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^RNAME$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^POS$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^MAPQ$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^CIGAR$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^RNEXT$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^PNEXT$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^TLEN$');
+----
+0
+
+query I
+SELECT * FROM cram_projection_diff('^FILE_OFFSET$');
+----
+0
+
+# COUNT(*) has no projected record fields.
+query II
+SELECT
+  (SELECT count(*) FROM cram_scan('range', '__WORKING_DIRECTORY__/test/data/ce.fa')),
+  (SELECT count(*) FROM cram_full WHERE file = 'range');
+----
+112	112
+
+# Projecting CIGAR retains SEQ and AUX for CG long-CIGAR restoration.
 query I
 SELECT * FROM cram_projection_diff('^(QNAME|FLAG|RNAME|POS|MAPQ|CIGAR|RNEXT|PNEXT|TLEN|FILE_OFFSET)$');
 ----
@@ -218,3 +277,18 @@ SELECT (SELECT count(*) FROM region_scan), (SELECT count(*) FROM oracle), count(
   (SELECT * FROM oracle EXCEPT ALL SELECT * FROM region_scan));
 ----
 18	18	0
+
+# Read names discarded at CRAM encoding are generated per pair from the mate links,
+# which htslib resolves only when a mate field is decoded. A QNAME-only projection must
+# still give mates one name. Fixture: test/data/cram_lossy_names.sam, written with
+#   samtools view -C -T test/data/bam_mismatch.fa --output-fmt-option lossy_names=1 \
+#     -o test/data/cram_lossy_names.cram test/data/cram_lossy_names.sam
+#   samtools index test/data/cram_lossy_names.cram   (samtools 1.23)
+query IT
+SELECT count(*), string_agg(QNAME, ',' ORDER BY QNAME)
+FROM (SELECT QNAME, count(*) AS n
+      FROM read_bam('__WORKING_DIRECTORY__/test/data/cram_lossy_names.cram',
+                    reference := '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa')
+      GROUP BY QNAME HAVING n = 2);
+----
+2	cram_lossy_names.cram:1,cram_lossy_names.cram:2

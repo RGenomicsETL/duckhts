@@ -59,6 +59,7 @@ src/libbigwig_hfile_io.c|libbigwig_hfile_io.c
 src/kmer_udf.c|kmer_udf.c
 src/tabix_reader.c|tabix_reader.c
 src/named_attribute_columns.c|named_attribute_columns.c
+src/column_names.c|column_names.c
 src/vep_parser.c|vep_parser.c
 src/hts_meta_reader.c|hts_meta_reader.c
 src/quality_encoding.c|quality_encoding.c

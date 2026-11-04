@@ -53,6 +53,9 @@
 #'   cardinality; vector-end padding does not. A malformed FORMAT tag is withheld
 #'   for every selected sample on that record. Physical read errors and OOM always fail.
 #' @param overwrite Logical. If TRUE, overwrites existing table
+#' @param duplicate_names `"error"` (default) or `"suffix"`. VCF keys and sample
+#'   IDs may differ only in case, while DuckDB column names ignore case; `"suffix"`
+#'   keeps the first name in header order and renames later ones `name__2`, `name__3`.
 #' @param samples Optional HTSlib sample selector: `NULL` or `"-"` keeps all,
 #'   `""` keeps none, comma-separated names include samples, and a leading
 #'   `"^"` excludes them. Unknown names error; selected samples retain header order.
@@ -102,8 +105,10 @@ rduckhts_bcf <- function(
   overwrite = FALSE,
   samples = NULL,
   regions_var = NULL,
-  include_file_offset = FALSE
+  include_file_offset = FALSE,
+  duplicate_names = "error"
 ) {
+  duplicate_names <- match.arg(duplicate_names, c("error", "suffix"))
   if (!is.logical(include_file_offset) || length(include_file_offset) != 1L ||
       is.na(include_file_offset)) {
     stop("include_file_offset must be TRUE or FALSE", call. = FALSE)
@@ -111,6 +116,7 @@ rduckhts_bcf <- function(
   .duckhts_check_table_target(con, table_name, overwrite)
   params <- list()
   if (include_file_offset) params$include_file_offset <- "true"
+  if (duplicate_names != "error") params$duplicate_names <- sql_quote_string(con, duplicate_names)
   if (!is.null(samples)) params$samples <- sql_quote_string(con, samples)
   if (!is.null(region)) {
     params$region <- sql_quote_string(con, region)

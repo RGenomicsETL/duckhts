@@ -18,6 +18,7 @@
 #define __USE_MINGW_ANSI_STDIO 1
 #endif
 #include "duckdb_extension.h"
+#include "duckhts_attributes.h"
 DUCKDB_EXTENSION_EXTERN
 
 #include <math.h>
@@ -109,16 +110,7 @@ static roh_list_t open_list(duckdb_vector vector, idx_t row) {
     return list;
 }
 
-/* MinGW's GCC treats the printf archetype as Microsoft's format rules, which
- * reject %lld/%llu. Use its C99-conforming stdio and check formats as such.
- * Clang (Windows ARM64) has no gnu_printf archetype and accepts %llu as printf. */
-#if defined(__MINGW32__) && !defined(__clang__)
-#define ROH_PRINTF_ARCHETYPE gnu_printf
-#else
-#define ROH_PRINTF_ARCHETYPE printf
-#endif
-static void roh_error(duckdb_function_info info, const char *format, ...)
-    __attribute__((format(ROH_PRINTF_ARCHETYPE, 2, 3)));
+static void roh_error(duckdb_function_info info, const char *format, ...) DUCKHTS_PRINTF(2, 3);
 
 static void roh_error(duckdb_function_info info, const char *format, ...) {
     char message[ROH_ERRLEN];

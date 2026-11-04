@@ -44,6 +44,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckdb_map.h"
 #include "include/bam_format.h"
 #include "include/bam_partition.h"
+#include "include/duckhts_column_names.h"
 #include "include/region_list.h"
 #include "include/seq_encoding.h"
 #include "include/quality_encoding.h"
@@ -410,15 +411,6 @@ static int bam_parse_scan_mode(const char *mode, int *scan_sequential) {
     return 0;
 }
 
-/* The standard tag whose column a named tag column would duplicate: DuckDB
- * column names ignore case, while SAM tag names do not (cm is not CM). */
-static const char *bam_std_tag_matching_column(const char *name) {
-    for (int i = 0; BAM_STD_TAGS[i].tag; i++) {
-        if (strcasecmp(BAM_STD_TAGS[i].tag, name) == 0) return BAM_STD_TAGS[i].tag;
-    }
-    return NULL;
-}
-
 /* Parse auxiliary_tags: BOOLEAN selects the AUXILIARY_TAGS map; a list of
  * two-character SAM tag names selects one VARCHAR column per tag. Returns 1 on
  * success, 0 with `error` set. Names must match [A-Za-z][A-Za-z0-9], be unique,
@@ -429,6 +421,8 @@ static int bam_parse_auxiliary_tags(duckdb_value value, bam_bind_data_t *bind,
     duckdb_type type_id = duckdb_get_type_id(type);
     idx_t n;
     int ok = 1;
+    duckhts_column_names columns;
+    char detail[100]; /* two-character tag names keep collision messages short */
 
     if (type_id == DUCKDB_TYPE_BOOLEAN) {
         bind->auxiliary_tags = duckdb_get_bool(value) ? 1 : 0;
@@ -472,6 +466,15 @@ static int bam_parse_auxiliary_tags(duckdb_value value, bam_bind_data_t *bind,
                  "read_bam: auxiliary_tags must name between 1 and %d tags", BAM_MAX_NAMED_TAGS);
         return 0;
     }
+    /* SAM tag names are case-sensitive and DuckDB column names are not (cm is not
+     * CM), so named tags must not repeat each other or a standard tag column. */
+    duckhts_column_names_init(&columns, 0);
+    for (int i = 0; bind->standard_tags && BAM_STD_TAGS[i].tag; i++) {
+        if (duckhts_column_names_claim(&columns, BAM_STD_TAGS[i].tag, NULL, detail, sizeof(detail)) != 0) {
+            snprintf(error, error_size, "read_bam: %s", detail);
+            ok = 0;
+        }
+    }
     for (idx_t i = 0; ok && i < n; i++) {
         duckdb_value child = duckdb_get_list_child(value, i);
         char *name = child && !duckdb_is_null_value(child) ? duckdb_get_varchar(child) : NULL;
@@ -481,28 +484,17 @@ static int bam_parse_auxiliary_tags(duckdb_value value, bam_bind_data_t *bind,
             snprintf(error, error_size,
                      "read_bam: auxiliary_tags names must be two characters, [A-Za-z][A-Za-z0-9]");
             ok = 0;
-        } else if (bind->standard_tags && bam_std_tag_matching_column(name)) {
-            snprintf(error, error_size,
-                     "read_bam: auxiliary_tags names %s, which matches the standard_tags column %s "
-                     "(column names ignore case)", name, bam_std_tag_matching_column(name));
+        } else if (duckhts_column_names_claim(&columns, name, NULL, detail, sizeof(detail)) != 0) {
+            snprintf(error, error_size, "read_bam: auxiliary_tags: %s", detail);
             ok = 0;
         } else {
-            for (int k = 0; ok && k < bind->n_named_tags; k++) {
-                if (strcasecmp(bind->named_tags[k], name) == 0) {
-                    snprintf(error, error_size,
-                             "read_bam: auxiliary_tags names %s and %s, the same column "
-                             "(column names ignore case)", bind->named_tags[k], name);
-                    ok = 0;
-                }
-            }
-            if (ok) {
-                memcpy(bind->named_tags[bind->n_named_tags], name, 3);
-                bind->n_named_tags++;
-            }
+            memcpy(bind->named_tags[bind->n_named_tags], name, 3);
+            bind->n_named_tags++;
         }
         if (name) duckdb_free(name);
         if (child) duckdb_destroy_value(&child);
     }
+    duckhts_column_names_destroy(&columns);
     return ok;
 }
 
@@ -677,7 +669,7 @@ static void bam_read_bind(duckdb_bind_info info) {
     samFile *fp = sam_open(file_path, "r");
     if (!fp) {
         char err[512];
-        snprintf(err, sizeof(err), "Failed to open SAM/BAM/CRAM file: %s", file_path);
+        snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s", file_path);
         duckdb_bind_set_error(info, err);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
@@ -1066,8 +1058,9 @@ static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_dat
  *
  * A CRAM decoder decodes only the data series behind the SAM fields it is
  * asked for (htslib cram/cram_decode.c:564-616). read_bam always asks for
- * the fixed SAM fields QNAME to TLEN. It drops two groups when no projected
- * column reads them:
+ * FLAG, RNAME, POS and CIGAR for scan ownership and iterator overlap checks.
+ * Other fixed fields follow the projection. It also drops two groups when no
+ * projected column reads them:
  *   - SEQ and QUAL. Without them htslib does not fetch the reference for a
  *     single-reference slice (cram_decode.c:2452-2458) and returns an empty
  *     sequence (cram_decode.c:3184-3198).
@@ -1088,14 +1081,26 @@ static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_dat
 
 static int bam_cram_required_fields(const bam_bind_data_t *bind,
                                     const idx_t *column_ids, idx_t column_count) {
-    int fields = SAM_QNAME | SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ |
-                 SAM_CIGAR | SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
+    int fields = SAM_FLAG | SAM_RNAME | SAM_POS | SAM_CIGAR;
     int need_sequence = 0;
     int need_tags = 0;
 
     for (idx_t i = 0; i < column_count; i++) {
         idx_t col_id = column_ids[i];
-        if (col_id == BAM_COL_SEQ || col_id == BAM_COL_QUAL) {
+        if (col_id == BAM_COL_QNAME) {
+            /* Names discarded at encoding are generated per pair from the mate
+             * links, which htslib resolves only when a mate field is requested
+             * (cram_decode.c:2101-2110); without them mates get different names. */
+            fields |= SAM_QNAME | SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
+        } else if (col_id == BAM_COL_MAPQ) {
+            fields |= SAM_MAPQ;
+        } else if (col_id == BAM_COL_RNEXT) {
+            fields |= SAM_RNEXT;
+        } else if (col_id == BAM_COL_PNEXT) {
+            fields |= SAM_PNEXT;
+        } else if (col_id == BAM_COL_TLEN) {
+            fields |= SAM_TLEN;
+        } else if (col_id == BAM_COL_SEQ || col_id == BAM_COL_QUAL) {
             need_sequence = 1;
         } else if (col_id == BAM_COL_CIGAR) {
             /* A record may keep BAM's long-CIGAR placeholder with the real
@@ -1175,7 +1180,9 @@ static void bam_read_local_init(duckdb_init_info info) {
     /* Each thread opens its own file handle (required for parallel seeks) */
     local->fp = sam_open(bind->file_path, "r");
     if (!local->fp) {
-        duckdb_init_set_error(info, "Failed to open SAM/BAM/CRAM file");
+        char err[512];
+        snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s", bind->file_path);
+        duckdb_init_set_error(info, err);
         destroy_bam_local(local);
         return;
     }
@@ -1197,7 +1204,7 @@ static void bam_read_local_init(duckdb_init_info info) {
 
     if (hts_get_format(local->fp)->format == cram) {
         int fields = bam_cram_required_fields(bind, local->column_ids, local->column_count);
-        if (hts_set_opt(local->fp, CRAM_OPT_REQUIRED_FIELDS, fields) < 0) {
+        if (duckhts_cram_require_fields(local->fp, fields) < 0) {
             duckdb_init_set_error(info, "read_bam: failed to set the CRAM required fields");
             destroy_bam_local(local);
             return;

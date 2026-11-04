@@ -1,5 +1,23 @@
 # Rduckhts (development version)
 
+- Region queries on tabix-indexed VCFs no longer scan every sample column to locate each
+  record (backport of htslib d24ed09).
+- The bundled extension reads VCF/BCF sites without parsing genotypes when no FORMAT or
+  sample column is selected, and decodes only the CRAM fields each function uses.
+  `duckhts_mosdepth(use_median = TRUE)` no longer clears 512 KiB of counters per window.
+- `rduckhts_bcftools_score()` with long `regions` or `targets` lists no longer re-parses the
+  list for every variant, and a summary file that cannot be read or loaded now stops with an
+  error instead of scoring with the markers read so far.
+- Read errors in tabix, BED, FASTA/FASTQ and `fasta_nuc` inputs now stop with an error
+  naming the file instead of returning a shorter result, and more error messages name the
+  function and file.
+- `rduckhts_bcf(..., duplicate_names = "suffix")` reads VCF/BCF files whose INFO keys,
+  FORMAT keys or sample names differ only in case (`DP` and `dp`, `s1` and `S1`), which
+  VCF allows and DuckDB column names cannot hold; later names get `__2`, `__3`. The
+  default `"error"` now names both columns.
+- Column-name collision errors from `rduckhts_bam(auxiliary_tags = ...)` and the GFF,
+  GTF and GenBank `attributes` arguments now read "`A` and `B` name the same column
+  (column names ignore case)".
 - The bundled extension fixes crashes, hangs and wrong results found by a review of its
   C code. Calls that used to end the R session now return an R error: idxstats or bin
   counts with a stale index, a malformed VariantKey, score files with mismatched DS/AP/GP

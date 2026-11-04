@@ -459,6 +459,72 @@ SELECT count(POS) FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contig
 ----
 0
 
+# Each projection preserves the literal rows, including duplicates and NULLs.
+# Isolated columns exercise STR, FLT, INFO and FORMAT parsing independently.
+foreach threads 1 4
+
+statement ok
+SET threads=${threads};
+
+foreach file bcf_scan_contigs.bcf bcf_scan_contigs.full.vcf.gz
+
+foreach mode auto sequential
+
+foreach column CHROM POS ID REF ALT QUAL FILTER INFO_DP FORMAT_GT_S1 FORMAT_GT_S2
+
+query I
+SELECT (SELECT list_sort(list(${column})) FROM read_bcf(
+  '__WORKING_DIRECTORY__/test/data/${file}', scan_mode := '${mode}',
+  index_path := '__WORKING_DIRECTORY__/test/data/${file}' ||
+    CASE WHEN ends_with('${file}', '.bcf') THEN '.csi' ELSE '.index.tbi' END))
+  IS NOT DISTINCT FROM (SELECT list_sort(list(${column})) FROM bcf_scan_expected);
+----
+true
+
+endloop
+
+# SAMPLE_ID is header-derived; tidy multiplicity does not require FORMAT parsing.
+query III
+SELECT
+  (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${file}',
+    scan_mode := '${mode}')),
+  (SELECT count(*) FROM read_bcf('__WORKING_DIRECTORY__/test/data/${file}',
+    scan_mode := '${mode}', tidy_format := true)),
+  (SELECT list_sort(list(SAMPLE_ID)) FROM read_bcf(
+    '__WORKING_DIRECTORY__/test/data/${file}', scan_mode := '${mode}', tidy_format := true))
+    = ['S1','S1','S1','S1','S1','S2','S2','S2','S2','S2'];
+----
+5	10	true
+
+endloop
+
+foreach column CHROM POS ID REF ALT QUAL FILTER INFO_DP FORMAT_GT_S1 FORMAT_GT_S2
+
+# String and typed selectors must see the same projected fields.
+query II
+SELECT
+  (SELECT list_sort(list(${column})) FROM read_bcf(
+    '__WORKING_DIRECTORY__/test/data/${file}', region := 'chr3:20-40',
+    index_path := '__WORKING_DIRECTORY__/test/data/${file}' ||
+      CASE WHEN ends_with('${file}', '.bcf') THEN '.csi' ELSE '.index.tbi' END))
+    IS NOT DISTINCT FROM
+      (SELECT list_sort(list(${column})) FROM bcf_scan_expected WHERE CHROM = 'chr3'),
+  (SELECT list_sort(list(${column})) FROM read_bcf(
+    '__WORKING_DIRECTORY__/test/data/${file}',
+    regions := [{'chrom':'chr3','start':19,'end':40}],
+    index_path := '__WORKING_DIRECTORY__/test/data/${file}' ||
+      CASE WHEN ends_with('${file}', '.bcf') THEN '.csi' ELSE '.index.tbi' END))
+    IS NOT DISTINCT FROM
+      (SELECT list_sort(list(${column})) FROM bcf_scan_expected WHERE CHROM = 'chr3');
+----
+true	true
+
+endloop
+
+endloop
+
+endloop
+
 # A header-only VCF has an empty Tabix dictionary, not an allocation failure.
 query II
 SELECT

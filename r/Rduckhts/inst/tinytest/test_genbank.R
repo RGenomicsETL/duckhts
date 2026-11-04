@@ -305,8 +305,8 @@ test_genbank_named_attributes <- function() {
   expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = 1), "character vector")
   expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = NA_character_), "NA")
   expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = ""), "empty")
-  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = "START"), "collides")
-  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = c("ID", "id")), "distinct")
+  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = "START"), "name the same column")
+  expect_error(rduckhts_genbank(con, "bad", genbank_path, attributes = c("ID", "id")), "name the same column")
 }
 
 test_genbank()

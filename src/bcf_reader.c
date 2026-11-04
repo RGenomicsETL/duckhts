@@ -11,6 +11,7 @@ DUCKDB_EXTENSION_EXTERN
 
 #include "include/vep_parser.h"
 
+#include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -32,6 +33,10 @@ DUCKDB_EXTENSION_EXTERN
 #include "include/duckdb_alloc.h"
 #include "include/duckdb_list.h"
 #include "include/region_list.h"
+#include "include/duckhts_column_names.h"
+#include "include/duckhts_bind_params.h"
+#include "include/duckhts_attributes.h"
+#include "include/duckhts_errors.h"
 #include "include/regions_bind.h"
 #include "include/bcf_scan.h"
 #include "include/bcf_field_vector.h"
@@ -780,8 +785,39 @@ static duckdb_logical_type create_vep_field_type(vep_field_type_t vep_type, int 
 // Schema Building - Bind Function
 // =============================================================================
 
+/* Declare a result column named by `fmt` and consume `type`. A name that collides
+ * with an earlier column ignoring case is an error, or gets a __N suffix under
+ * duplicate_names := 'suffix'. Returns 0, or -1 with the bind error set. */
+static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
+                          duckdb_logical_type type, const char *fmt, ...) DUCKHTS_PRINTF(4, 5);
+
+static int bcf_add_column(duckdb_bind_info info, duckhts_column_names *columns,
+                          duckdb_logical_type type, const char *fmt, ...) {
+    kstring_t name = KS_INITIALIZE;
+    const char *claimed = NULL;
+    char detail[512];
+    va_list args;
+    va_start(args, fmt);
+    int written = kvsprintf(&name, fmt, args);
+    va_end(args);
+    int rc = written < 0 ? -2 : duckhts_column_names_claim(columns, name.s, &claimed, detail, sizeof(detail));
+    if (rc == 0) {
+        duckdb_bind_add_result_column(info, claimed, type);
+    } else if (rc == -1) {
+        duckhts_bind_errorf(info, "read_bcf: %s; set duplicate_names := 'suffix' to rename the later column",
+                            detail);
+    } else {
+        duckdb_bind_set_error(info, "read_bcf: out of memory declaring columns");
+    }
+    duckdb_destroy_logical_type(&type);
+    ks_free(&name);
+    return rc == 0 ? 0 : -1;
+}
+
 static void bcf_read_bind(duckdb_bind_info info) {
     const char *reader_name = "read_bcf";
+    duckhts_column_names columns;
+    duckhts_column_names_init(&columns, 0);
 
     // Get the file path parameter
     duckdb_value path_val = duckdb_bind_get_parameter(info, 0);
@@ -796,129 +832,53 @@ static void bcf_read_bind(duckdb_bind_info info) {
         return;
     }
 
-    // Get optional region named parameter
-    char* region = NULL;
-    duckdb_value region_val = duckdb_bind_get_named_parameter(info, "region");
-    if (region_val && !duckdb_is_null_value(region_val)) {
-        region = duckdb_get_varchar(region_val);
-        if (!region) {
-            duckdb_destroy_value(&region_val);
-            duckdb_free(file_path);
-            duckdb_bind_set_error(info, "region list: out of memory reading region");
-            return;
-        }
-    }
-    if (region_val) duckdb_destroy_value(&region_val);
-
-    // Optional explicit index path
-    char* index_path = NULL;
-    duckdb_value idx_val = duckdb_bind_get_named_parameter(info, "index_path");
-    if (idx_val && !duckdb_is_null_value(idx_val)) {
-        index_path = duckdb_get_varchar(idx_val);
-    }
-    if (idx_val) duckdb_destroy_value(&idx_val);
-
-    // Optional scan mode: auto (current index-aware behavior) or sequential streaming.
+    static const char *const duplicate_choices[] = {"error", "suffix", NULL};
+    char *region = NULL;
+    char *index_path = NULL;
+    char *scan_mode = NULL;
+    char *decode_policy = NULL;
+    char *additional_csq_column_types = NULL;
+    int read_ok = duckhts_bind_varchar(info, "region", &region) &&
+                  duckhts_bind_varchar(info, "index_path", &index_path) &&
+                  duckhts_bind_varchar(info, "scan_mode", &scan_mode) &&
+                  duckhts_bind_varchar(info, "decode_error_policy", &decode_policy) &&
+                  duckhts_bind_varchar(info, "additional_csq_column_types", &additional_csq_column_types);
+    int tidy_format = duckhts_bind_bool(info, "tidy_format", false);
+    int include_file_offset = duckhts_bind_bool(info, "include_file_offset", false);
+    int duplicate_names = duckhts_bind_choice(info, "duplicate_names", duplicate_choices, 0);
+    int64_t requested_threads = duckhts_bind_int64(info, "decompression_threads", 0);
     int scan_sequential = 0;
-    duckdb_value scan_mode_val = duckdb_bind_get_named_parameter(info, "scan_mode");
-    if (scan_mode_val && !duckdb_is_null_value(scan_mode_val)) {
-        char* scan_mode = duckdb_get_varchar(scan_mode_val);
-        if (!duckhts_bcf_parse_scan_mode(scan_mode, &scan_sequential)) {
-            char err[128];
-            snprintf(err, sizeof(err), "%s: scan_mode must be 'auto' or 'sequential'", reader_name);
-            duckdb_bind_set_error(info, err);
-            if (scan_mode) duckdb_free(scan_mode);
-            duckdb_destroy_value(&scan_mode_val);
-            duckdb_free(file_path);
-            if (index_path) duckdb_free(index_path);
-            if (region) duckdb_free(region);
-            return;
-        }
-        if (scan_mode) duckdb_free(scan_mode);
+    duckhts_bcf_decode_policy_t decode_error_policy = DUCKHTS_BCF_DECODE_NULL;
+    char param_err[256] = "";
+
+    if (!read_ok || duplicate_names == -2) {
+        snprintf(param_err, sizeof(param_err), "%s: out of memory reading parameters", reader_name);
+    } else if (scan_mode && !duckhts_bcf_parse_scan_mode(scan_mode, &scan_sequential)) {
+        snprintf(param_err, sizeof(param_err), "%s: scan_mode must be 'auto' or 'sequential'", reader_name);
+    } else if (scan_sequential && region && region[0] != '\0') {
+        snprintf(param_err, sizeof(param_err), "%s: scan_mode := 'sequential' is incompatible with region queries", reader_name);
+    } else if (decode_policy && !duckhts_bcf_parse_decode_policy(decode_policy, &decode_error_policy)) {
+        snprintf(param_err, sizeof(param_err), "%s: decode_error_policy must be 'null', 'warn', or 'error'", reader_name);
+    } else if (duplicate_names < 0) {
+        snprintf(param_err, sizeof(param_err), "%s: duplicate_names must be 'error' or 'suffix'", reader_name);
+    } else if (additional_csq_column_types &&
+               !vep_validate_column_type_rules(additional_csq_column_types, param_err, sizeof(param_err))) {
+        /* the validator wrote param_err */
+    } else if (requested_threads < 0 || requested_threads > INT_MAX) {
+        snprintf(param_err, sizeof(param_err), "%s: decompression_threads must be between 0 and INT_MAX", reader_name);
     }
-    if (scan_mode_val) duckdb_destroy_value(&scan_mode_val);
-    if (scan_sequential && region && region[0] != '\0') {
-        char err[160];
-        snprintf(err, sizeof(err), "%s: scan_mode := 'sequential' is incompatible with region queries", reader_name);
-        duckdb_bind_set_error(info, err);
+    if (scan_mode) duckdb_free(scan_mode);
+    if (decode_policy) duckdb_free(decode_policy);
+    if (param_err[0]) {
+        duckdb_bind_set_error(info, param_err);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
+        if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
         return;
     }
-
-    duckhts_bcf_decode_policy_t decode_error_policy = DUCKHTS_BCF_DECODE_NULL;
-    duckdb_value decode_policy_val = duckdb_bind_get_named_parameter(info, "decode_error_policy");
-    if (decode_policy_val && !duckdb_is_null_value(decode_policy_val)) {
-        char *decode_policy = duckdb_get_varchar(decode_policy_val);
-        if (!duckhts_bcf_parse_decode_policy(decode_policy, &decode_error_policy)) {
-            char err[192];
-            snprintf(err, sizeof(err), "%s: decode_error_policy must be 'null', 'warn', or 'error'", reader_name);
-            duckdb_bind_set_error(info, err);
-            if (decode_policy) duckdb_free(decode_policy);
-            duckdb_destroy_value(&decode_policy_val);
-            duckdb_free(file_path);
-            if (index_path) duckdb_free(index_path);
-            if (region) duckdb_free(region);
-            return;
-        }
-        if (decode_policy) duckdb_free(decode_policy);
-    }
-    if (decode_policy_val) duckdb_destroy_value(&decode_policy_val);
-
-    // Get optional tidy_format named parameter (default: false)
-    int tidy_format = 0;
-    duckdb_value tidy_val = duckdb_bind_get_named_parameter(info, "tidy_format");
-    if (tidy_val && !duckdb_is_null_value(tidy_val)) {
-        tidy_format = duckdb_get_bool(tidy_val);
-    }
-    if (tidy_val) duckdb_destroy_value(&tidy_val);
-
-    // Optional FILE_OFFSET column (default: false)
-    int include_file_offset = 0;
-    duckdb_value file_offset_val = duckdb_bind_get_named_parameter(info, "include_file_offset");
-    if (file_offset_val && !duckdb_is_null_value(file_offset_val)) {
-        include_file_offset = duckdb_get_bool(file_offset_val);
-    }
-    if (file_offset_val) duckdb_destroy_value(&file_offset_val);
-
-    // Optional bcftools-style CSQ/ANN/BCSQ type overrides
-    char* additional_csq_column_types = NULL;
-    int decompression_threads = 0;
-    duckdb_value csq_types_val = duckdb_bind_get_named_parameter(info, "additional_csq_column_types");
-    if (csq_types_val && !duckdb_is_null_value(csq_types_val)) {
-        additional_csq_column_types = duckdb_get_varchar(csq_types_val);
-    }
-    if (csq_types_val) duckdb_destroy_value(&csq_types_val);
-    if (additional_csq_column_types) {
-        char err[256];
-        if (!vep_validate_column_type_rules(additional_csq_column_types, err, sizeof(err))) {
-            duckdb_bind_set_error(info, err);
-            duckdb_free(file_path);
-            if (index_path) duckdb_free(index_path);
-            if (region) duckdb_free(region);
-            duckdb_free(additional_csq_column_types);
-            return;
-        }
-    }
-
-    duckdb_value dthreads_val = duckdb_bind_get_named_parameter(info, "decompression_threads");
-    if (dthreads_val && !duckdb_is_null_value(dthreads_val)) {
-        int64_t requested_threads = duckdb_get_int64(dthreads_val);
-        if (requested_threads < 0 || requested_threads > INT_MAX) {
-            char err[160];
-            snprintf(err, sizeof(err), "%s: decompression_threads must be between 0 and INT_MAX", reader_name);
-            duckdb_bind_set_error(info, err);
-            duckdb_free(file_path);
-            if (index_path) duckdb_free(index_path);
-            if (region) duckdb_free(region);
-            if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
-            duckdb_destroy_value(&dthreads_val);
-            return;
-        }
-        decompression_threads = (int)requested_threads;
-    }
-    if (dthreads_val) duckdb_destroy_value(&dthreads_val);
+    columns.suffix_duplicates = duplicate_names == 1;
+    int decompression_threads = (int)requested_threads;
 
     duckhts_bcf_scan_t metadata = {0};
     char open_error[512];
@@ -1076,14 +1036,9 @@ static void bcf_read_bind(duckdb_bind_info info) {
                 continue;
             }
 
-            char col_name[256];
-            snprintf(col_name, sizeof(col_name), "VEP_%s", field->name);
-
             // Expose all transcripts as list columns for full preservation
-            duckdb_logical_type field_type = create_vep_field_type(field->type, 1);
-            duckdb_bind_add_result_column(info, col_name, field_type);
-            duckdb_destroy_logical_type(&field_type);
-
+            if (bcf_add_column(info, &columns, create_vep_field_type(field->type, 1),
+                               "VEP_%s", field->name) != 0) goto bind_error;
             col_idx++;
         }
 
@@ -1124,15 +1079,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
                 field->header_type = header_type;
                 field->is_list = header_vl_type != BCF_VL_FIXED || header_count > 1;
 
-                // Create column name: INFO_<fieldname>
-                char col_name[256];
-                snprintf(col_name, sizeof(col_name), "INFO_%s", field_name);
-
-                // Create DuckDB type
-                duckdb_logical_type field_type = duckhts_bcf_field_type(header_type, field->is_list);
-                duckdb_bind_add_result_column(info, col_name, field_type);
-                duckdb_destroy_logical_type(&field_type);
-
+                if (bcf_add_column(info, &columns, duckhts_bcf_field_type(header_type, field->is_list),
+                                   "INFO_%s", field_name) != 0) goto bind_error;
                 col_idx++;
                 info_idx++;
             }
@@ -1211,14 +1159,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
             // Add FORMAT columns once (no sample suffix)
             for (int f = 0; f < bind->n_format_fields; f++) {
                 field_meta_t* field = &bind->format_fields[f];
-
-                char col_name[256];
-                snprintf(col_name, sizeof(col_name), "FORMAT_%s", field->name);
-
-                duckdb_logical_type field_type = duckhts_bcf_field_type(field->header_type, field->is_list);
-                duckdb_bind_add_result_column(info, col_name, field_type);
-                duckdb_destroy_logical_type(&field_type);
-
+                if (bcf_add_column(info, &columns, duckhts_bcf_field_type(field->header_type, field->is_list),
+                                   "FORMAT_%s", field->name) != 0) goto bind_error;
                 col_idx++;
             }
         } else {
@@ -1226,16 +1168,8 @@ static void bcf_read_bind(duckdb_bind_info info) {
             for (int s = 0; s < bind->n_samples; s++) {
                 for (int f = 0; f < bind->n_format_fields; f++) {
                     field_meta_t* field = &bind->format_fields[f];
-
-                    // Column name: FORMAT_<fieldname>_<samplename>
-                    char col_name[512];
-                    snprintf(col_name, sizeof(col_name), "FORMAT_%s_%s",
-                             field->name, bind->sample_names[s]);
-
-                    duckdb_logical_type field_type = duckhts_bcf_field_type(field->header_type, field->is_list);
-                    duckdb_bind_add_result_column(info, col_name, field_type);
-                    duckdb_destroy_logical_type(&field_type);
-
+                    if (bcf_add_column(info, &columns, duckhts_bcf_field_type(field->header_type, field->is_list),
+                                       "FORMAT_%s_%s", field->name, bind->sample_names[s]) != 0) goto bind_error;
                     col_idx++;
                 }
             }
@@ -1318,6 +1252,7 @@ bind_error:
         if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
     }
 bind_cleanup:
+    duckhts_column_names_destroy(&columns);
     duckdb_destroy_logical_type(&varchar_type);
     duckdb_destroy_logical_type(&bigint_type);
     duckdb_destroy_logical_type(&double_type);
@@ -1464,6 +1399,11 @@ static void bcf_read_local_init(duckdb_init_info info) {
         destroy_init_data(local);
         return;
     }
+
+    /* VCF parsing precedes bcf_unpack: limit both stages to projected fields.
+     * Zero means parse everything to HTSlib, so count/POS-only scans use STR.
+     * SAMPLE_ID and tidy row counts come from the selected header samples. */
+    local->rec->max_unpack = local->unpack_mask ? local->unpack_mask : BCF_UN_STR;
 
     // Set up region query if user specified a region (non-parallel case)
     if (!is_parallel && bind->has_selector) {
@@ -2160,6 +2100,7 @@ void register_read_bcf_function(duckdb_connection connection) {
     duckdb_logical_type bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
     duckdb_table_function_add_named_parameter(tf, "index_path", varchar_type);  // optional explicit index path
     duckdb_table_function_add_named_parameter(tf, "tidy_format", bool_type);  // optional tidy format
+    duckdb_table_function_add_named_parameter(tf, "duplicate_names", varchar_type);
     duckdb_table_function_add_named_parameter(tf, "additional_csq_column_types", varchar_type);  // optional bcftools-style CSQ/ANN/BCSQ type overrides
     duckdb_table_function_add_named_parameter(tf, "decompression_threads", bigint_type);  // optional htslib worker threads
     {

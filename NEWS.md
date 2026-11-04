@@ -2,6 +2,65 @@
 
 # duckhts (development version)
 
+- `read_bcf` parses only the VCF fields that selected columns read, by setting htslib's
+  `max_unpack` from the projection. A site-only scan of the 2,504-sample 1000 Genomes
+  chr22 VCF parses no genotypes; results are unchanged. A text VCF field that no selected
+  column reads is not checked, so its syntax and decode errors are not reported; read,
+  decompression and allocation failures always error.
+- The vendored htslib 1.24 carries a backport of htslib d24ed09 (2026-10-27): tabix
+  stops parsing a record once the columns that locate it have been seen, instead of
+  scanning every sample column of a VCF line. With the projection change above, a
+  site-only region scan of the 2,504-sample chr22 VCF spent 65% of its time there.
+- CRAM decoding is limited to the fields each function uses in `read_bam` (now also read
+  names only when selected, MAPQ and mate fields only when selected or needed to link
+  mates for generated read names), `bam_bin_counts`,
+  `duckhts_bam_bed_coverage` and `read_pileup`. One helper, `duckhts_cram_require_fields`,
+  sets them, keeps the mate fields CRAM 1.x needs for flag reconstruction, and replaces
+  the hand-written calls in insert-size counts and idxstats; idxstats now reports a
+  failure to configure CRAM.
+- `bcftools_score` parses its `regions`, `targets` and region-file lists once, into sorted
+  merged intervals, instead of re-parsing the whole list for every VCF record. A
+  50,000-interval list on a synthetic VCF fell from 224 s to 0.112 s; the region and overlap
+  semantics are unchanged.
+- `duckhts_mosdepth(use_median := TRUE)` clears and scans only the depth counters a window
+  used instead of all 65,536 per window; output files are byte-identical.
+- Errors that were lost or reported as success:
+  - `read_tabix`, `read_bed`, the `fasta_nuc` BED input and alignment-backed `read_fastq`/
+    `read_fasta` treated an htslib read failure as end of file and returned a shorter
+    result. They now fail with the path, line and htslib status, whatever `read_bed`'s
+    `error_policy`, which covers only short lines.
+  - `fasta_nuc` treated an allocation failure while reading a BED interval as the end of
+    the BED file.
+  - A failed macro-digest step during `LOAD` replaced DuckDB's error with a generic one and
+    did not free the result.
+  - A failing bigWig scan could return the rows of a partly filled chunk with its error.
+  - `bcftools_norm_row` could return a passthrough result after failing to copy REF or ALT.
+  - `bcftools_score` leaked a marker's allele on rows it skipped, dropped markers or rows when
+    an allocation failed, and returned the markers read so far when a TSV or GWAS-VCF summary
+    could not be read. Allocation and read failures now stop the query, naming the summary
+    file and line; rows skipped for their data (missing allele or effect, unknown contig) are
+    still skipped.
+  - Messages from the reference cache, `read_bam`, `read_tabix` and the sequence readers now
+    name the function and path, and keep long mate names instead of truncating them.
+- `read_bcf(..., duplicate_names := 'suffix')` reads VCF/BCF files whose INFO keys,
+  FORMAT keys or sample IDs differ only in case, such as `DP` and `dp` or samples `s1`
+  and `S1`. VCF 4.3 and 4.5 allow them, while DuckDB column names ignore case. The first
+  name in header order is kept and each later one becomes `name__2`, `name__3`. The
+  default, `'error'`, still rejects such a schema at bind, now with a message naming both
+  columns and the option instead of DuckDB's duplicate-column error. The same check
+  catches wide FORMAT names that repeat because keys and sample IDs may contain `_`
+  (key `A_B` with sample `C`, key `A` with sample `B_C`), and long names are no longer
+  cut at 255 or 511 bytes.
+- One bind-time helper, `src/column_names.c`, now checks result column names the way
+  DuckDB compares them, for `read_bcf`, the GFF/GTF/GenBank `attributes` columns,
+  `read_bam` named tags and `bcftools_score` output columns. `bcftools_score` now rejects
+  PRS names that differ only in case with its own message instead of DuckDB's. Collision
+  messages read "`A` and `B` name the same column (column names ignore case)".
+- `src/include/duckhts_bind_params.h` reads named parameters for `read_bcf`,
+  `duckhts_mosdepth` and `bcftools_score`, replacing 50 hand-written
+  read/check/destroy blocks; the first of the shared host helpers that will separate the
+  DuckDB C API from reader code. Their string parameters now report an allocation
+  failure instead of being treated as absent.
 - Fixes from a review of the whole first-party C tree. Each fix has a regression test
   that fails on the previous code.
   - Inputs that crashed or hung the host process now return errors:

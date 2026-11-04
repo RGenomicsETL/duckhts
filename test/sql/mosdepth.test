@@ -396,6 +396,74 @@ CHROMOSOME_II	2	0.20
 CHROMOSOME_II	1	0.40
 CHROMOSOME_II	0	1.00
 
+# Unit windows must reproduce every per-base depth, including zero-depth runs.
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_median_unit_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  chrom := 'CHROMOSOME_II',
+  by := '1',
+  use_median := TRUE,
+  overwrite := TRUE
+);
+
+statement ok
+CREATE TEMP TABLE median_base_oracle AS
+SELECT pos, depth
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_median_unit_sqltest.per-base.bed.gz',
+  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'depth':'BIGINT'},
+  delim = '\t', header = false
+), LATERAL range(start_pos, end_pos) t(pos);
+
+query II
+SELECT count(*), count(*) FILTER (WHERE value = depth AND end_pos = pos + 1)
+FROM read_csv(
+  '__WORKING_DIRECTORY__/mosdepth_median_unit_sqltest.regions.bed.gz',
+  columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'value':'DOUBLE'},
+  delim = '\t', header = false
+) r
+FULL JOIN median_base_oracle b ON r.start_pos = b.pos;
+----
+5000	5000
+
+statement ok
+COPY (SELECT * FROM (VALUES
+  ('CHROMOSOME_II', 0, 1),
+  ('CHROMOSOME_II', 1000, 2000),
+  ('CHROMOSOME_II', 1000, 3001),
+  ('CHROMOSOME_II', 2000, 3000),
+  ('CHROMOSOME_II', 3000, 4000),
+  ('CHROMOSOME_II', 4000, 5000)
+) t(chrom, start_pos, end_pos))
+TO '__WORKING_DIRECTORY__/mosdepth_median_regions_sqltest.bed' (HEADER false, DELIMITER '\t');
+
+statement ok
+SELECT * FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_median_bed_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  chrom := 'CHROMOSOME_II',
+  by := '__WORKING_DIRECTORY__/mosdepth_median_regions_sqltest.bed',
+  use_median := TRUE,
+  no_per_base := TRUE,
+  overwrite := TRUE
+);
+
+query II
+SELECT count(*), count(*) FILTER (WHERE value = expected)
+FROM (
+  SELECT start_pos, end_pos, value, quantile_disc(depth, 0.5) AS expected
+  FROM read_csv(
+    '__WORKING_DIRECTORY__/mosdepth_median_bed_sqltest.regions.bed.gz',
+    columns = {'chrom':'VARCHAR', 'start_pos':'BIGINT', 'end_pos':'BIGINT', 'value':'DOUBLE'},
+    delim = '\t', header = false
+  ) r
+  JOIN median_base_oracle b ON b.pos >= r.start_pos AND b.pos < r.end_pos
+  GROUP BY start_pos, end_pos, value
+);
+----
+6	6
+
 statement ok
 SELECT * FROM duckhts_mosdepth(
   '__WORKING_DIRECTORY__/mosdepth_fragment_sqltest',

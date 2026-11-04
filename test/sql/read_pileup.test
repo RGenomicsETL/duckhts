@@ -74,6 +74,27 @@ FROM read_pileup(
 ----
 51	930	980
 
+# Embedded-reference CRAM preserves base and quality strings without names.
+query IITT
+SELECT pos, depth, bases, quals
+FROM read_pileup('test/data/bam_scan_mixed.cram', region := 'chr1', min_mapq := 30);
+----
+10	1	A	I
+
+query I
+WITH cram AS (
+  SELECT * FROM read_pileup('test/data/bam_scan_mixed.cram', region := 'chr1', flag_mask := 0)
+), bam AS (
+  SELECT * FROM read_pileup('test/data/bam_scan_mixed.bam', region := 'chr1', flag_mask := 0)
+)
+SELECT count(*) FROM (
+  (SELECT * FROM cram EXCEPT ALL SELECT * FROM bam)
+  UNION ALL
+  (SELECT * FROM bam EXCEPT ALL SELECT * FROM cram)
+);
+----
+0
+
 statement error
 SELECT *
 FROM read_pileup(

@@ -117,6 +117,40 @@ ORDER BY bin_id;
 8	0	0	0	0	0	0	NULL	0	0	NULL	0	5000	0.00	0	NULL	0	NULL
 9	0	0	0	0	0	0	NULL	0	0	NULL	0	5000	0.00	0	NULL	0	NULL
 
+# CRAM decoding preserves GC, mapping quality and mate-position duplicate rules.
+query I
+WITH cram AS (
+  SELECT * FROM bam_bin_counts('test/data/fixture_mixed.cram', 5000,
+    reference := 'test/data/fixture_ref.fa', rmdup := 'streaming', stats := 'gc,mq')
+), bam AS (
+  SELECT * FROM bam_bin_counts('test/data/fixture_mixed.bam', 5000,
+    reference := 'test/data/fixture_ref.fa', rmdup := 'streaming', stats := 'gc,mq')
+)
+SELECT count(*) FROM (
+  (SELECT * FROM cram EXCEPT ALL SELECT * FROM bam)
+  UNION ALL
+  (SELECT * FROM bam EXCEPT ALL SELECT * FROM cram)
+);
+----
+0
+
+# Placed and unplaced unmapped records retain their count and flag semantics.
+query I
+WITH cram AS (
+  SELECT * FROM bam_bin_counts('test/data/bam_scan_mixed.cram', 100,
+    include_unmapped := true, stats := 'gc,mq')
+), bam AS (
+  SELECT * FROM bam_bin_counts('test/data/bam_scan_mixed.bam', 100,
+    include_unmapped := true, stats := 'gc,mq')
+)
+SELECT count(*) FROM (
+  (SELECT * FROM cram EXCEPT ALL SELECT * FROM bam)
+  UNION ALL
+  (SELECT * FROM bam EXCEPT ALL SELECT * FROM cram)
+);
+----
+0
+
 statement error
 SELECT * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'weird');
 ----

@@ -555,6 +555,14 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
         snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to open alignment file '%s'", bind->path);
         return -1;
     }
+    /* QUAL feeds base-quality filtering. SEQ and AUX preserve CG long-CIGAR
+     * restoration; coverage does not use read names or mate fields. */
+    if (duckhts_cram_require_fields(fp, SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ | SAM_CIGAR |
+                                        SAM_SEQ | SAM_QUAL | SAM_AUX) < 0) {
+        snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to configure CRAM required fields");
+        sam_close(fp);
+        return -1;
+    }
     duckhts_apply_remote_hts_tuning(fp, bind->path,
                                     DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (bind->decompression_threads > 0 &&

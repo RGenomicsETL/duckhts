@@ -50,6 +50,25 @@ FROM duckhts_bam_bed_coverage(
 ----
 1	0	0.00	0.00	0
 
+# CRAM retains qualities, mapping quality and CIGARs for all coverage outputs.
+query I
+WITH cram AS (
+  SELECT * FROM duckhts_bam_bed_coverage('test/data/fixture_mixed.cram',
+    'test/data/fixture_mixed_regions.bed', reference := 'test/data/fixture_ref.fa',
+    min_baseq := 20, mapq := 30)
+), bam AS (
+  SELECT * FROM duckhts_bam_bed_coverage('test/data/fixture_mixed.bam',
+    'test/data/fixture_mixed_regions.bed', reference := 'test/data/fixture_ref.fa',
+    min_baseq := 20, mapq := 30)
+)
+SELECT count(*) FROM (
+  (SELECT * FROM cram EXCEPT ALL SELECT * FROM bam)
+  UNION ALL
+  (SELECT * FROM bam EXCEPT ALL SELECT * FROM cram)
+);
+----
+0
+
 statement error
 SELECT * FROM duckhts_bam_bed_coverage(
   '__WORKING_DIRECTORY__/test/data/fixture_mixed.bam',

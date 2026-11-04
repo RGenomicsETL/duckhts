@@ -80,8 +80,9 @@ static int slow_idxstats_to_file(samFile *fp, sam_hdr_t *header, FILE *out, int 
         return -1;
     }
 
-    if (hts_set_opt(fp, CRAM_OPT_REQUIRED_FIELDS, SAM_RNAME | SAM_FLAG) != 0) {
-        /* Keep going for BAM/other formats where this may be ignored. */
+    if (duckhts_cram_require_fields(fp, SAM_RNAME | SAM_FLAG) != 0) {
+        snprintf(err, errlen, "duckhts_samtools_idxstats: failed to configure CRAM required fields");
+        return -1;
     }
 
     b = bam_init1();

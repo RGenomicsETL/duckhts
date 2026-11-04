@@ -4,11 +4,13 @@
 #include <ctype.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
 #define REFERENCE_FETCH_PAD 4096
+#define REFERENCE_ERROR_PATH_LIMIT 256
 
 struct duckhts_reference_entry {
     char *fasta_path;
@@ -31,6 +33,8 @@ typedef struct {
 static pthread_key_t reference_key;
 static pthread_once_t reference_once = PTHREAD_ONCE_INIT;
 static int reference_key_error;
+/* Borrowed diagnostic storage, isolated between callers on different threads. */
+static _Thread_local char reference_load_error[1024];
 /* FAI_CREATE may write a common .fai/.gzi file. Only handle acquisition is
  * serialized; every fetch uses a handle owned by the calling thread. */
 static pthread_mutex_t reference_index_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -137,8 +141,20 @@ duckhts_reference_entry_t *duckhts_reference_cache_get(
     entry->fai = fai_load3_format(fasta_path, fai_path, gzi_path, FAI_CREATE, FAI_FASTA);
     pthread_mutex_unlock(&reference_index_mutex);
     if (!entry->fai) {
+        const char *fai_name = fai_path ? fai_path : fasta_path;
+        const char *gzi_name = gzi_path ? gzi_path : fasta_path;
+        snprintf(reference_load_error, sizeof(reference_load_error),
+                 "failed to load FASTA index: FASTA '%.*s%s'; FAI '%.*s%s%s'; GZI '%.*s%s%s'",
+                 REFERENCE_ERROR_PATH_LIMIT, fasta_path,
+                 strlen(fasta_path) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
+                 REFERENCE_ERROR_PATH_LIMIT, fai_name,
+                 strlen(fai_name) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
+                 fai_path ? "" : ".fai",
+                 REFERENCE_ERROR_PATH_LIMIT, gzi_name,
+                 strlen(gzi_name) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
+                 gzi_path ? "" : ".gzi");
         reference_entry_destroy(entry);
-        *error = "failed to load FASTA index";
+        *error = reference_load_error;
         return NULL;
     }
     entry->indexed_remote_tuned = (tune_indexed_remote_io != 0);

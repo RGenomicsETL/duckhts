@@ -192,7 +192,28 @@ test-duckdb-v2: release test-sql-lambda-syntax
 	.pi/duckdb-v2-venv/bin/python test/scripts/test_duckdb_v2.py
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
+test_release: test-error-handling test-fasta-nuc-alloc test-bam-open-error test-score-summary-errors
 endif
+
+# Native fault-injection and error-path tests; they link Linux-built objects.
+.PHONY: test-error-handling test-fasta-nuc-alloc test-bam-open-error test-score-summary-errors
+test-error-handling:
+	sh test/scripts/run_error_handling_tests.sh
+
+test-fasta-nuc-alloc:
+	@if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
+		cmake --build cmake_build/release --target duckhts_fasta_nuc_alloc_test; \
+	fi
+	bash test/scripts/fasta_nuc_alloc_test.sh
+
+test-bam-open-error:
+	bash test/scripts/bam_open_error_test.sh
+
+test-score-summary-errors:
+	@if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
+		cmake --build cmake_build/release --target duckhts_score_summary_error_test; \
+	fi
+	bash test/scripts/score_summary_error_test.sh
 
 .PHONY: test-extension-symbols
 test-extension-symbols:
@@ -205,8 +226,8 @@ test-extension-symbols:
 test-named-attribute-columns:
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		$(CC) -std=c11 -O2 -Wall -Wextra -Werror -UNDEBUG \
-			-Iduckdb_capi -Isrc/include \
-			test/scripts/named_attribute_columns_test.c src/named_attribute_columns.c \
+			-Iduckdb_capi -Isrc/include -Ithird_party/htslib \
+			test/scripts/named_attribute_columns_test.c src/named_attribute_columns.c src/column_names.c \
 			-o "$$tmp/named_attribute_columns_test"; \
 		"$$tmp/named_attribute_columns_test"
 

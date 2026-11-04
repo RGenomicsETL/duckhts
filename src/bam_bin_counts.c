@@ -559,6 +559,17 @@ static void destroy_bam_bin_local(void *data) {
     duckdb_free(local);
 }
 
+static int bam_bin_set_required_fields(samFile *fp, char *err, size_t errlen) {
+    /* PNEXT supports streaming duplicate detection. SEQ and AUX also preserve
+     * CG long-CIGAR restoration for indexed overlap checks (htslib sam.c). */
+    if (duckhts_cram_require_fields(fp, SAM_FLAG | SAM_RNAME | SAM_POS | SAM_MAPQ | SAM_CIGAR |
+                                        SAM_PNEXT | SAM_SEQ | SAM_AUX) < 0) {
+        snprintf(err, errlen, "bam_bin_counts: failed to configure CRAM required fields");
+        return -1;
+    }
+    return 0;
+}
+
 /* Opens this worker's own handle, header, index and record. Returns 0, or -1
  * with `err` set. */
 static int open_worker_handles(const bam_bin_bind_t *run, bam_bin_local_t *local,
@@ -568,6 +579,7 @@ static int open_worker_handles(const bam_bin_bind_t *run, bam_bin_local_t *local
         snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
         return -1;
     }
+    if (bam_bin_set_required_fields(local->fp, err, errlen) < 0) return -1;
     duckhts_apply_remote_hts_tuning(local->fp, run->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (run->reference && hts_set_opt(local->fp, CRAM_OPT_REFERENCE, run->reference) < 0) {
         snprintf(err, errlen, "bam_bin_counts: failed to set CRAM reference");
@@ -705,6 +717,10 @@ static int sequential_scan_no_index(bam_bin_bind_t *bind, char *err, size_t errl
         snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
         return -1;
     }
+    if (bam_bin_set_required_fields(fp, err, errlen) < 0) {
+        sam_close(fp);
+        return -1;
+    }
     duckhts_apply_remote_hts_tuning(fp, bind->path,
                                     DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (bind->reference) {
@@ -804,6 +820,10 @@ static int indexed_unmapped_scan(bam_bin_bind_t *bind, char *err, size_t errlen)
     fp = sam_open(bind->path, "r");
     if (!fp) {
         snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
+        return -1;
+    }
+    if (bam_bin_set_required_fields(fp, err, errlen) < 0) {
+        sam_close(fp);
         return -1;
     }
     duckhts_apply_remote_hts_tuning(fp, bind->path,

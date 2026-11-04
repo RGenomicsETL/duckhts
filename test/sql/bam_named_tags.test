@@ -97,23 +97,23 @@ SELECT
 statement error
 SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['cm', 'cm']);
 ----
-auxiliary_tags names cm and cm, the same column (column names ignore case)
+auxiliary_tags: cm and cm name the same column (column names ignore case)
 
 # SAM tag names are case-sensitive, DuckDB column names are not.
 statement error
 SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', auxiliary_tags := ['xf', 'XF']);
 ----
-auxiliary_tags names xf and XF, the same column (column names ignore case)
+auxiliary_tags: xf and XF name the same column (column names ignore case)
 
 statement error
 SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', standard_tags := true, auxiliary_tags := ['NM']);
 ----
-auxiliary_tags names NM, which matches the standard_tags column NM
+auxiliary_tags: NM and NM name the same column
 
 statement error
 SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/nanopore.bam', standard_tags := true, auxiliary_tags := ['cm']);
 ----
-auxiliary_tags names cm, which matches the standard_tags column CM
+auxiliary_tags: CM and cm name the same column
 
 # Without standard_tags, a standard tag can be named, as text.
 query I
