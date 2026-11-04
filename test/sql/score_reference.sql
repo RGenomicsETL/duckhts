@@ -165,6 +165,13 @@ chromosome_aliases(name, candidates) AS (
            ('XX', ['X', 'chrX']), ('PAR1', ['X', 'chrX']), ('PAR2', ['X', 'chrX']),
            ('24', ['Y', 'chrY']), ('26', ['MT', 'chrM']), ('MT', ['MT', 'chrM']), ('chrM', ['MT', 'chrM'])
 ),
+-- Native keeps a literal '.' summary ID and, matching by ID, pairs it with VCF records whose
+-- ID is '.'. read_tabix returns NULL both for '.' and for an empty field, which native skips,
+-- and read_geno returns NULL for a '.' ID. The reference rejects the one ambiguous case (in
+-- markers): a by-ID summary row without an ID while the VCF has records without one.
+vcf_missing_id AS (
+    SELECT EXISTS (SELECT 1 FROM read_bcf(getvariable('score_path')) WHERE ID IS NULL) AS present
+),
 markers AS (
     SELECT m.*, CASE WHEN match_id THEN 'I:' || m.id ELSE
         'P:' || coalesce(exact.id, stripped.id, prefixed.id, special.id, fallback.id) || ':' || pos END AS marker_key
@@ -176,7 +183,12 @@ markers AS (
     LEFT JOIN contigs special ON a.candidates[1] = special.id
     LEFT JOIN contigs fallback ON a.candidates[2] = fallback.id
     WHERE beta IS NOT NULL AND NOT isnan(beta) AND effect IS NOT NULL
-      AND CASE WHEN match_id THEN m.id IS NOT NULL ELSE pos IS NOT NULL END
+      AND CASE WHEN NOT match_id THEN pos IS NOT NULL
+               WHEN m.id IS NOT NULL THEN true
+               WHEN (SELECT present FROM vcf_missing_id)
+               THEN error('score_reference: summary rows and VCF records without IDs under ID matching; ' ||
+                          'native matches a literal ''.'' ID')
+               ELSE false END
     QUALIFY row_number() OVER (PARTITION BY path, marker_key ORDER BY ordinal) = 1
 ),
 thresholds AS (

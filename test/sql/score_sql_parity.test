@@ -410,6 +410,41 @@ FROM query(getvariable('score_compare'));
 ----
 0
 
+# Under ID matching, native pairs a literal '.' summary ID with VCF records whose ID is '.'.
+# read_tabix cannot tell '.' from an empty field (which native skips), so the reference
+# rejects a missing summary ID when the VCF also has records without IDs; against a VCF
+# whose records all have IDs it matches native.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_dot_id.tsv'];
+
+statement ok
+SET VARIABLE score_use_variant_id = true;
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', use_variant_id := true, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_dot_id.vcf';
+
+statement error
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+----
+summary rows and VCF records without IDs under ID matching
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
 statement ok
 SET VARIABLE score_columns = 'PLINK';
 
