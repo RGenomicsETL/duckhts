@@ -850,14 +850,23 @@ FROM query(getvariable('score_sql'));
 ----
 duplicate PRS names
 
-foreach fixture score_truncated.tsv.gz score_truncated.header.tsv.gz
-
+# The header probe reads the summary with read_csv before read_tabix scans
+# it. DuckDB 2.0 decodes the whole gzip stream before the probe's LIMIT 1
+# returns, so it reports the truncation itself; DuckDB 1.5 stops at the first
+# line and leaves the truncation to read_tabix. Either message must name the
+# truncated fixture.
 statement ok
-SET VARIABLE score_summaries = ['test/data/${fixture}'];
+SET VARIABLE score_summaries = ['test/data/score_truncated.tsv.gz'];
 
 statement error
 FROM query(getvariable('score_sql'));
 ----
-read_tabix: failed to read
+<REGEX>:.*(read_tabix: failed to read 'test/data/score_truncated\.tsv\.gz'|Unexpected end of GZIP stream: test/data/score_truncated\.tsv\.gz).*
 
-endloop
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_truncated.header.tsv.gz'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+<REGEX>:.*(read_tabix: failed to read 'test/data/score_truncated\.header\.tsv\.gz'|Unexpected end of GZIP stream: test/data/score_truncated\.header\.tsv\.gz).*
