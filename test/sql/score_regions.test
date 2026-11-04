@@ -228,3 +228,28 @@ SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summa
                              use := 'GT', columns := 'PLINK', targets := '1:200-100');
 ----
 invalid region/target expression
+
+# A VCF without ##contig lines gains contigs as records are read, so a target on a contig
+# that has not appeared yet must still match once its records arrive.
+statement ok
+COPY (SELECT replace(line, '|', chr(9)) FROM (VALUES
+    (1, '##fileformat=VCFv4.2'),
+    (2, '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">'),
+    (3, '#CHROM|POS|ID|REF|ALT|QUAL|FILTER|INFO|FORMAT|S1'),
+    (4, '1|100|rs1|A|T|.|PASS|.|GT|0/1'),
+    (5, '1|200|rs2|A|T|.|PASS|.|GT|1/1'),
+    (6, '2|300|rs3|A|T|.|PASS|.|GT|0/1')) t(ordinal, line) ORDER BY ordinal)
+TO '__WORKING_DIRECTORY__/test/sql/score_late_contig.vcf' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+statement ok
+COPY (SELECT replace(line, '|', chr(9)) FROM (VALUES
+    (1, 'CHR|BP|SNP|A1|BETA'), (2, '1|100|rs1|T|1'), (3, '1|200|rs2|T|10'), (4, '2|300|rs3|T|100'))
+    t(ordinal, line) ORDER BY ordinal)
+TO '__WORKING_DIRECTORY__/test/sql/score_late_contig.tsv' (FORMAT CSV, HEADER FALSE, QUOTE '', ESCAPE '');
+
+query TR
+SELECT * FROM bcftools_score('__WORKING_DIRECTORY__/test/sql/score_late_contig.vcf',
+                             '__WORKING_DIRECTORY__/test/sql/score_late_contig.tsv',
+                             use := 'GT', columns := 'PLINK', use_variant_id := true, targets := '2');
+----
+S1	100.0

@@ -2274,6 +2274,7 @@ static void score_init(duckdb_init_info info) {
     score_init_t *init = (score_init_t *)duckdb_malloc(sizeof(score_init_t));
     score_scan_source_t src = {0};
     int regions_parsed = 0;
+    int parsed_contigs = 0; /* contig dictionary size when the regions were parsed */
     bcf_hdr_t *hdr = NULL;
     score_summary_t **summaries = NULL;    /* one summary index per PRS */
     int64_t *matched_markers = NULL;
@@ -2470,14 +2471,22 @@ static void score_init(duckdb_init_info info) {
 
             if (!score_record_passes_filter_list(hdr, rec, bind->apply_filters)) continue;
             /* Parse on the first FILTER-passing record; empty or fully FILTER-
-             * excluded inputs do not evaluate region expressions. */
-            if (!regions_parsed) {
+             * excluded inputs do not evaluate region expressions. A VCF without
+             * ##contig lines gains contigs as records are read (htslib vcf.c
+             * fix_chromosome), so parse again when the contig dictionary grows:
+             * a named contig absent so far may now resolve. */
+            if (!regions_parsed || hdr->n[BCF_DT_CTG] != parsed_contigs) {
+                free(src.regions.intervals);
+                free(src.targets.intervals);
+                memset(&src.regions, 0, sizeof(src.regions));
+                memset(&src.targets, 0, sizeof(src.targets));
                 if (score_parse_region_list(hdr, bind->regions, &src.regions) < 0 ||
                     score_parse_region_list(hdr, bind->targets, &src.targets) < 0) {
                     snprintf(err, sizeof(err), "bcftools_score: invalid region/target expression");
                     goto score_record_error;
                 }
                 regions_parsed = 1;
+                parsed_contigs = hdr->n[BCF_DT_CTG];
             }
             int in_regions = score_record_in_regions(rec, &src.regions,
                                                      bind->regions_overlap >= 0 ? bind->regions_overlap : 1);
