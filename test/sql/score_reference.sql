@@ -155,6 +155,8 @@ samples AS (
                                     ' is absent from header: ' || getvariable('score_path')) END
 ),
 -- GT and DS use a common normalized call layout without decoding unrelated FORMAT tags.
+-- The per-record widths are computed before unnest: beside unnest, a list lambda over
+-- calls is evaluated once per call, which makes the work grow with samples squared.
 calls AS (
     SELECT * FROM query(
         'SELECT record_index, CHROM, POS, ID, REF, ALT, FILTER, gt_width, ds_width, c.sample_index, c.alleles, ' ||
@@ -162,7 +164,7 @@ calls AS (
             WHEN 'GT' THEN 'NULL::FLOAT[]'
             WHEN 'DS' THEN 'CASE WHEN typeof(c.format.DS) LIKE ''%[]'' THEN c.format.DS::FLOAT[] ELSE [c.format.DS::FLOAT] END'
             ELSE error('score_reference: supported use values are GT and DS') END ||
-        ' AS dosage FROM (SELECT *, unnest(calls) AS c, ' ||
+        ' AS dosage FROM (SELECT * EXCLUDE (calls), unnest(calls) AS c FROM (SELECT *, ' ||
         'list_max(list_transform(calls, lambda c: len(c.alleles))) AS gt_width, ' ||
         CASE coalesce(getvariable('score_use'), 'GT') WHEN 'DS' THEN
             'list_max(list_transform(calls, lambda c: CASE WHEN typeof(c.format.DS) LIKE ''%[]'' THEN len(c.format.DS::FLOAT[]) ELSE 1 END))'
@@ -172,7 +174,7 @@ calls AS (
         CASE WHEN getvariable('score_samples') IS NULL THEN 'NULL' ELSE
             chr(39) || replace(getvariable('score_samples')::VARCHAR, chr(39), chr(39) || chr(39)) || chr(39) END ||
         ', format_fields := ' || CASE WHEN coalesce(getvariable('score_use'), 'GT') = 'DS'
-            THEN '[''DS'']' ELSE '[]' END || '))')
+            THEN '[''DS'']' ELSE '[]' END || ')))')
 ),
 filtered_calls AS (
     SELECT * FROM calls

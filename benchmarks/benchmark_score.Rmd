@@ -460,7 +460,7 @@ multi_case$sql_compare
 ## Scaling
 
 The growth dimensions are variants (V), samples (S) and PRS files (P). The base
-case is V = 125,000, S = 100, P = 1. Each ladder doubles one dimension twice,
+case is V = 250,000, S = 100, P = 1. Each ladder doubles one dimension twice,
 holding the others at the base, and a joint case doubles all three. Every
 process is a fresh DuckDB CLI (`DUCKDB`, default `duckdb`) with a 4 GB memory
 limit and a 3 GB spill limit. Three processes run per engine, shape and thread count
@@ -503,7 +503,7 @@ reference_path <- normalizePath("test/sql/score_reference.sql", mustWork = TRUE)
 shapes <- data.frame(
   ladder = c("base", "variants", "variants", "samples", "samples", "prs", "prs", "joint"),
   scale = c("1x", "2x", "4x", "2x", "4x", "2x", "4x", "2x2x2"),
-  variants = 125000L * c(1L, 2L, 4L, 1L, 1L, 1L, 1L, 2L),
+  variants = 250000L * c(1L, 2L, 4L, 1L, 1L, 1L, 1L, 2L),
   samples = 100L * c(1L, 1L, 1L, 2L, 4L, 1L, 1L, 2L),
   prs = c(1L, 1L, 1L, 1L, 1L, 2L, 4L, 2L),
   stringsAsFactors = FALSE
