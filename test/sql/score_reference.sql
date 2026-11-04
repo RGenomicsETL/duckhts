@@ -9,7 +9,7 @@
 -- TSV summaries only; no include/exclude, GWAS-VCF, summary-list files or auto tag selection.
 -- END/symbolic reference spans are rejected for overlap modes 1/2.
 -- Custom column files, force_samples, log output, and caller-supplied PRS names are not supported.
--- read_tabix, rather than read_csv, preserves errors from truncated compressed input.
+-- Summary rows are scanned with read_tabix, which reports truncated compressed input.
 -- Counts are exact. Scores sum float32 products in double precision. For n terms,
 -- |native - SQL| <= (gamma(n, 2^-24) + gamma(n, 2^-53)) * A / (1-gamma(n, 2^-53)),
 -- where A is SQL sum(abs(term)) and gamma(n,u) = n*u/(1-n*u).
@@ -243,11 +243,35 @@ selection(kind, spec, path, mode) AS (
            ('targets', getvariable('score_targets')::VARCHAR, getvariable('score_targets_file')::VARCHAR,
             coalesce(getvariable('score_targets_overlap'), 0))
 ),
+-- Region and target files are read as whole lines, as native reads them with hts_getline
+-- (score_regions_from_file): leading whitespace is skipped, then empty and '#' lines.
+-- score_split_fields splits on runs of tabs and ends a field at '\r', so empty fields vanish
+-- and a literal '.' stays a field. BED is a case-insensitive .bed or .bed.gz name.
+file_rows AS (
+    SELECT selection.kind, selection.mode, f.path, f.data_row, f.fields, is_bed
+    FROM query(coalesce(nullif(array_to_string(list_transform(
+        list_filter([getvariable('score_regions_file')::VARCHAR, getvariable('score_targets_file')::VARCHAR], lambda p: p IS NOT NULL),
+        lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ' AS path, row_number() OVER () AS data_row, ' ||
+             'list_filter(regexp_split_to_array(trimmed, ''[\t\r]''), lambda x: x <> '''') AS fields ' ||
+             'FROM (SELECT ltrim(line, '' '' || chr(9) || chr(11) || chr(12) || chr(13)) AS trimmed FROM read_csv(' ||
+             chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ', columns := {''line'': ''VARCHAR''}, header := false, delim := chr(1), quote := '''', ' ||
+             'escape := '''', comment := '''', auto_detect := false, compression := ' ||
+             CASE WHEN regexp_matches(p, '\.(gz|bgz)$') THEN '''gzip''' ELSE '''none''' END ||
+             ')) WHERE coalesce(trimmed, '''') <> '''' AND NOT starts_with(trimmed, ''#'')'),
+        ' UNION ALL '), ''), 'SELECT NULL::VARCHAR AS path, NULL::BIGINT AS data_row, []::VARCHAR[] AS fields WHERE false')) AS f
+    JOIN selection USING (path),
+    LATERAL (SELECT regexp_matches(lower(path), '\.bed(\.gz)?$') AS is_bed)
+),
+-- A one-field row of a non-BED file is a region expression, parsed like the string option.
 interval_items AS (
-    SELECT selection.*, item, coalesce(contigs.id, regexp_extract(item, '^(\{[^}]+\}|[^:]+)', 1)) AS contig
-    FROM selection CROSS JOIN unnest(regexp_extract_all(spec, '(\{[^}]*\}[^,]*|[^,]+)')) AS items(item)
+    SELECT kind, mode, item, coalesce(contigs.id, regexp_extract(item, '^(\{[^}]+\}|[^:]+)', 1)) AS contig
+    FROM (SELECT kind, mode, spec AS expression FROM selection WHERE coalesce(spec, '') <> ''
+          UNION ALL
+          SELECT kind, mode, fields[1] FROM file_rows WHERE len(fields) = 1 AND NOT is_bed) AS expressions
+    CROSS JOIN unnest(regexp_extract_all(expression, '(\{[^}]*\}[^,]*|[^,]+)')) AS items(item)
     LEFT JOIN contigs ON item = contigs.id
-    WHERE coalesce(spec, '') <> ''
 ),
 text_intervals AS (
     SELECT kind, mode, contig,
@@ -261,23 +285,17 @@ text_intervals AS (
     FROM interval_items
 ),
 file_intervals AS (
-    SELECT kind, mode, values[1] AS chrom,
-           CASE WHEN coalesce(values[1], '') = '' OR try_cast(values[2] AS BIGINT) IS NULL
-                     OR try_cast(coalesce(values[3], values[2]) AS BIGINT) IS NULL
-                     OR try_cast(values[2] AS BIGINT) < CASE WHEN is_bed THEN 0 ELSE 1 END
-                     OR try_cast(coalesce(values[3], values[2]) AS BIGINT) <
-                        try_cast(values[2] AS BIGINT) + CASE WHEN is_bed THEN 1 ELSE 0 END
+    SELECT kind, mode, fields[1] AS chrom,
+           CASE WHEN try_cast(fields[2] AS BIGINT) IS NULL
+                     OR try_cast(coalesce(fields[3], fields[2]) AS BIGINT) IS NULL
+                     OR try_cast(fields[2] AS BIGINT) < CASE WHEN is_bed THEN 0 ELSE 1 END
+                     OR try_cast(coalesce(fields[3], fields[2]) AS BIGINT) <
+                        try_cast(fields[2] AS BIGINT) + CASE WHEN is_bed THEN 1 ELSE 0 END
                 THEN error('score_reference: invalid interval in ' || path || ' at data row ' || data_row)
-                ELSE values[2]::BIGINT + CASE WHEN is_bed THEN 1 ELSE 0 END END AS lo,
-           try_cast(coalesce(values[3], values[2]) AS BIGINT) AS hi
-    FROM query(coalesce(nullif(array_to_string(list_transform(
-        list_filter([getvariable('score_regions_file')::VARCHAR, getvariable('score_targets_file')::VARCHAR], lambda p: p IS NOT NULL),
-        lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
-             ' AS path, row_number() OVER () AS data_row, list_transform(json_keys(to_json(t)), lambda k: json_extract_string(to_json(t), ''/'' || k)) AS values FROM read_tabix(' ||
-             chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) || ', header := false) t'),
-        ' UNION ALL '), ''), 'SELECT NULL::VARCHAR AS path, NULL::BIGINT AS data_row, []::VARCHAR[] AS values WHERE false')) AS f
-    JOIN selection USING (path),
-    LATERAL (SELECT regexp_matches(path, '\.bed(\.(gz|bgz))?$') AS is_bed)
+                ELSE fields[2]::BIGINT + CASE WHEN is_bed THEN 1 ELSE 0 END END AS lo,
+           try_cast(coalesce(fields[3], fields[2]) AS BIGINT) AS hi
+    FROM file_rows
+    WHERE len(fields) > 1 OR is_bed
 ),
 intervals AS (
     SELECT kind, mode, chrom,

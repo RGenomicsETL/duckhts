@@ -587,8 +587,9 @@ SET VARIABLE score_path = 'test/data/score_input.vcf';
 statement ok
 SET VARIABLE score_apply_filters = NULL;
 
-# BED is zero-based half-open; plain TSV is one-based inclusive.
-foreach fixture score_sql_selection.bed score_sql_selection.tsv score_sql_anchor.bed
+# BED is zero-based half-open; plain TSV is one-based inclusive. In a non-BED file a
+# one-field row is a region expression; runs of tabs collapse, as in native.
+foreach fixture score_sql_selection.bed score_sql_selection.tsv score_sql_anchor.bed score_sql_selection_expr.txt
 
 foreach kind regions targets
 

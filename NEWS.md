@@ -4,12 +4,12 @@
 
 - `test/sql/score_reference.sql` computes `bcftools_score`'s GT and DS scores as one SQL
   query over `read_geno`, `read_bcf_samples`, `read_hts_header`, `read_tabix` and, for the
-  summary header line, `read_csv`, taking its inputs through session variables.
-  `test/sql/score_sql_parity.test` compares it with the native function on 136 cases: the
-  eight column presets, `#CHR`/`#ID` summary headers, indexed summaries, PRS file names, ID
-  and position matching, thresholds with the log-p to P fallback, NaN dosages, samples,
-  FILTER selection, region and target strings and BED files with their overlap modes, and
-  the upstream multiallelic behaviour. Counts must match exactly; scores within a float32
+  summary header line and region/target files, `read_csv`, taking its inputs through
+  session variables. `test/sql/score_sql_parity.test` compares it with the native function
+  on 142 cases: the eight column presets, `#CHR`/`#ID` summary headers, indexed summaries,
+  PRS file names, ID and position matching, thresholds with the log-p to P fallback, NaN
+  dosages, samples, FILTER selection, region and target strings and files (BED, TSV or one
+  expression per line) with their overlap modes, and the upstream multiallelic behaviour. Counts must match exactly; scores within a float32
   summation bound derived for each case. HDS/AP/GP/AS, GWAS-VCF summaries and
   include/exclude expressions are outside the reference. A p-value within float32 `log10f`
   rounding of a `q_score_thr` threshold is an error, because native's choice there depends
