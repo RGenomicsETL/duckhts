@@ -368,6 +368,48 @@ FROM query(getvariable('score_compare'));
 ----
 0
 
+# Column names use the float32-parsed threshold: 0.1234565 is named p0.123457, as in native.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_threshold_name.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1234565];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '0.1234565', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query I
+SELECT count(*) FROM pragma_table_info('sql_score') WHERE name = 'score_sql_threshold_name_CNT_p0.123457';
+----
+1
+
+# One heterozygous marker weighted by OR 1.00076: native logf and SQL's double ln differ in
+# the last float32 bits, so the bound includes the conversion error.
+statement ok
+SET VARIABLE score_q_score_thr = NULL;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_or_rounding.tsv'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
 statement ok
 SET VARIABLE score_columns = 'PLINK';
 

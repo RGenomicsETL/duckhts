@@ -15,6 +15,8 @@
 -- where A is SQL sum(abs(term)) and gamma(n,u) = n*u/(1-n*u).
 -- The denominator accounts for rounding in A. This assumes finite normal arithmetic
 -- and n*2^-24 < 1; n rather than n-1 also leaves slack for bound evaluation.
+-- A weight converted from an odds ratio adds C = sum(|dose| * beta_tol + ulp(term)) twice:
+-- native uses float32 logf, whose last bits depend on the platform libm.
 -- query() binds a projection generated solely from the input PRS names/thresholds.
 FROM query(CASE
     WHEN getvariable('score_regions') IS NOT NULL AND getvariable('score_regions_file') IS NOT NULL
@@ -132,6 +134,9 @@ parsed_markers AS (
            f['SNP'] AS id, upper(f['A1']) AS effect,
            coalesce(nullif(try_cast(f['BETA'] AS FLOAT), 'NaN'::FLOAT),
                CASE WHEN try_cast(f['OR'] AS FLOAT) > 0 THEN ln(try_cast(f['OR'] AS FLOAT))::FLOAT END) AS beta,
+           -- Two float32 ulps of a weight converted from an odds ratio (native logf); 0 for BETA.
+           CASE WHEN nullif(try_cast(f['BETA'] AS FLOAT), 'NaN'::FLOAT) IS NOT NULL THEN 0
+                ELSE 2 * pow(2, floor(log2(greatest(abs(beta), pow(2, -126)))) - 23) END AS beta_tol,
            -- Native parses LP first and falls back to P when LP is missing, unparsable or NaN.
            CASE WHEN NOT isnan(coalesce(try_cast(f['LP'] AS FLOAT), 'NaN'::FLOAT)) THEN try_cast(f['LP'] AS FLOAT)
                 WHEN try_cast(split_part(lower(f['P']), 'e', 1) AS FLOAT) > 0
@@ -177,7 +182,9 @@ markers AS (
 thresholds AS (
     SELECT threshold,
            CASE WHEN getvariable('score_q_score_thr') IS NULL THEN ''
-                ELSE '_p' || printf('%g', threshold) END AS suffix,
+                -- Native names the column from pow(10, -lp) of the float32-parsed threshold.
+                ELSE '_p' || printf('%g', pow(10, log10(CASE WHEN threshold::FLOAT = 0 THEN threshold
+                                                         ELSE threshold::FLOAT::DOUBLE END))) END AS suffix,
            CASE WHEN threshold <= 0 OR threshold > 1 THEN error('score_reference: invalid q_score_thr')
                 ELSE -log10(CASE WHEN threshold::FLOAT = 0 THEN threshold ELSE threshold::FLOAT::DOUBLE END) END AS lp
     FROM unnest(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0])) AS q(threshold)
@@ -291,7 +298,7 @@ $score$ || CASE WHEN coalesce(getvariable('score_regions')::VARCHAR, '') = ''
 $selection$ END || $score$
 ),
 matched AS (
-    SELECT c.*, m.path, m.beta, m.lp, m.lp_exact, m.lp_tol,
+    SELECT c.*, m.path, m.beta, m.beta_tol, m.lp, m.lp_exact, m.lp_tol,
            list_position(list_prepend(REF, ALT), effect) - 1 AS allele,
            CASE WHEN mode = 'GT' THEN gt_width >= 2
                 WHEN ds_width IS NULL THEN false
@@ -309,7 +316,9 @@ matched AS (
     CROSS JOIN options
 ),
 terms AS (
-    SELECT sample_index, path, t.suffix, (beta * dose)::FLOAT::DOUBLE AS term
+    SELECT sample_index, path, t.suffix, (beta * dose)::FLOAT::DOUBLE AS term,
+           CASE WHEN beta_tol = 0 THEN 0
+                ELSE abs(dose) * beta_tol + pow(2, floor(log2(greatest(abs(term), pow(2, -126)))) - 23) END AS conversion
     FROM matched CROSS JOIN thresholds t
     WHERE available AND NOT missing AND allele >= 0
       AND (getvariable('score_q_score_thr') IS NULL OR matched.lp IS NULL OR isnan(matched.lp) OR
@@ -319,7 +328,8 @@ terms AS (
                 ELSE matched.lp >= t.lp END)
 ),
 reductions AS (
-    SELECT sample_index, path, suffix, sum(term) AS score, count(*)::BIGINT AS n, sum(abs(term)) AS magnitude
+    SELECT sample_index, path, suffix, sum(term) AS score, count(*)::BIGINT AS n, sum(abs(term)) AS magnitude,
+           sum(conversion) AS conversion
     FROM terms GROUP BY sample_index, path, suffix
 ),
 results AS (
@@ -329,7 +339,7 @@ results AS (
            CASE WHEN n * pow(2, -24) >= 1 THEN 'Infinity'::DOUBLE
                 ELSE coalesce(magnitude * (n * pow(2, -24) / (1 - n * pow(2, -24)) +
                                            n * pow(2, -53) / (1 - n * pow(2, -53))) /
-                    (1 - n * pow(2, -53) / (1 - n * pow(2, -53))), 0) END AS bound
+                    (1 - n * pow(2, -53) / (1 - n * pow(2, -53))) + 2 * conversion, 0) END AS bound
     FROM samples CROSS JOIN summaries CROSS JOIN thresholds t
     LEFT JOIN reductions r ON samples.sample_index = r.sample_index AND summaries.path = r.path AND t.suffix = r.suffix
 )
@@ -339,8 +349,8 @@ $score$ || array_to_string(list_transform(
         list_transform(getvariable('score_summaries'), lambda p: regexp_replace(regexp_extract(p, '[^/]+$'),
             '(\.(gz|txt|tsv|vcf|bcf))+$', '')),
         lambda p: list_transform(coalesce(getvariable('score_q_score_thr')::DOUBLE[], [1.0]), lambda q:
-            {'metric': p || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END,
-             'count_metric': p || '_CNT' || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', q) END}))),
+            {'metric': p || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', pow(10, log10(CASE WHEN q::FLOAT = 0 THEN q ELSE q::FLOAT::DOUBLE END))) END,
+             'count_metric': p || '_CNT' || CASE WHEN getvariable('score_q_score_thr') IS NULL THEN '' ELSE '_p' || printf('%g', pow(10, log10(CASE WHEN q::FLOAT = 0 THEN q ELSE q::FLOAT::DOUBLE END))) END}))),
     lambda m: 'max(score) FILTER (WHERE metric = ' || chr(39) || replace(m['metric'], chr(39), chr(39) || chr(39)) || chr(39) ||
          ') AS "' || replace(m['metric'], '"', '""') || '"' ||
          CASE WHEN coalesce(getvariable('score_counts'), false) THEN
