@@ -608,9 +608,15 @@ scaling_raw <- do.call(rbind, scaling_rows)
 expected <- scaling_raw[scaling_raw$engine == "duckhts_native" & scaling_raw$threads == 1L &
                           scaling_raw$rep == 1L & scaling_raw$ok, c("key", "result")]
 scaling_raw$expected <- expected$result[match(scaling_raw$key, expected$key)]
+
+# A result row holds the row count, one count sum per PRS, then one finiteness flag per PRS.
+all_scores_finite <- function(result, prs) {
+  fields <- strsplit(result, ",", fixed = TRUE)[[1L]]
+  length(fields) == 1L + 2L * prs && all(utils::tail(fields, prs) == "true")
+}
 scaling_raw$passed <- scaling_raw$ok & !is.na(scaling_raw$expected) &
   scaling_raw$result == scaling_raw$expected &
-  grepl(",true$", scaling_raw$result) &
+  mapply(all_scores_finite, scaling_raw$result, scaling_raw$prs, USE.NAMES = FALSE) &
   is.finite(scaling_raw$rss_bytes) & scaling_raw$rss_bytes <= scaling_raw$ceiling_mib * 2^20
 
 cell_keys <- c("ladder", "scale", "variants", "samples", "prs", "engine", "threads")

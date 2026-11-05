@@ -9,18 +9,26 @@ SET VARIABLE score_sql = (SELECT content FROM read_text('test/sql/score_referenc
 
 statement ok
 SET VARIABLE score_compare = $compare$
-WITH native_cells AS (
+WITH count_columns AS (
+    -- Count columns are BIGINT and scores DOUBLE in both outputs, so a column's type,
+    -- not its name, picks exact or bounded comparison.
+    SELECT coalesce(list(column_name) FILTER (WHERE table_name = 'native_score'), []) AS native,
+           coalesce(list(column_name) FILTER (WHERE table_name = 'sql_score'), []) AS reference
+    FROM duckdb_columns()
+    WHERE schema_name = 'main' AND table_name IN ('native_score', 'sql_score') AND data_type = 'BIGINT'
+), native_cells AS (
     SELECT n.SAMPLE, j.key, j.value FROM native_score n, json_each(to_json(n)) j
     WHERE j.key <> 'SAMPLE'
 ), reference_cells AS (
     SELECT r.SAMPLE, j.key, j.value, to_json(r) AS row FROM sql_score r, json_each(to_json(r)) j
     WHERE j.key <> 'SAMPLE' AND NOT ends_with(j.key, '_BOUND')
 )
-SELECT count(*) FROM native_cells n FULL JOIN reference_cells r USING (SAMPLE, key)
+SELECT count(*) FROM native_cells n FULL JOIN reference_cells r USING (SAMPLE, key) CROSS JOIN count_columns c
 WHERE n.SAMPLE IS NULL OR r.SAMPLE IS NULL OR n.value IS NULL OR r.value IS NULL
    OR json_type(n.value) = 'NULL' OR json_type(r.value) = 'NULL'
    OR NOT isfinite(n.value::DOUBLE) OR NOT isfinite(r.value::DOUBLE)
-   OR CASE WHEN regexp_matches(coalesce(n.key, r.key), '_CNT(_p|$)')
+   OR list_contains(c.native, key) <> list_contains(c.reference, key)
+   OR CASE WHEN list_contains(c.native, key)
            THEN n.value::BIGINT <> r.value::BIGINT
            ELSE json_extract(r.row, '/' || r.key || '_BOUND') IS NULL
                 OR json_type(json_extract(r.row, '/' || r.key || '_BOUND')) = 'NULL'
@@ -436,6 +444,61 @@ summary scan is narrower than its mapped header fields
 statement ok
 SET VARIABLE score_columns = NULL;
 
+statement ok
+SET VARIABLE score_q_score_thr = NULL;
+
+# Native strtoll must consume the whole BP field: rs2 at BP 200.1 is skipped, and rs3 at
+# ' +300' (leading space and sign) is kept.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_fractional_bp.tsv'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query TI
+SELECT SAMPLE, score_sql_fractional_bp_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	2
+S2	2
+
+# A header without effect allele and weight columns is rejected without any data rows.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_header_only.tsv'];
+
+statement error
+SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK');
+----
+summary must include effect allele and effect size/OR columns
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+missing effect allele/weight columns in summary header
+
+# rs2 has an empty SNP field. Native collapses the tab run, which moves A1, BETA and P one
+# field left; read_tabix keeps the positions, so the reference rejects the summary.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_empty_field.tsv'];
+
+query I
+SELECT score_sql_empty_field_CNT FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true) ORDER BY SAMPLE;
+----
+2
+2
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+a summary row has an empty field before a later field
+
 # One heterozygous marker weighted by OR 1.00076: native logf and SQL's double ln differ in
 # the last float32 bits, so the bound includes the conversion error.
 statement ok
@@ -828,6 +891,33 @@ SET VARIABLE score_use = 'GT';
 
 statement ok
 SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+# A PRS named score_summary_CNT is a score, not a count: the comparator picks
+# exact comparison from the column type, so a changed score is still rejected.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary_CNT.tsv'];
+
+statement ok
+SET VARIABLE score_counts = true;
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+UPDATE sql_score SET score_summary_CNT = score_summary_CNT + 0.1 WHERE SAMPLE = 'S2';
+
+query I
+FROM query(getvariable('score_compare'));
+----
+1
 
 statement ok
 SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];

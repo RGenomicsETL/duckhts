@@ -6,8 +6,9 @@
   query over `read_geno`, `read_bcf_samples`, `read_hts_header`, `read_tabix` and, for the
   summary header line and region/target files, `read_csv`, taking its inputs through
   session variables. `test/sql/score_sql_parity.test` compares it with the native function
-  on 208 cases: the eight column presets, `#CHR`/`#ID` summary headers, indexed summaries,
-  PRS file names, ID and position matching, thresholds with the log-p to P fallback, NaN
+  on 210 cases: the eight column presets, `#CHR`/`#ID` summary headers, indexed summaries,
+  PRS file names (including one ending in `_CNT`), ID and position matching with native
+  integer position syntax, thresholds with the log-p to P fallback, NaN
   dosages, samples, FILTER selection, region and target strings in htslib coordinate syntax
   (including contig names with colons) and files (BED, TSV, one expression per line, or no
   data rows) with their overlap modes, and the upstream multiallelic behaviour. Counts must match exactly; scores within a
@@ -18,8 +19,13 @@
   `logf`'s rounding. Under ID matching, a summary row without an ID is an error when the
   VCF also has records without IDs, because native matches a literal `.`. A summary whose
   first data row is shorter than the mapped header fields is an error, because `read_tabix`
-  takes its column count from that row. Like native, it rejects thresholds that repeat or
-  format to the same column-name suffix. `benchmarks/benchmark_score.md` times it beside
+  takes its column count from that row. A summary row with an empty field before a later
+  field, or with a carriage return, is an error, because native collapses tab runs and
+  `read_tabix` keeps every position. Like native, it rejects thresholds that repeat or
+  format to the same column-name suffix, and headers without effect allele and weight
+  columns even when the summary has no data rows. The parity comparator picks exact or
+  bounded comparison from each column's type, not its name, and the benchmark's scaling
+  gate checks the finiteness of every PRS score, not only the last. `benchmarks/benchmark_score.md` times it beside
   the native function
   and `bcftools +score`: at 500,000 variants × 100 samples, 19.4 s against 0.98 s native
   and 1.17 s upstream. Its 1×/2×/4× ladders of variants, samples and PRS files have time

@@ -71,6 +71,22 @@ summary_rows AS MATERIALIZED (
              chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
              ', header := false, auto_detect := false)'), ' UNION ALL '))
 ),
+-- Native splits a row on runs of tabs and ends a field at '\r' (score_split_fields), so an
+-- empty field before a later one shifts the later positions; read_tabix keeps every position.
+-- Such rows are outside the reference. Whole lines come from read_csv, as in summary_headers.
+summary_layouts AS MATERIALIZED (
+    SELECT path, bool_or(regexp_matches(line, '(^|\t)\t+[^\t]|\r')) AS collapses
+    FROM query(array_to_string(list_transform(getvariable('score_summaries'),
+        lambda p: 'SELECT ' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ' AS path, CASE WHEN starts_with(line, ''#'') THEN substr(line, 2) ELSE line END AS line ' ||
+             'FROM read_csv(' || chr(39) || replace(p, chr(39), chr(39) || chr(39)) || chr(39) ||
+             ', columns := {''line'': ''VARCHAR''}, header := false, delim := chr(1), quote := '''', ' ||
+             'escape := '''', comment := '''', auto_detect := false, compression := ' ||
+             CASE WHEN regexp_matches(p, '\.(gz|bgz)$') THEN '''gzip''' ELSE '''none''' END ||
+             ') WHERE NOT starts_with(line, ''#'') OR starts_with(line, ''#CHR'') OR starts_with(line, ''#ID'')'),
+        ' UNION ALL '))
+    GROUP BY path
+),
 -- Alias order follows the pinned native presets.
 aliases(preset, role, names) AS (
     VALUES
@@ -128,14 +144,13 @@ fields AS (
       AND CASE WHEN list_max(map_values(mapping)) > len(field_values)
                THEN error('score_reference: summary scan is narrower than its mapped header fields ' ||
                           '(a short first data row); outside the reference: ' || path)
-               WHEN mapping['A1'] IS NULL OR (mapping['BETA'] IS NULL AND mapping['OR'] IS NULL)
-               THEN error('score_reference: missing effect allele/weight columns in summary header: ' || path)
-               WHEN (coalesce(getvariable('score_use_variant_id'), false) OR lack_position) AND mapping['SNP'] IS NULL
-               THEN error('score_reference: missing marker name column in summary header: ' || path)
                ELSE true END
 ),
 parsed_markers AS (
-    SELECT path, ordinal, f['CHR'] AS chrom, try_cast(f['BP'] AS BIGINT) AS pos,
+    SELECT path, ordinal, f['CHR'] AS chrom,
+           -- Native strtoll must consume the whole BP field; DuckDB's cast would round 200.1.
+           CASE WHEN regexp_matches(f['BP'], '^[ \t\n\v\f\r]*[+-]?[0-9]+$')
+                THEN try_cast(f['BP'] AS BIGINT) END AS pos,
            f['SNP'] AS id, upper(f['A1']) AS effect,
            coalesce(nullif(try_cast(f['BETA'] AS FLOAT), 'NaN'::FLOAT),
                CASE WHEN try_cast(f['OR'] AS FLOAT) > 0 THEN ln(try_cast(f['OR'] AS FLOAT))::FLOAT END) AS beta,
@@ -195,6 +210,23 @@ markers AS (
                           'native matches a literal ''.'' ID')
                ELSE false END
     QUALIFY row_number() OVER (PARTITION BY path, marker_key ORDER BY ordinal) = 1
+),
+-- Header and layout checks run once per summary, so a summary without data rows is checked too.
+validated_summaries AS (
+    SELECT s.path, s.prs FROM summaries s
+    LEFT JOIN header_mapping h USING (path)
+    LEFT JOIN summary_layouts l USING (path)
+    WHERE CASE WHEN h.mapping IS NULL
+               THEN error('score_reference: empty summary file: ' || s.path)
+               WHEN h.mapping['A1'] IS NULL OR (h.mapping['BETA'] IS NULL AND h.mapping['OR'] IS NULL)
+               THEN error('score_reference: missing effect allele/weight columns in summary header: ' || s.path)
+               WHEN (coalesce(getvariable('score_use_variant_id'), false) OR
+                     h.mapping['CHR'] IS NULL OR h.mapping['BP'] IS NULL) AND h.mapping['SNP'] IS NULL
+               THEN error('score_reference: missing marker name column in summary header: ' || s.path)
+               WHEN coalesce(l.collapses, false)
+               THEN error('score_reference: a summary row has an empty field before a later field, or a ' ||
+                          'carriage return, which native tokenizes differently; outside the reference: ' || s.path)
+               ELSE true END
 ),
 thresholds AS (
     SELECT threshold,
@@ -437,8 +469,8 @@ results AS (
                 ELSE coalesce(magnitude * (n * pow(2, -24) / (1 - n * pow(2, -24)) +
                                            n * pow(2, -53) / (1 - n * pow(2, -53))) /
                     (1 - n * pow(2, -53) / (1 - n * pow(2, -53))) + 2 * conversion, 0) END AS bound
-    FROM samples CROSS JOIN summaries CROSS JOIN thresholds t
-    LEFT JOIN reductions r ON samples.sample_index = r.sample_index AND summaries.path = r.path AND t.suffix = r.suffix
+    FROM samples CROSS JOIN validated_summaries s CROSS JOIN thresholds t
+    LEFT JOIN reductions r ON samples.sample_index = r.sample_index AND s.path = r.path AND t.suffix = r.suffix
 )
 SELECT SAMPLE,
 $score$ ||
