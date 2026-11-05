@@ -1,0 +1,972 @@
+# name: test/sql/score_sql_parity.test
+# description: Relational GT/DS score reference and float32 forward error bounds
+# group: [duckhts]
+
+require duckhts
+
+statement ok
+SET VARIABLE score_sql = (SELECT content FROM read_text('test/sql/score_reference.sql'));
+
+statement ok
+SET VARIABLE score_compare = $compare$
+WITH native_cells AS (
+    SELECT n.SAMPLE, j.key, j.value FROM native_score n, json_each(to_json(n)) j
+    WHERE j.key <> 'SAMPLE'
+), reference_cells AS (
+    SELECT r.SAMPLE, j.key, j.value, to_json(r) AS row FROM sql_score r, json_each(to_json(r)) j
+    WHERE j.key <> 'SAMPLE' AND NOT ends_with(j.key, '_BOUND')
+)
+SELECT count(*) FROM native_cells n FULL JOIN reference_cells r USING (SAMPLE, key)
+WHERE n.SAMPLE IS NULL OR r.SAMPLE IS NULL OR n.value IS NULL OR r.value IS NULL
+   OR json_type(n.value) = 'NULL' OR json_type(r.value) = 'NULL'
+   OR NOT isfinite(n.value::DOUBLE) OR NOT isfinite(r.value::DOUBLE)
+   OR CASE WHEN regexp_matches(coalesce(n.key, r.key), '_CNT(_p|$)')
+           THEN n.value::BIGINT <> r.value::BIGINT
+           ELSE json_extract(r.row, '/' || r.key || '_BOUND') IS NULL
+                OR json_type(json_extract(r.row, '/' || r.key || '_BOUND')) = 'NULL'
+                OR NOT isfinite(json_extract(r.row, '/' || r.key || '_BOUND')::DOUBLE)
+                OR abs(n.value::DOUBLE - r.value::DOUBLE) >
+                   json_extract(r.row, '/' || r.key || '_BOUND')::DOUBLE END
+$compare$;
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_counts = true;
+
+statement ok
+SET VARIABLE score_bounds = true;
+
+foreach preset PLINK PLINK2 REGENIE SAIGE BOLT METAL PGS SSF
+
+statement ok
+SET VARIABLE score_columns = '${preset}';
+
+statement ok
+SET VARIABLE score_summaries = [CASE WHEN '${preset}' = 'PLINK' THEN 'test/data/score_summary.tsv' ELSE 'test/data/score_summary_' || lower('${preset}') || '.tsv' END];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := '${preset}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query I
+SELECT count(*) FROM ((SELECT name, type FROM pragma_table_info('native_score') EXCEPT ALL SELECT name, type FROM pragma_table_info('sql_score') WHERE NOT ends_with(name, '_BOUND')) UNION ALL (SELECT name, type FROM pragma_table_info('sql_score') WHERE NOT ends_with(name, '_BOUND') EXCEPT ALL SELECT name, type FROM pragma_table_info('native_score')));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_columns = 'PLINK';
+
+foreach fixture score_summary score_summary_rsid score_summary_comments score_summary_log10p score_summary_or score_summary_mismatch score_summary_na score_summary_skips
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/${fixture}.tsv'];
+
+foreach by_id false true
+
+statement ok
+SET VARIABLE score_use_variant_id = ${by_id};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', use_variant_id := ${by_id}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+endloop
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+foreach fixture score_input score_chrprefix score_dosage score_missing_gt
+
+statement ok
+SET VARIABLE score_path = 'test/data/${fixture}.vcf';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_aliases.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_aliases.tsv'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query TII
+SELECT SAMPLE, score_sql_aliases::INTEGER, score_sql_aliases_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	5	3
+S2	5	3
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+statement ok
+SET VARIABLE score_use = 'DS';
+
+foreach fixture score_dosage score_missing_ds score_sql_nan_ds
+
+statement ok
+SET VARIABLE score_path = 'test/data/${fixture}.vcf';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'DS', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_bad_ds.vcf';
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+invalid DS FORMAT cardinality
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_dosage.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv', 'test/data/score_summary_or.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1, 0.3, 1.0];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'DS', columns := 'PLINK', q_score_thr := '0.1,0.3,1', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary_smallp.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [1e-200];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '1e-200', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary_log10p.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1, 1.0];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '0.1,1', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+# A log-p field that parses to NaN or fails to parse (NA, ., nan, x) falls back to P.
+foreach preset METAL PLINK2
+
+statement ok
+SET VARIABLE score_columns = '${preset}';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_lp_' || lower('${preset}') || '.tsv'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := '${preset}', q_score_thr := '0.1,1', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+# METAL keeps only rs2 (P 0.01) at 0.1; PLINK2 keeps rs2 (LOG10_P 2) and rs3 (P 0.01).
+query TII
+SELECT SAMPLE, "score_sql_lp_plink2_CNT_p0.1", "score_sql_lp_plink2_CNT_p1" FROM sql_score ORDER BY SAMPLE;
+----
+S1	2	3
+S2	2	3
+
+# A header line starting with #CHR or #ID is the header with its '#' removed; other
+# '#' lines before it are comments. Plain and BGZF summaries.
+statement ok
+SET VARIABLE score_q_score_thr = NULL;
+
+foreach summary score_sql_hash_header.tsv score_sql_hash_header_bgzf.tsv.gz score_sql_hash_id.tsv
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/${summary}'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK2', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+query TI
+SELECT SAMPLE, score_sql_hash_id_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	3
+S2	3
+
+# PRS names strip only gz, txt, tsv, vcf and bcf, as native does: study.ssf keeps .ssf.
+statement ok
+SET VARIABLE score_columns = 'SSF';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_study.ssf'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'SSF', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query I
+SELECT count(*) FROM pragma_table_info('sql_score') WHERE name = 'score_sql_study.ssf';
+----
+1
+
+# A tabix index with line_skip = 1 makes read_tabix skip the header line itself; the
+# first marker must stay.
+statement ok
+SET VARIABLE score_columns = 'PLINK';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_indexed.tsv.gz'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query TI
+SELECT SAMPLE, score_sql_indexed_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	3
+S2	3
+
+# Native computes -log10(p) with float32 log10f, whose last bit depends on the platform
+# libm. rs1 (P = 0.00000000095) lies within that rounding of the 9.5e-10 threshold, so the
+# reference rejects it; at 1e-9 the selection is decided and matches native.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_lp_adjacent.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [9.5e-10, 1e-9];
+
+statement error
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+----
+within float32 log10 rounding of a q_score_thr threshold
+
+statement ok
+SET VARIABLE score_q_score_thr = [1e-9];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '1e-9', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+# Column names use the float32-parsed threshold: 0.1234565 is named p0.123457, as in native.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_threshold_name.tsv'];
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1234565];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '0.1234565', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+query I
+SELECT count(*) FROM pragma_table_info('sql_score') WHERE name = 'score_sql_threshold_name_CNT_p0.123457';
+----
+1
+
+# A repeated threshold, or two thresholds that format to the same %.6g suffix, would name
+# the same column twice; native rejects both, and the reference must not merge them.
+foreach thresholds 0.1,0.1 0.1234565,0.1234567
+
+statement ok
+SET VARIABLE score_q_score_thr = string_split('${thresholds}', ',')::DOUBLE[];
+
+statement error
+SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', q_score_thr := '${thresholds}', counts := true);
+----
+duplicate generated output column name
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+duplicate generated output column names
+
+endloop
+
+# The first data row omits P. Native splits each row and excludes rs2 (P=0.5) at 0.1;
+# read_tabix would take five columns from that row and drop P everywhere, so the
+# reference rejects the summary rather than admit rs2.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_ragged.tsv'];
+
+statement ok
+SET VARIABLE score_columns = 'PLINK2';
+
+statement ok
+SET VARIABLE score_q_score_thr = [0.1];
+
+query I
+SELECT "score_sql_ragged_CNT_p0.1" FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK2', q_score_thr := '0.1', counts := true) ORDER BY SAMPLE;
+----
+2
+2
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+summary scan is narrower than its mapped header fields
+
+statement ok
+SET VARIABLE score_columns = NULL;
+
+# One heterozygous marker weighted by OR 1.00076: native logf and SQL's double ln differ in
+# the last float32 bits, so the bound includes the conversion error.
+statement ok
+SET VARIABLE score_q_score_thr = NULL;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_or_rounding.tsv'];
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+# Under ID matching, native pairs a literal '.' summary ID with VCF records whose ID is '.'.
+# read_tabix cannot tell '.' from an empty field (which native skips), so the reference
+# rejects a missing summary ID when the VCF also has records without IDs; against a VCF
+# whose records all have IDs it matches native.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_dot_id.tsv'];
+
+statement ok
+SET VARIABLE score_use_variant_id = true;
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', use_variant_id := true, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_dot_id.vcf';
+
+statement error
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+----
+summary rows and VCF records without IDs under ID matching
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
+statement ok
+SET VARIABLE score_columns = 'PLINK';
+
+statement ok
+SET VARIABLE score_q_score_thr = NULL;
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+foreach sample_selection S1 S2 ^S2
+
+statement ok
+SET VARIABLE score_samples = '${sample_selection}';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', samples := '${sample_selection}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_samples = NULL;
+
+# Coordinates follow hts_parse_region: chr:-N is 1-N, chr:0 and chr: are the whole contig,
+# chr:N- runs to the end, and numbers take fractions, exponents and k/M/G suffixes.
+foreach region 1:100-200 2,1 1:100-100,chrZ:5-9 1:300-300,1:1-400,1:100-100,1:100-100,1:101-199,1:200-200 1:300-300,1:100-100 chrZ:1-1000,chrY 1:-200 1:0.1k-0.2k,1:3e2 1:0 1: 1:250- 1:1.5-2.5e2
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '${region}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '${region}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+endloop
+
+# A contig name with colons: hts_parse_region splits an unbraced item at its last colon.
+statement ok
+SET VARIABLE score_path = 'test/data/score_hla.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_hla_summary.tsv'];
+
+foreach region HLA-A*01:01:100-100 {HLA-A*01:01}:200 HLA-A*01:01 HLA-A*01:01:150-
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '${region}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '${region}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+foreach filters PASS q10
+
+statement ok
+SET VARIABLE score_apply_filters = '${filters}';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', apply_filters := '${filters}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+# FILTER=. records pass only with '.'; PASS selects records whose FILTER is PASS
+# (bcftools +score 1.24 gives the same counts). Lists naming no header filter are
+# outside the reference.
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_filters.vcf';
+
+foreach filters PASS . q10 q10,PASS .,PASS
+
+statement ok
+SET VARIABLE score_apply_filters = '${filters}';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', apply_filters := '${filters}', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+# .,PASS keeps the FILTER=. and PASS records.
+query TI
+SELECT SAMPLE, score_summary_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	2
+S2	2
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_apply_filters = NULL;
+
+# BED is zero-based half-open; plain TSV is one-based inclusive. In a non-BED file a
+# one-field row is a region expression; runs of tabs collapse, as in native. A file with
+# only comments and blank lines leaves the selection inactive.
+foreach fixture score_sql_selection.bed score_sql_selection.tsv score_sql_anchor.bed score_sql_selection_expr.txt score_sql_selection_empty.txt
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind}_file = 'test/data/${fixture}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_spans.vcf';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind}_file := 'test/data/${fixture}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind}_file = NULL;
+
+endloop
+
+endloop
+
+foreach site 100 103 104
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '1:${site}-${site}';
+
+foreach mode 0 1 2
+
+statement ok
+SET VARIABLE score_${kind}_overlap = ${mode};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '1:${site}-${site}', ${kind}_overlap := ${mode}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+endloop
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_hla.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_hla_summary.tsv'];
+
+foreach kind regions targets
+
+statement ok
+SET VARIABLE score_${kind} = '{HLA-A*01:01}:100-100';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', ${kind} := '{HLA-A*01:01}:100-100', counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_${kind} = NULL;
+
+endloop
+
+# First marker per key, full allele-string matching, and REF counted per record.
+statement ok
+SET VARIABLE score_path = 'test/data/score_sql_quirks.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_sql_quirks.tsv'];
+
+foreach mode GT DS
+
+statement ok
+SET VARIABLE score_use = '${mode}';
+
+foreach by_id false true
+
+statement ok
+SET VARIABLE score_use_variant_id = ${by_id};
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := '${mode}', columns := 'PLINK', use_variant_id := ${by_id}, counts := true);
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+endloop
+
+endloop
+
+query TII
+SELECT SAMPLE, score_sql_quirks::INTEGER, score_sql_quirks_CNT FROM sql_score ORDER BY SAMPLE;
+----
+S1	16	5
+S2	9	5
+
+# Comparator controls: reject a changed score, count, and missing error bound.
+statement ok
+UPDATE sql_score SET score_sql_quirks = score_sql_quirks + 1 WHERE SAMPLE = 'S1';
+
+query I
+FROM query(getvariable('score_compare'));
+----
+1
+
+statement ok
+UPDATE sql_score SET score_sql_quirks = score_sql_quirks - 1, score_sql_quirks_CNT = score_sql_quirks_CNT - 1 WHERE SAMPLE = 'S1';
+
+query I
+FROM query(getvariable('score_compare'));
+----
+1
+
+statement ok
+UPDATE sql_score SET score_sql_quirks_CNT = score_sql_quirks_CNT + 1, score_sql_quirks_BOUND = NULL WHERE SAMPLE = 'S1';
+
+query I
+FROM query(getvariable('score_compare'));
+----
+1
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv'];
+
+statement ok
+SET VARIABLE score_counts = false;
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK');
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_regions = '1:1-200';
+
+statement ok
+SET VARIABLE score_targets = '1:300';
+
+statement ok
+CREATE OR REPLACE TABLE native_score AS SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', regions := '1:1-200', targets := '1:300');
+
+statement ok
+CREATE OR REPLACE TABLE sql_score AS FROM query(getvariable('score_sql'));
+
+query I
+FROM query(getvariable('score_compare'));
+----
+0
+
+statement ok
+SET VARIABLE score_regions = NULL;
+
+statement ok
+SET VARIABLE score_targets = NULL;
+
+statement ok
+SET VARIABLE score_regions_file = 'test/data/score_sql_bad_interval.bed';
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+invalid interval in test/data/score_sql_bad_interval.bed at data row 1
+
+statement ok
+SET VARIABLE score_regions_file = NULL;
+
+# Native rejects each of these through hts_parse_region; the reference must reject them too.
+foreach invalid_region 1:bad chrZ:abc chrZ:7-3 {chrZ 1:-5-10 1:100-200x
+
+statement ok
+SET VARIABLE score_regions = '${invalid_region}';
+
+statement error
+SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK', regions := '${invalid_region}', counts := true);
+----
+invalid region/target expression
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+invalid region/target expression
+
+endloop
+
+statement ok
+SET VARIABLE score_regions = NULL;
+
+statement ok
+SET VARIABLE score_use = 'HDS';
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+supported use values are GT and DS
+
+statement ok
+SET VARIABLE score_use = 'GT';
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_as.vcf';
+
+statement error
+SELECT * FROM bcftools_score(getvariable('score_path'), getvariable('score_summaries'), use := 'GT', columns := 'PLINK');
+----
+VCF does not include the GT FORMAT field
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+required FORMAT/GT is absent from header
+
+statement ok
+SET VARIABLE score_path = 'test/data/score_input.vcf';
+
+statement ok
+SET VARIABLE score_use_variant_id = true;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary_no_snp.tsv'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+missing marker name column
+
+statement ok
+SET VARIABLE score_use_variant_id = false;
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_summary.tsv', 'test/data/score_summary.tsv'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+duplicate PRS names
+
+# The header probe reads the summary with read_csv before read_tabix scans
+# it. DuckDB 2.0 decodes the whole gzip stream before the probe's LIMIT 1
+# returns, so it reports the truncation itself; DuckDB 1.5 stops at the first
+# line and leaves the truncation to read_tabix. Either message must name the
+# truncated fixture.
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_truncated.tsv.gz'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+<REGEX>:.*(read_tabix: failed to read 'test/data/score_truncated\.tsv\.gz'|Unexpected end of GZIP stream: test/data/score_truncated\.tsv\.gz).*
+
+statement ok
+SET VARIABLE score_summaries = ['test/data/score_truncated.header.tsv.gz'];
+
+statement error
+FROM query(getvariable('score_sql'));
+----
+<REGEX>:.*(read_tabix: failed to read 'test/data/score_truncated\.header\.tsv\.gz'|Unexpected end of GZIP stream: test/data/score_truncated\.header\.tsv\.gz).*

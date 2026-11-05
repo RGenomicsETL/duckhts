@@ -1,0 +1,4 @@
+# Region expressions, one per line, mixed with a tab-delimited row
+  1:102-150
+chrY		
+1	300	300

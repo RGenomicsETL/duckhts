@@ -1,0 +1,6 @@
+CHR	BP	SNP	A1	BETA	P
+1	100	split	A	1	0.1
+1	100	split	C	100	0.1
+1	200	multi	ATT	2	0.1
+1	300	duplicate	G	4	0.1
+1	400	duplicate	G	8	0.1
