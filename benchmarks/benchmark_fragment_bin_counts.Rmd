@@ -3,6 +3,7 @@ title: "Counting BED fragments by tile and cell barcode in SQL"
 output:
   github_document:
     html_preview: false
+    pandoc_args: ["--wrap=none"]
 ---
 
 <!-- benchmark_fragment_bin_counts.md is generated from benchmark_fragment_bin_counts.Rmd. -->
@@ -450,6 +451,134 @@ Peak RSS of a fresh R process running `tile_cell` on 16M fragments, including R
 and the connection: `r round(rss[["read_bed"]])` MiB from `read_bed`,
 `r round(rss[["parquet"]])` MiB from Parquet.
 
+# From R
+
+If you would rather write dplyr, these three routes run the `one_bin` count on the
+same `con`, so the cgranges index is still there. `end` needs no quotes.
+
+**dbplyr** is the simplest. It passes functions it does not know through to DuckDB.
+
+```{r dbplyr}
+library(dplyr)
+
+use_source("SELECT * FROM read_parquet('fragments_4M.parquet')")
+
+dbplyr_counts <- tbl(con, "fragments") |>
+  semi_join(tbl(con, "cells"), by = c(name = "barcode")) |>
+  filter(!duckhts_cgranges_has_overlap("blacklist_idx", chrom, start, end)) |>
+  mutate(bin = floor((start + end) / 2 / 50000)) |>
+  count(chrom, bin, name)
+```
+
+**duckplyr** with `prudence = "stingy"` stops instead of quietly falling back to R.
+It keeps its operators as macros on its own connection, and that connection cannot
+load the unsigned extension bundled with Rduckhts. So define the four macros this
+pipeline needs on `con`. `dd$` calls a DuckDB function, and `na_matches = "never"`
+is safe because a barcode is never NULL.
+
+```{r duckplyr}
+library(duckplyr)
+
+duckplyr_macros <- c(
+  '"=="(x, y) AS (x == y)',
+  '"!"(x) AS (NOT x)',
+  '"n"() AS CAST(COUNT(*) AS int32)',
+  '"___divide"(x, y) AS CASE WHEN y = 0 THEN CASE WHEN x = 0 THEN CAST(\'NaN\' AS double)
+     WHEN x > 0 THEN CAST(\'+Infinity\' AS double) ELSE CAST(\'-Infinity\' AS double) END
+     ELSE CAST(x AS double) / y END'
+)
+for (macro in duckplyr_macros) {
+  dbExecute(con, paste("CREATE MACRO", macro))
+}
+
+fragments_df <- read_sql_duckdb("SELECT * FROM fragments", con = con, prudence = "stingy")
+cells_df <- read_sql_duckdb("SELECT barcode FROM cells", con = con, prudence = "stingy")
+
+duckplyr_counts <- function() {
+  fragments_df |>
+    semi_join(cells_df, by = c(name = "barcode"), na_matches = "never") |>
+    filter(!dd$duckhts_cgranges_has_overlap("blacklist_idx", chrom, start, end)) |>
+    mutate(bin = dd$floor((start + end) / 2 / 50000)) |>
+    count(chrom, bin, name) |>
+    collect()
+}
+```
+
+All three must match on every row, then all three return the same data frame to R:
+
+```{r r_routes}
+as_counts <- function(counts) {
+  counts <- as.data.table(as.data.frame(counts))
+  setnames(counts, c("chrom", "bin", "barcode", "n"))
+  counts[, `:=`(bin = as.numeric(bin), n = as.numeric(n))]
+  counts
+}
+sql_rows <- as_counts(dbGetQuery(con, sql_of("one_bin")))
+stopifnot(
+  fsetequal(as_counts(collect(dbplyr_counts)), sql_rows),
+  fsetequal(as_counts(duckplyr_counts()), sql_rows)
+)
+
+r_routes <- bench::mark(
+  sql = dbGetQuery(con, sql_of("one_bin")),
+  dbplyr = collect(dbplyr_counts),
+  duckplyr = duckplyr_counts(),
+  check = FALSE,
+  memory = FALSE,
+  filter_gc = FALSE,
+  min_time = 0,
+  min_iterations = 5,
+  max_iterations = 5
+)
+route_seconds <- as.numeric(r_routes$median)
+names(route_seconds) <- as.character(r_routes$expression)
+knitr::kable(data.frame(route = names(route_seconds), median_s = round(route_seconds, 2)), row.names = FALSE)
+```
+
+On 4M fragments, with `r format(nrow(sql_rows), big.mark = ",")` rows returned.
+
+**[Rducks](https://github.com/RGenomicsETL/Rducks)** runs an R function inside the
+query, for a rule that is easier to write in R. R callbacks need DuckDB on one
+thread, so keep the counting in SQL and use this for the custom rule only. This one
+labels fragments by nucleosome count, and the check runs the same function outside
+DuckDB.
+
+```{r rducks}
+Rducks::rducks_enable(con, threads = "single")
+
+nucleosomes <- function(width) as.integer(round(as.numeric(width) / 180))
+
+widths_df <- read_sql_duckdb(
+  "SELECT \"end\" - start AS width FROM fragments",
+  con = con,
+  prudence = "stingy"
+)
+nucleosome_counts <- function() {
+  Rducks::rducks_with_duckplyr(
+    con,
+    widths_df |>
+      mutate(nucleosomes_spanned = nucleosomes(width)) |>
+      count(nucleosomes_spanned) |>
+      collect(),
+    returns = list(nucleosomes = Rducks::INTEGER),
+    mode = "vectorized"
+  )
+}
+
+rducks_seconds <- system.time(in_query <- nucleosome_counts())[["elapsed"]]
+widths <- dbGetQuery(con, "SELECT \"end\" - start AS width FROM fragments")$width
+outside <- as.data.frame(table(nucleosomes(widths)), stringsAsFactors = FALSE)
+in_query <- as.data.frame(in_query)
+in_query <- in_query[order(in_query$nucleosomes_spanned), ]
+stopifnot(
+  identical(as.integer(outside$Var1), as.integer(in_query$nucleosomes_spanned)),
+  identical(as.numeric(outside$Freq), as.numeric(in_query$n))
+)
+in_query
+```
+
+The R function took `r round(rducks_seconds, 2)` s on 4M fragments, one run, on one DuckDB thread.
+
 <details>
 <summary>Run details</summary>
 
@@ -459,6 +588,9 @@ cat(
   "Rduckhts:", as.character(packageVersion("Rduckhts")), "\n",
   "DuckDB:", dbGetQuery(con, "SELECT version() AS v")$v, "\n",
   "bedtools:", system2("bedtools", "--version", stdout = TRUE), "\n",
+  "duckplyr:", as.character(packageVersion("duckplyr")), "\n",
+  "dbplyr:", as.character(packageVersion("dbplyr")), "\n",
+  "Rducks:", as.character(packageVersion("Rducks")), "\n",
   "load average at end:", readLines("/proc/loadavg"), "\n",
   "CPUs available:", length(parallel::mcaffinity()), "\n"
 )

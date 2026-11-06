@@ -5,28 +5,11 @@ Counting BED fragments by tile and cell barcode in SQL
 
 @ttriche happy that the package is useful to you!
 
-On the bin count question, for these things i usually start from
-composing over some sql that does the equivalent work, and if it is not
-satisfactory add a native kernel. Some tests of this approach are in
-[duckseq](https://github.com/RGenomicsETL/duckseq/tree/main). Its [AIE
-demo](https://rgenomicsetl.github.io/duckseq/aie/) just got a [rewrite
-of its preparation
-SQL](https://github.com/RGenomicsETL/duckseq/commit/d53d66df415fb045e3473f11afabf267590df417):
-4M real PBMC records at 4 threads went from 13.9 s to 4.3 s, against 5.3
-s for Gravlax. The two do not store the same thing: the Gravlax archive
-is 20 times smaller, and it still wins on one thread.
+On the bin count question, for these things i usually start from composing over some sql that does the equivalent work, and if it is not satisfactory add a native kernel. Some tests of this approach are in [duckseq](https://github.com/RGenomicsETL/duckseq/tree/main). Its [AIE demo](https://rgenomicsetl.github.io/duckseq/aie/) just got a [rewrite of its preparation SQL](https://github.com/RGenomicsETL/duckseq/commit/d53d66df415fb045e3473f11afabf267590df417): 4M real PBMC records at 4 threads went from 13.9 s to 4.3 s, against 5.3 s for Gravlax. The two do not store the same thing: the Gravlax archive is 20 times smaller, and it still wins on one thread.
 
-Indeed i thought at one point about adding a fragment count mode to
-`bam_bin_counts`, if this is useful i can add this functionality and the
-blacklisting: for the native kernel cgranges should make the
-blacklisting relatively fast.
+Indeed i thought at one point about adding a fragment count mode to `bam_bin_counts`, if this is useful i can add this functionality and the blacklisting: for the native kernel cgranges should make the blacklisting relatively fast.
 
-For now, the SQL below should work. I am guessing the application from
-the file names in
-[\#356](https://github.com/RGenomicsETL/duckhts/issues/356): single-cell
-CUT&Tag style `chrom, start, end, name` fragments, `name` is the cell
-barcode, 50 kb hg38 tiles, and a sparse tile by cell matrix at the end.
-The data is simulated in that shape, it is not a real experiment.
+For now, the SQL below should work. I am guessing the application from the file names in [\#356](https://github.com/RGenomicsETL/duckhts/issues/356): single-cell CUT&Tag style `chrom, start, end, name` fragments, `name` is the cell barcode, 50 kb hg38 tiles, and a sparse tile by cell matrix at the end. The data is simulated in that shape, it is not a real experiment.
 
 <details>
 <summary>
@@ -120,8 +103,7 @@ invisible(dbExecute(con, "SET threads = 4"))
 knitr::opts_chunk$set(connection = "con", max.print = 4)
 ```
 
-`fragments` is a view over the file, so nothing is loaded yet. `end` is
-reserved and needs quotes. All coordinates stay 0-based half-open.
+`fragments` is a view over the file, so nothing is loaded yet. `end` is reserved and needs quotes. All coordinates stay 0-based half-open.
 
 ``` sql
 CREATE TEMP VIEW fragments AS
@@ -181,8 +163,7 @@ SELECT * FROM duckhts_cgranges_from_table_labelled(
 
 # Counts
 
-**One bin per fragment.** Fixed tiles are arithmetic, here on the
-fragment midpoint.
+**One bin per fragment.** Fixed tiles are arithmetic, here on the fragment midpoint.
 
 ``` sql
 SELECT
@@ -200,18 +181,16 @@ GROUP BY ALL
 
 | chrom |  bin | barcode          |   n |
 |:------|-----:|:-----------------|----:|
-| chr1  | 4056 | TTGTAGTGGCGTGGTT |   2 |
-| chr1  | 4056 | CGTCAACCGCACCTTG |   1 |
-| chr1  | 4056 | CCCCCAGCGAGAGGCT |   1 |
-| chr1  | 4063 | TGCATTTAACCGACGC |   1 |
+| chr1  | 4056 | TGGTCGAATGATAACA |   1 |
+| chr1  | 4059 | GAGCTGACTTGATCAA |   1 |
+| chr1  | 4061 | CCGGGTGTAACCTAGC |   1 |
+| chr1  | 4108 | ATGGTGTCAAGCGGCA |   1 |
 
 Displaying records 1 - 4
 
 </div>
 
-**Every overlapped bin.** A fragment that crosses a tile edge counts in
-both tiles. The `unnest` must sit in a CTE because DuckDB cannot group
-on it directly.
+**Every overlapped bin.** A fragment that crosses a tile edge counts in both tiles. The `unnest` must sit in a CTE because DuckDB cannot group on it directly.
 
 ``` sql
 WITH hits AS (
@@ -232,19 +211,16 @@ GROUP BY ALL
 
 | chrom |  bin | barcode          |   n |
 |:------|-----:|:-----------------|----:|
-| chr1  | 2352 | ACGGACTCGACACTAA |   1 |
-| chr1  | 2371 | TATTTAACCAGATCGT |   1 |
-| chr1  | 2371 | ACCACAATGGTGATGG |   1 |
-| chr1  | 2371 | TGTGGTAGGAAGATCG |   1 |
+| chr1  | 3919 | TAGGATTATAGCCATG |   1 |
+| chr1  | 3941 | TGTCGGTTGGTAAATT |   1 |
+| chr1  | 3961 | GATCGAGCCAAGGGAG |   1 |
+| chr1  | 3975 | TAACATCCTGTAAGTA |   1 |
 
 Displaying records 1 - 4
 
 </div>
 
-**Any tile or peak BED, with integer ids.** This is the same count
-through the tile index, so `tiles` can be irregular. Joining `cells`
-replaces the barcode string with an integer before the group by, and the
-ids are the matrix coordinates.
+**Any tile or peak BED, with integer ids.** This is the same count through the tile index, so `tiles` can be irregular. Joining `cells` replaces the barcode string with an integer before the group by, and the ids are the matrix coordinates.
 
 ``` sql
 WITH hits AS (
@@ -267,9 +243,9 @@ GROUP BY ALL
 | tile_id | cell_id |   n |
 |--------:|--------:|----:|
 |   61738 |      81 |   1 |
+|   61756 |      95 |   1 |
 |   24475 |     219 |   1 |
-|    9577 |     281 |   1 |
-|   35862 |     408 |   1 |
+|   15740 |     269 |   1 |
 
 Displaying records 1 - 4
 
@@ -296,9 +272,7 @@ sum(tile_by_cell)
 Check against bedtools and data.table
 </summary>
 
-`bedtools intersect -v` does the blacklisting, `data.table` does the
-barcode filter and the counts. All three queries must match on every
-row.
+`bedtools intersect -v` does the blacklisting, `data.table` does the barcode filter and the counts. All three queries must match on every row.
 
 ``` r
 kept <- fread(
@@ -362,10 +336,7 @@ data.frame(
 
 # Bench
 
-`bench::mark()` runs the chunks above unchanged, each one written to a
-temp table. `reader_only` is the floor: it touches every barcode and
-does no other work. The Parquet file is written once from the same
-fragments.
+`bench::mark()` runs the chunks above unchanged, each one written to a temp table. `reader_only` is the floor: it touches every barcode and does no other work. The Parquet file is written once from the same fragments.
 
 ``` sql
 SELECT sum(strlen(name)) AS barcode_bytes
@@ -382,8 +353,7 @@ FROM fragments
 
 </div>
 
-The blacklist can also be plain SQL, so this is `one_bin` without
-cgranges:
+The blacklist can also be plain SQL, so this is `one_bin` without cgranges:
 
 ``` sql
 SELECT
@@ -405,17 +375,16 @@ GROUP BY ALL
 
 | chrom |  bin | barcode          |   n |
 |:------|-----:|:-----------------|----:|
-| chr1  | 4481 | TTCGCTGGGACTTTCT |   1 |
-| chr2  |  348 | TGCCGTCTCAACGCAT |   1 |
-| chr2  |  413 | TGAAAGGCCGAACATC |   1 |
-| chr2  |  474 | GTTTCTTGCGTAATTC |   1 |
+| chr1  | 4203 | GATCTGACGCACGACT |   1 |
+| chr1  | 4323 | AAAAAAATCGGAGCCA |   1 |
+| chr1  | 4643 | TTCGTCCTATTCGCAC |   1 |
+| chr1  | 4807 | ACAGAGACTCGCCCTC |   1 |
 
 Displaying records 1 - 4
 
 </div>
 
-And this is `one_bin` with the integer cell id, to price the barcode
-string:
+And this is `one_bin` with the integer cell id, to price the barcode string:
 
 ``` sql
 SELECT
@@ -433,10 +402,10 @@ GROUP BY ALL
 
 | chrom |  bin | cell_id |   n |
 |:------|-----:|--------:|----:|
-| chrY  |  172 |      24 |   1 |
-| chr11 | 1941 |      66 |   1 |
-| chrY  | 1110 |     287 |   1 |
-| chr1  | 2455 |     423 |   1 |
+| chr14 | 1347 |      71 |   1 |
+| chr14 |  554 |     153 |   1 |
+| chr1  | 2510 |     196 |   1 |
+| chr18 |  891 |     218 |   1 |
 
 Displaying records 1 - 4
 
@@ -494,49 +463,174 @@ knitr::kable(median_seconds, digits = 2)
 
 |                       | read_bed 4M | parquet 4M | read_bed 8M | parquet 8M | read_bed 16M | parquet 16M |
 |:----------------------|------------:|-----------:|------------:|-----------:|-------------:|------------:|
-| reader_only           |        0.67 |       0.01 |        1.32 |       0.02 |         2.59 |        0.03 |
-| one_bin               |        1.85 |       0.32 |        3.62 |       0.62 |         7.21 |        1.22 |
-| one_bin_cell_id       |        1.64 |       0.28 |        3.24 |       0.54 |         6.45 |        1.05 |
-| one_bin_sql_blacklist |        2.34 |       0.57 |        4.78 |       1.05 |         9.49 |        2.03 |
-| all_bins              |        1.94 |       0.41 |        3.82 |       0.78 |         7.61 |        1.55 |
-| tile_cell             |        2.82 |       0.72 |        5.47 |       1.41 |        10.85 |        2.81 |
+| reader_only           |        0.67 |       0.01 |        1.30 |       0.02 |         2.61 |        0.03 |
+| one_bin               |        1.84 |       0.33 |        3.59 |       0.62 |         7.18 |        1.25 |
+| one_bin_cell_id       |        1.61 |       0.29 |        3.28 |       0.53 |         6.46 |        1.06 |
+| one_bin_sql_blacklist |        2.31 |       0.56 |        4.72 |       1.07 |         9.41 |        2.01 |
+| all_bins              |        1.94 |       0.41 |        3.84 |       0.79 |         7.55 |        1.56 |
+| tile_cell             |        2.77 |       1.08 |        5.48 |       2.10 |        10.74 |        4.17 |
 
-Median seconds of 5 runs, 4 DuckDB threads. Time grows linearly with
-fragments. On 16M fragments:
+Median seconds of 5 runs, 4 DuckDB threads. Time grows linearly with fragments. On 16M fragments:
 
-- `read_bed` runs the whole query on one thread: Parquet is 5.9 times
-  faster for `one_bin`. If you count the same file more than once,
-  convert it once.
-- The barcode string is not the main cost: integer ids save 14% from
-  Parquet, so i would not chase a custom hash before fixing the reader.
-- cgranges blacklisting is 1.7 times faster than the plain SQL anti join
-  from Parquet.
-- Fixed tiles do not need the tile index: `tile_cell` takes 1.8 times as
-  long as `all_bins`, but it accepts any BED and gives matrix ids.
+- `read_bed` runs the whole query on one thread: Parquet is 5.7 times faster for `one_bin`. If you count the same file more than once, convert it once.
+- The barcode string is not the main cost: integer ids save 15% from Parquet, so i would not chase a custom hash before fixing the reader.
+- cgranges blacklisting is 1.6 times faster than the plain SQL anti join from Parquet.
+- Fixed tiles do not need the tile index: `tile_cell` takes 2.7 times as long as `all_bins`, but it accepts any BED and gives matrix ids.
 
 | fragments | gz_MiB | parquet_MiB | convert_once_s |
 |:----------|-------:|------------:|---------------:|
-| 4M        |   51.4 |        24.9 |           1.42 |
+| 4M        |   51.4 |        24.9 |           1.43 |
 | 8M        |  100.7 |        48.1 |           2.79 |
-| 16M       |  197.1 |        92.4 |           5.48 |
+| 16M       |  197.1 |        92.4 |           5.43 |
 
-Peak RSS of a fresh R process running `tile_cell` on 16M fragments,
-including R and the connection: 1931 MiB from `read_bed`, 587 MiB from
-Parquet.
+Peak RSS of a fresh R process running `tile_cell` on 16M fragments, including R and the connection: 1948 MiB from `read_bed`, 594 MiB from Parquet.
+
+# From R
+
+If you would rather write dplyr, these three routes run the `one_bin` count on the same `con`, so the cgranges index is still there. `end` needs no quotes.
+
+**dbplyr** is the simplest. It passes functions it does not know through to DuckDB.
+
+``` r
+library(dplyr)
+
+use_source("SELECT * FROM read_parquet('fragments_4M.parquet')")
+#> [1] 0
+
+dbplyr_counts <- tbl(con, "fragments") |>
+  semi_join(tbl(con, "cells"), by = c(name = "barcode")) |>
+  filter(!duckhts_cgranges_has_overlap("blacklist_idx", chrom, start, end)) |>
+  mutate(bin = floor((start + end) / 2 / 50000)) |>
+  count(chrom, bin, name)
+```
+
+**duckplyr** with `prudence = "stingy"` stops instead of quietly falling back to R. It keeps its operators as macros on its own connection, and that connection cannot load the unsigned extension bundled with Rduckhts. So define the four macros this pipeline needs on `con`. `dd$` calls a DuckDB function, and `na_matches = "never"` is safe because a barcode is never NULL.
+
+``` r
+library(duckplyr)
+
+duckplyr_macros <- c(
+  '"=="(x, y) AS (x == y)',
+  '"!"(x) AS (NOT x)',
+  '"n"() AS CAST(COUNT(*) AS int32)',
+  '"___divide"(x, y) AS CASE WHEN y = 0 THEN CASE WHEN x = 0 THEN CAST(\'NaN\' AS double)
+     WHEN x > 0 THEN CAST(\'+Infinity\' AS double) ELSE CAST(\'-Infinity\' AS double) END
+     ELSE CAST(x AS double) / y END'
+)
+for (macro in duckplyr_macros) {
+  dbExecute(con, paste("CREATE MACRO", macro))
+}
+
+fragments_df <- read_sql_duckdb("SELECT * FROM fragments", con = con, prudence = "stingy")
+cells_df <- read_sql_duckdb("SELECT barcode FROM cells", con = con, prudence = "stingy")
+
+duckplyr_counts <- function() {
+  fragments_df |>
+    semi_join(cells_df, by = c(name = "barcode"), na_matches = "never") |>
+    filter(!dd$duckhts_cgranges_has_overlap("blacklist_idx", chrom, start, end)) |>
+    mutate(bin = dd$floor((start + end) / 2 / 50000)) |>
+    count(chrom, bin, name) |>
+    collect()
+}
+```
+
+All three must match on every row, then all three return the same data frame to R:
+
+``` r
+as_counts <- function(counts) {
+  counts <- as.data.table(as.data.frame(counts))
+  setnames(counts, c("chrom", "bin", "barcode", "n"))
+  counts[, `:=`(bin = as.numeric(bin), n = as.numeric(n))]
+  counts
+}
+sql_rows <- as_counts(dbGetQuery(con, sql_of("one_bin")))
+stopifnot(
+  fsetequal(as_counts(collect(dbplyr_counts)), sql_rows),
+  fsetequal(as_counts(duckplyr_counts()), sql_rows)
+)
+
+r_routes <- bench::mark(
+  sql = dbGetQuery(con, sql_of("one_bin")),
+  dbplyr = collect(dbplyr_counts),
+  duckplyr = duckplyr_counts(),
+  check = FALSE,
+  memory = FALSE,
+  filter_gc = FALSE,
+  min_time = 0,
+  min_iterations = 5,
+  max_iterations = 5
+)
+route_seconds <- as.numeric(r_routes$median)
+names(route_seconds) <- as.character(r_routes$expression)
+knitr::kable(data.frame(route = names(route_seconds), median_s = round(route_seconds, 2)), row.names = FALSE)
+```
+
+| route    | median_s |
+|:---------|---------:|
+| sql      |     0.53 |
+| dbplyr   |     0.57 |
+| duckplyr |     0.62 |
+
+On 4M fragments, with 3,506,782 rows returned.
+
+**[Rducks](https://github.com/RGenomicsETL/Rducks)** runs an R function inside the query, for a rule that is easier to write in R. R callbacks need DuckDB on one thread, so keep the counting in SQL and use this for the custom rule only. This one labels fragments by nucleosome count, and the check runs the same function outside DuckDB.
+
+``` r
+Rducks::rducks_enable(con, threads = "single")
+
+nucleosomes <- function(width) as.integer(round(as.numeric(width) / 180))
+
+widths_df <- read_sql_duckdb(
+  "SELECT \"end\" - start AS width FROM fragments",
+  con = con,
+  prudence = "stingy"
+)
+nucleosome_counts <- function() {
+  Rducks::rducks_with_duckplyr(
+    con,
+    widths_df |>
+      mutate(nucleosomes_spanned = nucleosomes(width)) |>
+      count(nucleosomes_spanned) |>
+      collect(),
+    returns = list(nucleosomes = Rducks::INTEGER),
+    mode = "vectorized"
+  )
+}
+
+rducks_seconds <- system.time(in_query <- nucleosome_counts())[["elapsed"]]
+widths <- dbGetQuery(con, "SELECT \"end\" - start AS width FROM fragments")$width
+outside <- as.data.frame(table(nucleosomes(widths)), stringsAsFactors = FALSE)
+in_query <- as.data.frame(in_query)
+in_query <- in_query[order(in_query$nucleosomes_spanned), ]
+stopifnot(
+  identical(as.integer(outside$Var1), as.integer(in_query$nucleosomes_spanned)),
+  identical(as.numeric(outside$Freq), as.numeric(in_query$n))
+)
+in_query
+#>   nucleosomes_spanned       n
+#> 1                   0   36451
+#> 2                   1 2744651
+#> 3                   2 1205335
+#> 4                   3   13563
+```
+
+The R function took 2.08 s on 4M fragments, one run, on one DuckDB thread.
 
 <details>
 <summary>
 Run details
 </summary>
 
-    #> source revision: d18f37b11620dcace261c49c7b4d8241caf525fd 
+    #> source revision: 54656aaaaf82f275a67ef8e6deaf202a82a77923 
     #>  Rduckhts: 2.0.2.9000.0.1.1 
     #>  DuckDB: v1.5.5 
     #>  bedtools: bedtools v2.31.1 
-    #>  load average at end: 3.20 2.32 1.46 4/2264 3388263 
+    #>  duckplyr: 1.2.1 
+    #>  dbplyr: 2.5.2 
+    #>  Rducks: 0.1.1.9000 
+    #>  load average at end: 3.00 2.12 1.45 2/2109 3405604 
     #>  CPUs available: 8
 
-Cells stay at 5,000 and only the fragment count grows. Render with
-`taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
+Cells stay at 5,000 and only the fragment count grows. Render with `taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
 
 </details>
