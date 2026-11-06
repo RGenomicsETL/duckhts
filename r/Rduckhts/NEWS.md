@@ -3,8 +3,6 @@
 - The optional GitHub mirror of R-universe package binaries no longer refreshes
   nightly. Use CRAN or R-universe directly for normal installation; previously
   mirrored bundles remain available, with manual refreshes only.
-- Manual binary-mirror refreshes no longer delete existing package bundles before
-  upload. The latest-version pointer is updated only after all bundles are verified.
 - Region queries on tabix-indexed VCFs no longer scan every sample column to locate each
   record (backport of htslib d24ed09).
 - The bundled extension reads VCF/BCF sites without parsing genotypes when no FORMAT or
