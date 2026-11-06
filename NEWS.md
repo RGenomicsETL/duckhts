@@ -5,9 +5,9 @@
 - `benchmarks/benchmark_fragment_bin_counts.md` counts BED fragments by tile and cell
   barcode in SQL, with barcode selection, blacklisting and a sparse tile by cell matrix, on
   simulated single-cell fragments. Three queries match `bedtools intersect` plus `data.table`
-  on every row. At 4 threads on 16M fragments, `one_bin` takes 7.18 s from `read_bed` and
-  1.25 s from Parquet, because `read_bed` runs the query on one thread; integer cell ids
-  save 15% from Parquet. Only the fragment count is scaled. The same count through dbplyr
+  on every row. At 4 threads on 16M fragments, `one_bin` takes 7.20 s from `read_bed` and
+  1.22 s from Parquet, because `read_bed` runs the query on one thread; integer cell ids
+  save 14% from Parquet. Only the fragment count is scaled. The same count through dbplyr
   and duckplyr matches the SQL on every row, and Rducks runs an R rule inside the query on
   one DuckDB thread. duckplyr needs four of its macros defined on the Rduckhts connection,
   because its own connection cannot load the unsigned bundled extension.

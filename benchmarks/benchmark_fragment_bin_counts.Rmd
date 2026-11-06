@@ -19,26 +19,11 @@ sql_of <- function(label) paste(knitr::knit_code$get(label), collapse = "\n")
 
 @ttriche happy that the package is useful to you!
 
-On the bin count question, for these things i usually start from composing over
-some sql that does the equivalent work, and if it is not satisfactory add a native
-kernel. Some tests of this approach are in
-[duckseq](https://github.com/RGenomicsETL/duckseq/tree/main). Its
-[AIE demo](https://rgenomicsetl.github.io/duckseq/aie/) just got a
-[rewrite of its preparation SQL](https://github.com/RGenomicsETL/duckseq/commit/d53d66df415fb045e3473f11afabf267590df417):
-4M real PBMC records at 4 threads went from 13.9 s to 4.3 s, against 5.3 s for
-Gravlax. The two do not store the same thing: the Gravlax archive is 20 times
-smaller, and it still wins on one thread.
+On the bin count question, for these things i usually start by composing some sql that does the equivalent work, and if it is not satisfactory add a native kernel. Some tests of this approach are in [duckseq](https://github.com/RGenomicsETL/duckseq/tree/main).
 
-Indeed i thought at one point about adding a fragment count mode to
-`bam_bin_counts`, if this is useful i can add this functionality and the
-blacklisting: for the native kernel cgranges should make the blacklisting
-relatively fast.
+Indeed i thought of adding a fragment count mode to `bam_bin_counts`. If this is useful i can add it with the blacklisting, cgranges should make that relatively fast.
 
-For now, the SQL below should work. I am guessing the application from the file
-names in [#356](https://github.com/RGenomicsETL/duckhts/issues/356): single-cell
-CUT&Tag style `chrom, start, end, name` fragments, `name` is the cell barcode,
-50 kb hg38 tiles, and a sparse tile by cell matrix at the end. The data is
-simulated in that shape, it is not a real experiment.
+For now this should work. i am guessing your setup from the file names in [#356](https://github.com/RGenomicsETL/duckhts/issues/356): `chrom, start, end, name` fragments with the barcode in `name`, 50 kb tiles, and a sparse tile by cell matrix at the end. The data below is simulated.
 
 <details>
 <summary>Simulated input</summary>
@@ -130,8 +115,7 @@ invisible(dbExecute(con, "SET threads = 4"))
 knitr::opts_chunk$set(connection = "con", max.print = 4)
 ```
 
-`fragments` is a view over the file, so nothing is loaded yet. `end` is reserved
-and needs quotes. All coordinates stay 0-based half-open.
+`end` needs quotes in SQL. Coordinates stay 0-based half-open.
 
 ```{sql fragments_view}
 CREATE TEMP VIEW fragments AS
@@ -171,8 +155,7 @@ SELECT * FROM duckhts_cgranges_from_table_labelled(
 
 # Counts
 
-**One bin per fragment.** Fixed tiles are arithmetic, here on the fragment
-midpoint.
+**One bin per fragment**, by midpoint:
 
 ```{sql one_bin}
 SELECT
@@ -186,8 +169,7 @@ WHERE name IN (SELECT barcode FROM cells)
 GROUP BY ALL
 ```
 
-**Every overlapped bin.** A fragment that crosses a tile edge counts in both
-tiles. The `unnest` must sit in a CTE because DuckDB cannot group on it directly.
+**Every overlapped bin**, so a fragment across a tile edge counts in both:
 
 ```{sql all_bins}
 WITH hits AS (
@@ -204,10 +186,7 @@ FROM hits
 GROUP BY ALL
 ```
 
-**Any tile or peak BED, with integer ids.** This is the same count through the
-tile index, so `tiles` can be irregular. Joining `cells` replaces the barcode
-string with an integer before the group by, and the ids are the matrix
-coordinates.
+**Any tile or peak BED**, with integer ids for the matrix:
 
 ```{sql tile_cell}
 WITH hits AS (
@@ -240,9 +219,6 @@ sum(tile_by_cell)
 
 <details>
 <summary>Check against bedtools and data.table</summary>
-
-`bedtools intersect -v` does the blacklisting, `data.table` does the barcode
-filter and the counts. All three queries must match on every row.
 
 ```{r oracle}
 kept <- fread(
@@ -302,16 +278,15 @@ data.frame(
 
 # Bench
 
-`bench::mark()` runs the chunks above unchanged, each one written to a temp table.
-`reader_only` is the floor: it touches every barcode and does no other work. The
-Parquet file is written once from the same fragments.
+`bench::mark()` runs the queries above from `read_bed` and from a Parquet copy.
+
+<details>
+<summary>Extra queries in the table</summary>
 
 ```{sql reader_only}
 SELECT sum(strlen(name)) AS barcode_bytes
 FROM fragments
 ```
-
-The blacklist can also be plain SQL, so this is `one_bin` without cgranges:
 
 ```{sql one_bin_sql_blacklist}
 SELECT
@@ -329,8 +304,6 @@ WHERE f.name IN (SELECT barcode FROM cells)
 GROUP BY ALL
 ```
 
-And this is `one_bin` with the integer cell id, to price the barcode string:
-
 ```{sql one_bin_cell_id}
 SELECT
   f.chrom,
@@ -342,6 +315,8 @@ JOIN cells AS c ON f.name = c.barcode
 WHERE NOT duckhts_cgranges_has_overlap('blacklist_idx', f.chrom, f.start, f."end")
 GROUP BY ALL
 ```
+
+</details>
 
 ```{r bench}
 use_source <- function(relation) {
@@ -369,7 +344,6 @@ time_queries <- function() {
 
 timings <- list()
 convert_seconds <- numeric()
-parquet_mib <- numeric()
 for (size in names(sizes)) {
   parquet_file <- sprintf("fragments_%s.parquet", size)
   convert_seconds[size] <- system.time(dbExecute(con, sprintf(
@@ -377,7 +351,6 @@ for (size in names(sizes)) {
      TO '%s' (FORMAT parquet, COMPRESSION zstd)",
     fragment_files[[size]], parquet_file
   )))[["elapsed"]]
-  parquet_mib[size] <- file.size(parquet_file) / 2^20
 
   use_source(sprintf(
     "SELECT chrom, start, \"end\", name FROM read_bed('%s')", fragment_files[[size]]
@@ -393,34 +366,11 @@ rownames(median_seconds) <- as.character(timings[[1]]$expression)
 knitr::kable(median_seconds, digits = 2)
 ```
 
-Median seconds of 5 runs, 4 DuckDB threads. Time grows linearly with fragments.
-On 16M fragments:
+Median seconds of 5 runs, 4 threads. Time grows linearly with fragments.
 
-- `read_bed` runs the whole query on one thread: Parquet is
-  `r round(median_seconds["one_bin", "read_bed 16M"] / median_seconds["one_bin", "parquet 16M"], 1)`
-  times faster for `one_bin`. If you count the same file more than once, convert
-  it once.
-- The barcode string is not the main cost: integer ids save
-  `r round(100 * (1 - median_seconds["one_bin_cell_id", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"]))`%
-  from Parquet, so i would not chase a custom hash before fixing the reader.
-- cgranges blacklisting is
-  `r round(median_seconds["one_bin_sql_blacklist", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"], 1)`
-  times faster than the plain SQL anti join from Parquet.
-- Fixed tiles do not need the tile index: `tile_cell` takes
-  `r round(median_seconds["tile_cell", "parquet 16M"] / median_seconds["all_bins", "parquet 16M"], 1)`
-  times as long as `all_bins`, but it accepts any BED and gives matrix ids.
-
-```{r conversion, echo = FALSE}
-knitr::kable(
-  data.frame(
-    fragments = names(sizes),
-    gz_MiB = round(file.size(fragment_files) / 2^20, 1),
-    parquet_MiB = round(parquet_mib, 1),
-    convert_once_s = round(convert_seconds, 2),
-    row.names = NULL
-  )
-)
-```
+- `read_bed` runs the whole query on one thread. Parquet is `r round(median_seconds["one_bin", "read_bed 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster, so if you count a file more than once, convert it first (`r round(convert_seconds[["16M"]], 1)` s for 16M).
+- Barcode strings cost little: integer ids save `r round(100 * (1 - median_seconds["one_bin_cell_id", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"]))`%.
+- cgranges blacklisting is `r round(median_seconds["one_bin_sql_blacklist", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster than a SQL anti join.
 
 ```{r peak_rss, echo = FALSE}
 peak_rss_mib <- function(relation) {
@@ -447,16 +397,11 @@ rss <- c(
 )
 ```
 
-Peak RSS of a fresh R process running `tile_cell` on 16M fragments, including R
-and the connection: `r round(rss[["read_bed"]])` MiB from `read_bed`,
-`r round(rss[["parquet"]])` MiB from Parquet.
-
 # From R
 
-If you would rather write dplyr, these three routes run the `one_bin` count on the
-same `con`, so the cgranges index is still there. `end` needs no quotes.
+The same `one_bin` count on the same connection, with no quoting of `end`.
 
-**dbplyr** is the simplest. It passes functions it does not know through to DuckDB.
+dbplyr:
 
 ```{r dbplyr}
 library(dplyr)
@@ -470,11 +415,7 @@ dbplyr_counts <- tbl(con, "fragments") |>
   count(chrom, bin, name)
 ```
 
-**duckplyr** with `prudence = "stingy"` stops instead of quietly falling back to R.
-It keeps its operators as macros on its own connection, and that connection cannot
-load the unsigned extension bundled with Rduckhts. So define the four macros this
-pipeline needs on `con`. `dd$` calls a DuckDB function, and `na_matches = "never"`
-is safe because a barcode is never NULL.
+duckplyr, with `prudence = "stingy"` so nothing falls back to R. It needs four of its macros on this connection:
 
 ```{r duckplyr}
 library(duckplyr)
@@ -503,8 +444,6 @@ duckplyr_counts <- function() {
     collect()
 }
 ```
-
-All three must match on every row, then all three return the same data frame to R:
 
 ```{r r_routes}
 as_counts <- function(counts) {
@@ -535,13 +474,9 @@ names(route_seconds) <- as.character(r_routes$expression)
 knitr::kable(data.frame(route = names(route_seconds), median_s = round(route_seconds, 2)), row.names = FALSE)
 ```
 
-On 4M fragments, with `r format(nrow(sql_rows), big.mark = ",")` rows returned.
+Median seconds on 4M fragments. All three return the same rows.
 
-**[Rducks](https://github.com/RGenomicsETL/Rducks)** runs an R function inside the
-query, for a rule that is easier to write in R. R callbacks need DuckDB on one
-thread, so keep the counting in SQL and use this for the custom rule only. This one
-labels fragments by nucleosome count, and the check runs the same function outside
-DuckDB.
+[Rducks](https://github.com/RGenomicsETL/Rducks) runs an R function inside the query, on one DuckDB thread, so keep it for rules that are awkward in SQL:
 
 ```{r rducks}
 Rducks::rducks_enable(con, threads = "single")
@@ -577,7 +512,7 @@ stopifnot(
 in_query
 ```
 
-The R function took `r round(rducks_seconds, 2)` s on 4M fragments, one run, on one DuckDB thread.
+That took `r round(rducks_seconds, 1)` s on 4M fragments.
 
 <details>
 <summary>Run details</summary>
@@ -596,7 +531,7 @@ cat(
 )
 ```
 
-Cells stay at 5,000 and only the fragment count grows. Render with
+Peak RSS of a fresh R process running `tile_cell` on 16M fragments: `r round(rss[["read_bed"]])` MiB from `read_bed`, `r round(rss[["parquet"]])` MiB from Parquet. Cells stay at 5,000 and only the fragment count grows. Render with
 `taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
 
 </details>
