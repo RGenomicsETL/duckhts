@@ -4,13 +4,14 @@
 
 - `benchmarks/benchmark_fragment_bin_counts.md` counts BED fragments by tile and cell
   barcode in SQL, with barcode selection, blacklisting and a sparse tile by cell matrix, on
-  simulated single-cell fragments. Three queries match `bedtools intersect` plus `data.table`
-  on every row. At 4 threads on 16M fragments, `one_bin` takes 7.20 s from `read_bed` and
-  1.22 s from Parquet, because `read_bed` runs the query on one thread; integer cell ids
-  save 14% from Parquet. Only the fragment count is scaled. The same count through dbplyr
-  and duckplyr matches the SQL on every row, and Rducks runs an R rule inside the query on
-  one DuckDB thread. duckplyr needs four of its macros defined on the Rduckhts connection,
-  because its own connection cannot load the unsigned bundled extension.
+  simulated single-cell fragments. Its queries match `bedtools intersect` plus `data.table`
+  on every row. At 4 threads on 16M fragments, `one_bin` takes 5.08 s from an indexed
+  `read_bed` file and 1.20 s from Parquet, because `read_bed` decompresses and parses text
+  on one thread. Without a tabix index `read_bed` gives the planner no row estimate, and
+  `tile_cell` peaks at 1,933 MiB against 677 MiB. Only the fragment count is scaled. The
+  same count through dbplyr and duckplyr matches the SQL on every row, and Rducks runs an
+  R rule inside the query. duckplyr needs four of its macros defined on the Rduckhts
+  connection, because its own connection cannot load the unsigned bundled extension.
 
 - `test/sql/score_reference.sql` computes `bcftools_score`'s GT and DS scores as one SQL
   query over `read_geno`, `read_bcf_samples`, `read_hts_header`, `read_tabix` and, for the

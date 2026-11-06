@@ -85,8 +85,9 @@ simulate_fragments <- function(n, path) {
 sizes <- c("4M" = 4e6, "8M" = 8e6, "16M" = 16e6)
 fragment_files <- sprintf("fragments_%s.bed.gz", names(sizes))
 names(fragment_files) <- names(sizes)
+plain_files <- sub("\\.gz$", "", fragment_files)
 for (size in names(sizes)) {
-  simulate_fragments(sizes[[size]], fragment_files[[size]])
+  simulate_fragments(sizes[[size]], plain_files[[size]])
 }
 writeLines(cell_barcodes, "cells.txt")
 
@@ -113,6 +114,21 @@ library(DBI)
 con <- rduckhts_connect()
 invisible(dbExecute(con, "SET threads = 4"))
 knitr::opts_chunk$set(connection = "con", max.print = 4)
+```
+
+Index the fragments once, so DuckDB knows how many rows to plan for:
+
+```{r index_fragments}
+for (size in names(sizes)) {
+  dbGetQuery(con, sprintf(
+    "SELECT * FROM bgzip('%s', output_path := '%s')",
+    plain_files[[size]], fragment_files[[size]]
+  ))
+  dbGetQuery(con, sprintf(
+    "SELECT * FROM tabix_index('%s', preset := 'bed')",
+    fragment_files[[size]]
+  ))
+}
 ```
 
 `end` needs quotes in SQL. Coordinates stay 0-based half-open.
@@ -186,7 +202,7 @@ FROM hits
 GROUP BY ALL
 ```
 
-**Any tile or peak BED**, with integer ids for the matrix:
+**Through a tile index**, with integer ids for the matrix. The index also takes irregular tiles or peaks, though the check below only covers fixed tiles:
 
 ```{sql tile_cell}
 WITH hits AS (
@@ -256,8 +272,16 @@ tile_cell <- tile_key[tile_cell, on = "tile_id"]
 tile_cell <- cell_key[tile_cell, on = "cell_id"]
 tile_cell <- tile_cell[, .(chrom, bin = as.numeric(start %/% tile_width), barcode, n)]
 
+one_bin_ids <- observed("one_bin_cell_id")
+one_bin_ids <- cell_key[one_bin_ids, on = "cell_id"]
+one_bin_ids <- one_bin_ids[, .(chrom, bin = as.numeric(bin), barcode, n)]
+one_bin_anti_join <- observed("one_bin_sql_blacklist")
+one_bin_anti_join[, bin := as.numeric(bin)]
+
 stopifnot(
   fsetequal(one_bin, expected_one_bin),
+  fsetequal(one_bin_ids, expected_one_bin),
+  fsetequal(one_bin_anti_join, expected_one_bin),
   fsetequal(all_bins, expected_all_bins),
   fsetequal(tile_cell, expected_all_bins),
   !fsetequal(expected_one_bin, expected_all_bins),
@@ -366,12 +390,6 @@ rownames(median_seconds) <- as.character(timings[[1]]$expression)
 knitr::kable(median_seconds, digits = 2)
 ```
 
-Median seconds of 5 runs, 4 threads. Time grows linearly with fragments.
-
-- `read_bed` runs the whole query on one thread. Parquet is `r round(median_seconds["one_bin", "read_bed 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster, so if you count a file more than once, convert it first (`r round(convert_seconds[["16M"]], 1)` s for 16M).
-- Barcode strings cost little: integer ids save `r round(100 * (1 - median_seconds["one_bin_cell_id", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"]))`%.
-- cgranges blacklisting is `r round(median_seconds["one_bin_sql_blacklist", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster than a SQL anti join.
-
 ```{r peak_rss, echo = FALSE}
 peak_rss_mib <- function(relation) {
   statements <- c(
@@ -391,11 +409,31 @@ peak_rss_mib <- function(relation) {
   ), script)
   as.numeric(system2("Rscript", script, stdout = TRUE, stderr = FALSE)) / 1024
 }
-rss <- c(
-  read_bed = peak_rss_mib("SELECT chrom, start, \"end\", name FROM read_bed('fragments_16M.bed.gz')"),
-  parquet = peak_rss_mib("SELECT * FROM read_parquet('fragments_16M.parquet')")
-)
+
+# A copy with no .tbi beside it shows what a missing row estimate costs.
+rss_ceiling_mib <- 4096
+rss <- do.call(rbind, lapply(names(sizes), function(size) {
+  unindexed <- sprintf("unindexed_%s.bed.gz", size)
+  file.copy(fragment_files[[size]], unindexed)
+  read_bed_sql <- "SELECT chrom, start, \"end\", name FROM read_bed('%s')"
+  row <- data.frame(
+    fragments = size,
+    read_bed_indexed = peak_rss_mib(sprintf(read_bed_sql, fragment_files[[size]])),
+    read_bed_unindexed = peak_rss_mib(sprintf(read_bed_sql, unindexed)),
+    parquet = peak_rss_mib(sprintf("SELECT * FROM read_parquet('fragments_%s.parquet')", size))
+  )
+  unlink(unindexed)
+  row
+}))
+stopifnot(all(rss[, -1] <= rss_ceiling_mib))
 ```
+
+Median seconds of 5 runs, 4 threads. On 16M fragments:
+
+- `read_bed` decompresses and parses text on one thread, so Parquet is `r round(median_seconds["one_bin", "read_bed 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster for `one_bin`. If you count a file more than once, convert it first (`r round(convert_seconds[["16M"]], 1)` s).
+- Keep the tabix index. Without it DuckDB has no row estimate and can build its join on the fragments: `tile_cell` peaks at `r round(rss$read_bed_unindexed[rss$fragments == "16M"])` MiB, against `r round(rss$read_bed_indexed[rss$fragments == "16M"])` MiB with the index.
+- The barcode string in the group key costs little: integer ids there save `r round(100 * (1 - median_seconds["one_bin_cell_id", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"]))`% from Parquet.
+- From Parquet, cgranges blacklisting is `r round(median_seconds["one_bin_sql_blacklist", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster than a SQL anti join.
 
 # From R
 
@@ -454,6 +492,7 @@ as_counts <- function(counts) {
 }
 sql_rows <- as_counts(dbGetQuery(con, sql_of("one_bin")))
 stopifnot(
+  fsetequal(sql_rows, expected_one_bin),
   fsetequal(as_counts(collect(dbplyr_counts)), sql_rows),
   fsetequal(as_counts(duckplyr_counts()), sql_rows)
 )
@@ -512,7 +551,7 @@ stopifnot(
 in_query
 ```
 
-That took `r round(rducks_seconds, 1)` s on 4M fragments.
+That took `r round(rducks_seconds, 1)` s on 4M fragments in one run.
 
 <details>
 <summary>Run details</summary>
@@ -531,7 +570,13 @@ cat(
 )
 ```
 
-Peak RSS of a fresh R process running `tile_cell` on 16M fragments: `r round(rss[["read_bed"]])` MiB from `read_bed`, `r round(rss[["parquet"]])` MiB from Parquet. Cells stay at 5,000 and only the fragment count grows. Render with
+Peak RSS in MiB of a fresh R process running `tile_cell`, one run each, with a 4 GiB ceiling set before this render:
+
+```{r rss_table, echo = FALSE}
+knitr::kable(rss, digits = 0, row.names = FALSE)
+```
+
+Cells stay at 5,000 and only the fragment count grows. No 1-thread series was run, so these times carry no scaling verdict. Render with
 `taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
 
 </details>

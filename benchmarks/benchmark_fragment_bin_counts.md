@@ -73,8 +73,9 @@ simulate_fragments <- function(n, path) {
 sizes <- c("4M" = 4e6, "8M" = 8e6, "16M" = 16e6)
 fragment_files <- sprintf("fragments_%s.bed.gz", names(sizes))
 names(fragment_files) <- names(sizes)
+plain_files <- sub("\\.gz$", "", fragment_files)
 for (size in names(sizes)) {
-  simulate_fragments(sizes[[size]], fragment_files[[size]])
+  simulate_fragments(sizes[[size]], plain_files[[size]])
 }
 writeLines(cell_barcodes, "cells.txt")
 
@@ -101,6 +102,21 @@ library(DBI)
 con <- rduckhts_connect()
 invisible(dbExecute(con, "SET threads = 4"))
 knitr::opts_chunk$set(connection = "con", max.print = 4)
+```
+
+Index the fragments once, so DuckDB knows how many rows to plan for:
+
+``` r
+for (size in names(sizes)) {
+  dbGetQuery(con, sprintf(
+    "SELECT * FROM bgzip('%s', output_path := '%s')",
+    plain_files[[size]], fragment_files[[size]]
+  ))
+  dbGetQuery(con, sprintf(
+    "SELECT * FROM tabix_index('%s', preset := 'bed')",
+    fragment_files[[size]]
+  ))
+}
 ```
 
 `end` needs quotes in SQL. Coordinates stay 0-based half-open.
@@ -179,12 +195,12 @@ GROUP BY ALL
 
 <div class="knitsql-table">
 
-| chrom |  bin | barcode          |   n |
-|:------|-----:|:-----------------|----:|
-| chr1  | 3919 | AGACTCGATTTGCATA |   1 |
-| chr1  | 3941 | TAGGGTGATGGGGTGC |   1 |
-| chr1  | 3961 | GCCTATGTCGACCTAA |   1 |
-| chr1  | 3973 | GGGAGTACAAAGTAGT |   1 |
+| chrom | bin | barcode          |   n |
+|:------|----:|:-----------------|----:|
+| chr1  |   0 | CGCGGACTGCAACGTA |   1 |
+| chr1  |   2 | GTTCCAATATAACCGC |   1 |
+| chr1  |   6 | CAACCGACCTCTCCCC |   1 |
+| chr1  |   9 | CACCCGTGAGATGCTA |   1 |
 
 Displaying records 1 - 4
 
@@ -209,18 +225,18 @@ GROUP BY ALL
 
 <div class="knitsql-table">
 
-| chrom |  bin | barcode          |   n |
-|:------|-----:|:-----------------|----:|
-| chr1  | 3919 | AGACTCGATTTGCATA |   1 |
-| chr1  | 3941 | TAGGGTGATGGGGTGC |   1 |
-| chr1  | 3961 | GCCTATGTCGACCTAA |   1 |
-| chr1  | 3973 | GGGAGTACAAAGTAGT |   1 |
+| chrom | bin | barcode          |   n |
+|:------|----:|:-----------------|----:|
+| chr1  |   3 | GTGGGCGCGGAATGTC |   1 |
+| chr1  |   4 | TTAATAATAGCCGCGC |   1 |
+| chr1  |  11 | TGTCCTTCTAGGAAGA |   1 |
+| chr1  |  21 | CGGATTGTAACGGTAC |   1 |
 
 Displaying records 1 - 4
 
 </div>
 
-**Any tile or peak BED**, with integer ids for the matrix:
+**Through a tile index**, with integer ids for the matrix. The index also takes irregular tiles or peaks, though the check below only covers fixed tiles:
 
 ``` sql
 WITH hits AS (
@@ -242,10 +258,10 @@ GROUP BY ALL
 
 | tile_id | cell_id |   n |
 |--------:|--------:|----:|
-|   61738 |      81 |   1 |
-|   24475 |     219 |   1 |
-|   15740 |     269 |   1 |
-|    9577 |     281 |   1 |
+|       2 |     318 |   1 |
+|      11 |    4933 |   1 |
+|      27 |     514 |   1 |
+|      27 |    3800 |   1 |
 
 Displaying records 1 - 4
 
@@ -308,8 +324,16 @@ tile_cell <- tile_key[tile_cell, on = "tile_id"]
 tile_cell <- cell_key[tile_cell, on = "cell_id"]
 tile_cell <- tile_cell[, .(chrom, bin = as.numeric(start %/% tile_width), barcode, n)]
 
+one_bin_ids <- observed("one_bin_cell_id")
+one_bin_ids <- cell_key[one_bin_ids, on = "cell_id"]
+one_bin_ids <- one_bin_ids[, .(chrom, bin = as.numeric(bin), barcode, n)]
+one_bin_anti_join <- observed("one_bin_sql_blacklist")
+one_bin_anti_join[, bin := as.numeric(bin)]
+
 stopifnot(
   fsetequal(one_bin, expected_one_bin),
+  fsetequal(one_bin_ids, expected_one_bin),
+  fsetequal(one_bin_anti_join, expected_one_bin),
   fsetequal(all_bins, expected_all_bins),
   fsetequal(tile_cell, expected_all_bins),
   !fsetequal(expected_one_bin, expected_all_bins),
@@ -376,10 +400,10 @@ GROUP BY ALL
 
 | chrom | bin | barcode          |   n |
 |:------|----:|:-----------------|----:|
-| chr2  |  94 | GGGTGAGAATCGGAAT |   1 |
-| chr2  | 129 | GCAGGGTTGCCCGTAC |   1 |
-| chr2  | 309 | GTATTACTACCTCACC |   1 |
-| chr2  | 344 | TATGTCGGCACGGTGA |   1 |
+| chr1  |  21 | CGGATTGTAACGGTAC |   1 |
+| chr1  |  25 | TACGTGGATGATCTCT |   1 |
+| chr1  |  28 | TTGAATGGGCCATGGT |   1 |
+| chr1  |  32 | TCTTCGACGCCTCTGT |   1 |
 
 Displaying records 1 - 4
 
@@ -399,12 +423,12 @@ GROUP BY ALL
 
 <div class="knitsql-table">
 
-| chrom |  bin | cell_id |   n |
-|:------|-----:|--------:|----:|
-| chr18 |  843 |     154 |   1 |
-| chrY  |  226 |     246 |   1 |
-| chr18 | 1508 |     833 |   1 |
-| chr18 |  836 |     922 |   1 |
+| chrom | bin | cell_id |   n |
+|:------|----:|--------:|----:|
+| chr1  |   8 |    1388 |   1 |
+| chr1  |  11 |     314 |   1 |
+| chr1  |  11 |    4634 |   1 |
+| chr1  |  14 |    1235 |   1 |
 
 Displaying records 1 - 4
 
@@ -462,18 +486,19 @@ knitr::kable(median_seconds, digits = 2)
 
 |                       | read_bed 4M | parquet 4M | read_bed 8M | parquet 8M | read_bed 16M | parquet 16M |
 |:----------------------|------------:|-----------:|------------:|-----------:|-------------:|------------:|
-| reader_only           |        0.67 |       0.01 |        1.32 |       0.02 |         2.60 |        0.03 |
-| one_bin               |        1.82 |       0.32 |        3.62 |       0.62 |         7.20 |        1.22 |
-| one_bin_cell_id       |        1.61 |       0.28 |        3.25 |       0.53 |         6.44 |        1.05 |
-| one_bin_sql_blacklist |        2.33 |       0.57 |        4.75 |       1.06 |         9.38 |        2.01 |
-| all_bins              |        1.93 |       0.40 |        3.83 |       0.78 |         7.55 |        1.54 |
-| tile_cell             |        2.76 |       1.09 |        5.50 |       2.16 |        10.80 |        4.34 |
+| reader_only           |        0.42 |       0.01 |        0.84 |       0.02 |         1.62 |        0.03 |
+| one_bin               |        1.27 |       0.32 |        2.50 |       0.62 |         5.08 |        1.20 |
+| one_bin_cell_id       |        1.19 |       0.28 |        2.36 |       0.53 |         4.80 |        1.04 |
+| one_bin_sql_blacklist |        1.47 |       0.57 |        2.90 |       1.05 |         5.75 |        2.04 |
+| all_bins              |        1.55 |       0.41 |        3.09 |       0.78 |         6.19 |        1.54 |
+| tile_cell             |        1.77 |       1.03 |        3.53 |       2.04 |         7.26 |        4.10 |
 
-Median seconds of 5 runs, 4 threads. Time grows linearly with fragments.
+Median seconds of 5 runs, 4 threads. On 16M fragments:
 
-- `read_bed` runs the whole query on one thread. Parquet is 5.9 times faster, so if you count a file more than once, convert it first (5.6 s for 16M).
-- Barcode strings cost little: integer ids save 14%.
-- cgranges blacklisting is 1.6 times faster than a SQL anti join.
+- `read_bed` decompresses and parses text on one thread, so Parquet is 4.2 times faster for `one_bin`. If you count a file more than once, convert it first (4.5 s).
+- Keep the tabix index. Without it DuckDB has no row estimate and can build its join on the fragments: `tile_cell` peaks at 1933 MiB, against 677 MiB with the index.
+- The barcode string in the group key costs little: integer ids there save 14% from Parquet.
+- From Parquet, cgranges blacklisting is 1.7 times faster than a SQL anti join.
 
 # From R
 
@@ -533,6 +558,7 @@ as_counts <- function(counts) {
 }
 sql_rows <- as_counts(dbGetQuery(con, sql_of("one_bin")))
 stopifnot(
+  fsetequal(sql_rows, expected_one_bin),
   fsetequal(as_counts(collect(dbplyr_counts)), sql_rows),
   fsetequal(as_counts(duckplyr_counts()), sql_rows)
 )
@@ -557,7 +583,7 @@ knitr::kable(data.frame(route = names(route_seconds), median_s = round(route_sec
 |:---------|---------:|
 | sql      |     0.52 |
 | dbplyr   |     0.55 |
-| duckplyr |     0.63 |
+| duckplyr |     0.62 |
 
 Median seconds on 4M fragments. All three return the same rows.
 
@@ -602,23 +628,31 @@ in_query
 #> 4                   3   13563
 ```
 
-That took 2.1 s on 4M fragments.
+That took 2.1 s on 4M fragments in one run.
 
 <details>
 <summary>
 Run details
 </summary>
 
-    #> source revision: b2a0aa055a807201ed4a35770cae75744e45f381 
+    #> source revision: 65b4f921299bf7f62c24b82fa8f0f3735514f475 
     #>  Rduckhts: 2.0.2.9000.0.1.1 
     #>  DuckDB: v1.5.5 
     #>  bedtools: bedtools v2.31.1 
     #>  duckplyr: 1.2.1 
     #>  dbplyr: 2.5.2 
     #>  Rducks: 0.1.1.9000 
-    #>  load average at end: 2.69 2.16 1.68 1/2124 3417482 
+    #>  load average at end: 2.42 2.14 1.58 1/2183 3550101 
     #>  CPUs available: 8
 
-Peak RSS of a fresh R process running `tile_cell` on 16M fragments: 1946 MiB from `read_bed`, 618 MiB from Parquet. Cells stay at 5,000 and only the fragment count grows. Render with `taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
+Peak RSS in MiB of a fresh R process running `tile_cell`, one run each, with a 4 GiB ceiling set before this render:
+
+| fragments | read_bed_indexed | read_bed_unindexed | parquet |
+|:----------|-----------------:|-------------------:|--------:|
+| 4M        |              285 |                586 |     264 |
+| 8M        |              427 |               1043 |     362 |
+| 16M       |              677 |               1933 |     558 |
+
+Cells stay at 5,000 and only the fragment count grows. No 1-thread series was run, so these times carry no scaling verdict. Render with `taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
 
 </details>
