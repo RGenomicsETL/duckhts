@@ -104,7 +104,7 @@ invisible(dbExecute(con, "SET threads = 4"))
 knitr::opts_chunk$set(connection = "con", max.print = 4)
 ```
 
-Index the fragments once, so DuckDB knows how many rows to plan for:
+The code writes plain text, then compresses it with `bgzip` and indexes it with `tabix_index`. The index gives DuckDB a row estimate to plan with. Every timed `read_bed` scan uses it. Only the memory check also runs without it:
 
 ``` r
 for (size in names(sizes)) {
@@ -197,10 +197,10 @@ GROUP BY ALL
 
 | chrom | bin | barcode          |   n |
 |:------|----:|:-----------------|----:|
-| chr1  |   0 | CGCGGACTGCAACGTA |   1 |
-| chr1  |   2 | GTTCCAATATAACCGC |   1 |
-| chr1  |   6 | CAACCGACCTCTCCCC |   1 |
-| chr1  |   9 | CACCCGTGAGATGCTA |   1 |
+| chr1  |   5 | TCCTACGCCAACGGTG |   1 |
+| chr1  |   6 | ATCAGCCTAAAATTAT |   1 |
+| chr1  |   9 | CGCCCGATGGGTCTAC |   1 |
+| chr1  |  14 | CGACAGAAAGCTACTC |   1 |
 
 Displaying records 1 - 4
 
@@ -366,15 +366,15 @@ Extra queries in the table
 </summary>
 
 ``` sql
-SELECT sum(strlen(name)) AS barcode_bytes
+SELECT sum(strlen(chrom) + start + "end" + strlen(name)) AS scan_checksum
 FROM fragments
 ```
 
 <div class="knitsql-table">
 
-| barcode_bytes |
+| scan_checksum |
 |--------------:|
-|       6.4e+07 |
+|  6.184118e+14 |
 
 1 records
 
@@ -400,10 +400,10 @@ GROUP BY ALL
 
 | chrom | bin | barcode          |   n |
 |:------|----:|:-----------------|----:|
-| chr1  |  21 | CGGATTGTAACGGTAC |   1 |
-| chr1  |  25 | TACGTGGATGATCTCT |   1 |
-| chr1  |  28 | TTGAATGGGCCATGGT |   1 |
-| chr1  |  32 | TCTTCGACGCCTCTGT |   1 |
+| chr1  |  33 | TCGTTCAAAGAAAGCA |   1 |
+| chr1  |  65 | GCGGAGAGCCGAACGT |   1 |
+| chr1  |  72 | TAAAATACTAAGGACC |   1 |
+| chr1  |  73 | AGACAAGCTCAAAATA |   1 |
 
 Displaying records 1 - 4
 
@@ -425,10 +425,10 @@ GROUP BY ALL
 
 | chrom | bin | cell_id |   n |
 |:------|----:|--------:|----:|
-| chr1  |   8 |    1388 |   1 |
-| chr1  |  11 |     314 |   1 |
-| chr1  |  11 |    4634 |   1 |
-| chr1  |  14 |    1235 |   1 |
+| chr1  |   6 |    2068 |   1 |
+| chr1  |  15 |    3210 |   1 |
+| chr1  |  25 |    3240 |   1 |
+| chr1  |  26 |    1731 |   1 |
 
 Displaying records 1 - 4
 
@@ -486,18 +486,24 @@ knitr::kable(median_seconds, digits = 2)
 
 |                       | read_bed 4M | parquet 4M | read_bed 8M | parquet 8M | read_bed 16M | parquet 16M |
 |:----------------------|------------:|-----------:|------------:|-----------:|-------------:|------------:|
-| reader_only           |        0.42 |       0.01 |        0.84 |       0.02 |         1.62 |        0.03 |
-| one_bin               |        1.27 |       0.32 |        2.50 |       0.62 |         5.08 |        1.20 |
-| one_bin_cell_id       |        1.19 |       0.28 |        2.36 |       0.53 |         4.80 |        1.04 |
-| one_bin_sql_blacklist |        1.47 |       0.57 |        2.90 |       1.05 |         5.75 |        2.04 |
-| all_bins              |        1.55 |       0.41 |        3.09 |       0.78 |         6.19 |        1.54 |
-| tile_cell             |        1.77 |       1.03 |        3.53 |       2.04 |         7.26 |        4.10 |
+| reader_only           |        0.68 |       0.04 |        1.34 |       0.08 |         2.68 |        0.16 |
+| one_bin               |        1.26 |       0.32 |        2.52 |       0.62 |         5.14 |        1.21 |
+| one_bin_cell_id       |        1.19 |       0.28 |        2.38 |       0.54 |         4.86 |        1.05 |
+| one_bin_sql_blacklist |        1.47 |       0.56 |        2.86 |       1.06 |         5.75 |        2.02 |
+| all_bins              |        1.55 |       0.41 |        3.06 |       0.78 |         6.30 |        1.54 |
+| tile_cell             |        1.77 |       0.72 |        3.54 |       1.40 |         7.13 |        2.78 |
+
+Across the four earlier renders, `tile_cell` from Parquet at 16M took 2.81, 4.17, 4.34 and 4.10 s with the same SQL. This render took 2.78 s. The cause is unknown, so read that cell as a range.
+
+`reader_only` sums over all four columns, so Parquet cannot answer it from metadata.
+
+At 16M, 14,235,736 of 16,000,000 fragments pass the barcode filter and blacklist, and `tile_cell` returns 13,484,755 rows.
 
 Median seconds of 5 runs, 4 threads. On 16M fragments:
 
-- `read_bed` decompresses and parses text on one thread, so Parquet is 4.2 times faster for `one_bin`. If you count a file more than once, convert it first (4.5 s).
-- Keep the tabix index. Without it DuckDB has no row estimate and can build its join on the fragments: `tile_cell` peaks at 1933 MiB, against 677 MiB with the index.
-- The barcode string in the group key costs little: integer ids there save 14% from Parquet.
+- `read_bed` is a single-threaded scan, so the filter, overlap and aggregation above it also run on one thread. It also decompresses and parses text: `reader_only` takes 2.7 s of the 5.1 s of `one_bin`. Parquet is 4.3 times faster for `one_bin`. If you count a file more than once, convert it first (4.5 s).
+- Keep the tabix index. Without it DuckDB has no row estimate and can build its join on the fragments: `tile_cell` peaks at 1933 MiB, against 661 MiB with the index.
+- Joining `cells` for integer ids, instead of grouping on the barcode string, takes 87% of the time from Parquet. The two queries also differ in `JOIN` against `IN`, so this is not the string cost alone.
 - From Parquet, cgranges blacklisting is 1.7 times faster than a SQL anti join.
 
 # From R
@@ -581,11 +587,11 @@ knitr::kable(data.frame(route = names(route_seconds), median_s = round(route_sec
 
 | route    | median_s |
 |:---------|---------:|
-| sql      |     0.52 |
+| sql      |     0.53 |
 | dbplyr   |     0.55 |
 | duckplyr |     0.62 |
 
-Median seconds on 4M fragments. All three return the same rows.
+Median seconds on 4M fragments. All three return the same rows. They return rows to R, while the timing table writes a temp table, so `sql` here and `one_bin` from Parquet at 4M differ.
 
 [Rducks](https://github.com/RGenomicsETL/Rducks) runs an R function inside the query, on one DuckDB thread, so keep it for rules that are awkward in SQL:
 
@@ -628,31 +634,31 @@ in_query
 #> 4                   3   13563
 ```
 
-That took 2.1 s on 4M fragments in one run.
+That took 2.1 s on 4M fragments in one run, including UDF registration and row collection.
 
 <details>
 <summary>
 Run details
 </summary>
 
-    #> source revision: 65b4f921299bf7f62c24b82fa8f0f3735514f475 
-    #>  Rduckhts: 2.0.2.9000.0.1.1 
-    #>  DuckDB: v1.5.5 
-    #>  bedtools: bedtools v2.31.1 
-    #>  duckplyr: 1.2.1 
-    #>  dbplyr: 2.5.2 
-    #>  Rducks: 0.1.1.9000 
-    #>  load average at end: 2.42 2.14 1.58 1/2183 3550101 
-    #>  CPUs available: 8
+    #> source revision: f6dbbad5fd975373cf3764d7a54c165bc3fa9f09
+    #> Rduckhts: 2.0.2.9000.0.1.1
+    #> DuckDB: v1.5.5
+    #> bedtools: bedtools v2.31.1
+    #> duckplyr: 1.2.1
+    #> dbplyr: 2.5.2
+    #> Rducks: 0.1.1.9000
+    #> load average at end: 2.08 1.86 1.54 1/2217 4048410
+    #> CPUs available: 8
 
-Peak RSS in MiB of a fresh R process running `tile_cell`, one run each, with a 4 GiB ceiling set before this render:
+Peak RSS in MiB of a fresh R process running `tile_cell`, one run per source and size. The bounds were set after earlier renders. The 1024 MiB bound on indexed `read_bed` and Parquet fails if the index stops giving a row estimate. The 4096 MiB bound on the unindexed copy catches runaway memory:
 
 | fragments | read_bed_indexed | read_bed_unindexed | parquet |
 |:----------|-----------------:|-------------------:|--------:|
-| 4M        |              285 |                586 |     264 |
-| 8M        |              427 |               1043 |     362 |
-| 16M       |              677 |               1933 |     558 |
+| 4M        |              289 |                583 |     274 |
+| 8M        |              429 |               1038 |     368 |
+| 16M       |              661 |               1933 |     563 |
 
-Cells stay at 5,000 and only the fragment count grows. No 1-thread series was run, so these times carry no scaling verdict. Render with `taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
+Cells stay at 5,000 and only the fragment count grows. No single-thread series was run, so these times carry no scaling verdict. Render with `taskset -c 8-15 nice -n 10 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
 
 </details>
