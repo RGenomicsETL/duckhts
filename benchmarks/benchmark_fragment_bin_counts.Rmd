@@ -116,7 +116,7 @@ invisible(dbExecute(con, "SET threads = 4"))
 knitr::opts_chunk$set(connection = "con", max.print = 4)
 ```
 
-Index the fragments once, so DuckDB knows how many rows to plan for:
+The code writes plain text, then compresses it with `bgzip` and indexes it with `tabix_index`. The index gives DuckDB a row estimate to plan with. Every timed `read_bed` scan uses it. Only the memory check also runs without it:
 
 ```{r index_fragments}
 for (size in names(sizes)) {
@@ -308,7 +308,7 @@ data.frame(
 <summary>Extra queries in the table</summary>
 
 ```{sql reader_only}
-SELECT sum(strlen(name)) AS barcode_bytes
+SELECT sum(strlen(chrom) + start + "end" + strlen(name)) AS scan_checksum
 FROM fragments
 ```
 
@@ -390,6 +390,25 @@ rownames(median_seconds) <- as.character(timings[[1]]$expression)
 knitr::kable(median_seconds, digits = 2)
 ```
 
+Across the four earlier renders, `tile_cell` from Parquet at 16M took 2.81, 4.17, 4.34 and 4.10 s with the same SQL. This render took `r sprintf("%.2f", median_seconds["tile_cell", "parquet 16M"])` s. The cause is unknown, so read that cell as a range.
+
+`reader_only` sums over all four columns, so Parquet cannot answer it from metadata.
+
+```{r headline_counts, echo = FALSE}
+headline_input <- sizes[["16M"]]
+invisible(use_source("SELECT * FROM read_parquet('fragments_16M.parquet')"))
+invisible(run("tile_cell"))
+headline_output <- dbGetQuery(con, "SELECT count(*) AS n FROM result")$n
+headline_kept <- dbGetQuery(con, '
+  SELECT count(*) AS n
+  FROM fragments AS f
+  WHERE f.name IN (SELECT barcode FROM cells)
+    AND NOT duckhts_cgranges_has_overlap(\'blacklist_idx\', f.chrom, f.start, f."end")
+')$n
+```
+
+At 16M, `r format(headline_kept, big.mark = ",")` of `r format(headline_input, big.mark = ",", scientific = FALSE)` fragments pass the barcode filter and blacklist, and `tile_cell` returns `r format(headline_output, big.mark = ",")` rows.
+
 ```{r peak_rss, echo = FALSE}
 peak_rss_mib <- function(relation) {
   statements <- c(
@@ -411,7 +430,8 @@ peak_rss_mib <- function(relation) {
 }
 
 # A copy with no .tbi beside it shows what a missing row estimate costs.
-rss_ceiling_mib <- 4096
+indexed_rss_ceiling_mib <- 1024
+unindexed_rss_ceiling_mib <- 4096
 rss <- do.call(rbind, lapply(names(sizes), function(size) {
   unindexed <- sprintf("unindexed_%s.bed.gz", size)
   file.copy(fragment_files[[size]], unindexed)
@@ -425,14 +445,18 @@ rss <- do.call(rbind, lapply(names(sizes), function(size) {
   unlink(unindexed)
   row
 }))
-stopifnot(all(rss[, -1] <= rss_ceiling_mib))
+stopifnot(
+  all(rss$read_bed_indexed <= indexed_rss_ceiling_mib),
+  all(rss$parquet <= indexed_rss_ceiling_mib),
+  all(rss$read_bed_unindexed <= unindexed_rss_ceiling_mib)
+)
 ```
 
 Median seconds of 5 runs, 4 threads. On 16M fragments:
 
-- `read_bed` decompresses and parses text on one thread, so Parquet is `r round(median_seconds["one_bin", "read_bed 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster for `one_bin`. If you count a file more than once, convert it first (`r round(convert_seconds[["16M"]], 1)` s).
+- `read_bed` is a single-threaded scan, so the filter, overlap and aggregation above it also run on one thread. It also decompresses and parses text: `reader_only` takes `r round(median_seconds["reader_only", "read_bed 16M"], 1)` s of the `r round(median_seconds["one_bin", "read_bed 16M"], 1)` s of `one_bin`. Parquet is `r round(median_seconds["one_bin", "read_bed 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster for `one_bin`. If you count a file more than once, convert it first (`r round(convert_seconds[["16M"]], 1)` s).
 - Keep the tabix index. Without it DuckDB has no row estimate and can build its join on the fragments: `tile_cell` peaks at `r round(rss$read_bed_unindexed[rss$fragments == "16M"])` MiB, against `r round(rss$read_bed_indexed[rss$fragments == "16M"])` MiB with the index.
-- The barcode string in the group key costs little: integer ids there save `r round(100 * (1 - median_seconds["one_bin_cell_id", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"]))`% from Parquet.
+- Joining `cells` for integer ids, instead of grouping on the barcode string, takes `r round(100 * median_seconds["one_bin_cell_id", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"])`% of the time from Parquet. The two queries also differ in `JOIN` against `IN`, so this is not the string cost alone.
 - From Parquet, cgranges blacklisting is `r round(median_seconds["one_bin_sql_blacklist", "parquet 16M"] / median_seconds["one_bin", "parquet 16M"], 1)` times faster than a SQL anti join.
 
 # From R
@@ -513,7 +537,7 @@ names(route_seconds) <- as.character(r_routes$expression)
 knitr::kable(data.frame(route = names(route_seconds), median_s = round(route_seconds, 2)), row.names = FALSE)
 ```
 
-Median seconds on 4M fragments. All three return the same rows.
+Median seconds on 4M fragments. All three return the same rows. They return rows to R, while the timing table writes a temp table, so `sql` here and `one_bin` from Parquet at 4M differ.
 
 [Rducks](https://github.com/RGenomicsETL/Rducks) runs an R function inside the query, on one DuckDB thread, so keep it for rules that are awkward in SQL:
 
@@ -551,32 +575,33 @@ stopifnot(
 in_query
 ```
 
-That took `r round(rducks_seconds, 1)` s on 4M fragments in one run.
+That took `r round(rducks_seconds, 1)` s on `r sizes[["4M"]] / 1e6`M fragments in one run, including UDF registration and row collection.
 
 <details>
 <summary>Run details</summary>
 
 ```{r run_details, echo = FALSE}
 cat(
-  "source revision:", source_revision, "\n",
-  "Rduckhts:", as.character(packageVersion("Rduckhts")), "\n",
-  "DuckDB:", dbGetQuery(con, "SELECT version() AS v")$v, "\n",
-  "bedtools:", system2("bedtools", "--version", stdout = TRUE), "\n",
-  "duckplyr:", as.character(packageVersion("duckplyr")), "\n",
-  "dbplyr:", as.character(packageVersion("dbplyr")), "\n",
-  "Rducks:", as.character(packageVersion("Rducks")), "\n",
-  "load average at end:", readLines("/proc/loadavg"), "\n",
-  "CPUs available:", length(parallel::mcaffinity()), "\n"
+  "source revision: ", source_revision, "\n",
+  "Rduckhts: ", as.character(packageVersion("Rduckhts")), "\n",
+  "DuckDB: ", dbGetQuery(con, "SELECT version() AS v")$v, "\n",
+  "bedtools: ", system2("bedtools", "--version", stdout = TRUE), "\n",
+  "duckplyr: ", as.character(packageVersion("duckplyr")), "\n",
+  "dbplyr: ", as.character(packageVersion("dbplyr")), "\n",
+  "Rducks: ", as.character(packageVersion("Rducks")), "\n",
+  "load average at end: ", readLines("/proc/loadavg"), "\n",
+  "CPUs available: ", length(parallel::mcaffinity()), "\n",
+  sep = ""
 )
 ```
 
-Peak RSS in MiB of a fresh R process running `tile_cell`, one run each, with a 4 GiB ceiling set before this render:
+Peak RSS in MiB of a fresh R process running `tile_cell`, one run per source and size. The bounds were set after earlier renders. The `r indexed_rss_ceiling_mib` MiB bound on indexed `read_bed` and Parquet fails if the index stops giving a row estimate. The `r unindexed_rss_ceiling_mib` MiB bound on the unindexed copy catches runaway memory:
 
 ```{r rss_table, echo = FALSE}
 knitr::kable(rss, digits = 0, row.names = FALSE)
 ```
 
-Cells stay at 5,000 and only the fragment count grows. No 1-thread series was run, so these times carry no scaling verdict. Render with
-`taskset -c 8-15 nice -n -15 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
+Cells stay at `r format(n_cells, big.mark = ",")` and only the fragment count grows. No single-thread series was run, so these times carry no scaling verdict. Render with
+`taskset -c 8-15 nice -n 10 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
 
 </details>
