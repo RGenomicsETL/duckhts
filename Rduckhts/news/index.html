@@ -39,7 +39,8 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="development version" id="rduckhts-development-version">Rduckhts (development version)<a class="anchor" aria-label="anchor" href="#rduckhts-development-version"></a></h2>
-<ul><li>Region queries on tabix-indexed VCFs no longer scan every sample column to locate each record (backport of htslib d24ed09).</li>
+<ul><li>The optional GitHub mirror of R-universe package binaries no longer refreshes nightly. Use CRAN or R-universe directly for normal installation; previously mirrored bundles remain available, with manual refreshes only.</li>
+<li>Region queries on tabix-indexed VCFs no longer scan every sample column to locate each record (backport of htslib d24ed09).</li>
 <li>The bundled extension reads VCF/BCF sites without parsing genotypes when no FORMAT or sample column is selected, and decodes only the CRAM fields each function uses. <code>duckhts_mosdepth(use_median = TRUE)</code> no longer clears 512 KiB of counters per window.</li>
 <li>
 <code>rduckhts_bcftools_score()</code> with long <code>regions</code> or <code>targets</code> lists no longer re-parses the list for every variant, and a summary file that cannot be read or loaded now stops with an error instead of scoring with the markers read so far.</li>
