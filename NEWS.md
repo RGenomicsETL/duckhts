@@ -2,6 +2,13 @@
 
 # duckhts (development version)
 
+- The optional GitHub mirror of R-universe R package binaries is now manual-only.
+  Existing release assets are retained; the mirror is not a per-commit archive.
+  Normal CRAN/R-universe installation and signed DuckDB extension distribution
+  are unchanged.
+- Manual R-universe mirror refreshes retain existing binaries and verify every
+  downloaded release asset before updating the version pointer. Conflicting or
+  unvalidated assets for the same package version stop publication for inspection.
 - `benchmarks/benchmark_fragment_bin_counts.md` counts BED fragments by tile and cell
   barcode in SQL, with barcode selection, blacklisting and a sparse tile by cell matrix, on
   simulated single-cell fragments. Its queries match `bedtools intersect` plus `data.table`

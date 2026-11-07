@@ -64,6 +64,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Test R-universe artifact validation and publication
+        run: |
+          python3 test/scripts/test_r_universe_artifact.py
+          python3 test/scripts/test_r_universe_publication.py
       - name: Install native dependencies
         run: |
           sudo apt-get update
