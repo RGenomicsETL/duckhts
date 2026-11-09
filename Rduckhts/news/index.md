@@ -2,31 +2,46 @@
 
 ## Rduckhts (development version)
 
+- The package build reads the DuckDB C API version of the bundled
+  extension from the bundled `duckdb_extension.h`, on Unix and Windows.
+  The previous parse matched a preprocessor guard line and always fell
+  back to a hardcoded `v1.2.0`, so a newer header would have produced an
+  extension that an older DuckDB loads and then cannot serve. The build
+  now stops when the header does not define the version. The stamped
+  version is unchanged.
+
 - The optional GitHub mirror of R-universe package binaries no longer
   refreshes nightly. Use CRAN or R-universe directly for normal
   installation; previously mirrored bundles remain available, with
   manual refreshes only.
+
 - Region queries on tabix-indexed VCFs no longer scan every sample
   column to locate each record (backport of htslib d24ed09).
+
 - The bundled extension reads VCF/BCF sites without parsing genotypes
   when no FORMAT or sample column is selected, and decodes only the CRAM
   fields each function uses. `duckhts_mosdepth(use_median = TRUE)` no
   longer clears 512 KiB of counters per window.
+
 - `rduckhts_bcftools_score()` with long `regions` or `targets` lists no
   longer re-parses the list for every variant, and a summary file that
   cannot be read or loaded now stops with an error instead of scoring
   with the markers read so far.
+
 - Read errors in tabix, BED, FASTA/FASTQ and `fasta_nuc` inputs now stop
   with an error naming the file instead of returning a shorter result,
   and more error messages name the function and file.
+
 - `rduckhts_bcf(..., duplicate_names = "suffix")` reads VCF/BCF files
   whose INFO keys, FORMAT keys or sample names differ only in case (`DP`
   and `dp`, `s1` and `S1`), which VCF allows and DuckDB column names
   cannot hold; later names get `__2`, `__3`. The default `"error"` now
   names both columns.
+
 - Column-name collision errors from `rduckhts_bam(auxiliary_tags = ...)`
   and the GFF, GTF and GenBank `attributes` arguments now read “`A` and
   `B` name the same column (column names ignore case)”.
+
 - The bundled extension fixes crashes, hangs and wrong results found by
   a review of its C code. Calls that used to end the R session now
   return an R error: idxstats or bin counts with a stale index, a
@@ -39,13 +54,17 @@
   full `read_fasta` scans, contig names from VCF tabix indexes, CSQ
   numbers parsed from text, BED regions in `rduckhts_bcftools_score()`,
   and `bcftools_norm` on records mixing `*` with other alleles.
+
 - Building a cgranges interval index with `duckhts_cgranges_add()` no
   longer leaks about 94 bytes of memory per interval.
+
 - `input_quality_encoding = "auto"` now stops with an error when the
   qualities fit more than one encoding, instead of guessing phred64;
   pass the encoding explicitly.
+
 - A failed `overwrite = TRUE` run of bgzip, bgunzip, mosdepth or
   idxstats keeps the existing output file instead of deleting it.
+
 - [`rduckhts_bam_bed_coverage()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_bed_coverage.md)
   no longer has the `bed_index_path`, `fragment_mode` and
   `processing_threads` arguments, which did nothing or always failed.
@@ -55,6 +74,7 @@
   [`rduckhts_gff_convert_parquet()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_gff_convert_parquet.md)
   no longer have `header`, `header_names`, `auto_detect` and
   `column_types`, which the reader ignored.
+
 - [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md)
   and
   [`rduckhts_bam_multi()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_multi.md)
@@ -63,10 +83,12 @@
   map; a single name is still sent as a list. `TRUE` and `FALSE` keep
   their meaning. Reading a few tags no longer builds a map for every
   record.
+
 - A BAM whose reads sit on one large reference, such as a
   single-chromosome BAM, now scans on several threads: the bundled
   extension cuts such a reference into byte-balanced pieces from its
   index. The records returned do not change.
+
 - [`rduckhts_bam_bin_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_bin_counts.md)
   and `bam_bin_counts()` in SQL scan when the query executes, not when
   it is bound. With duckdb 1.5, a SQL `PREPARE` statement executed twice
@@ -76,21 +98,26 @@
   [`dbBind()`](https://dbi.r-dbi.org/reference/dbBind.html) and were not
   affected. The scan runs on DuckDB’s worker threads, so `SET threads`
   bounds it, instead of up to 16 threads of its own.
+
 - [`rduckhts_bam_bed_coverage()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam_bed_coverage.md)
   reads the BED file and alignments when the query executes, so a
   prepared query sees the files as they are at each execution.
+
 - [`rduckhts_functions()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_functions.md)
   and the bundled function reference: `regionkey`,
   `duckhts_ancestry_proportions`, `bcftools_norm_row` and
   `bcftools_munge_row` no longer show `name := default` arguments, which
   DuckDB ignores on scalar functions. The `bcftools_munge_row` example
   now binds. `duckhts_alt_to_list` is listed.
+
 - The catalog test checks that every function the bundled extension
   registers is in the catalog, apart from internal helpers.
+
 - README: “Avoid three common SQL mistakes” shows the errors for an
   unquoted `end`, a column name passed as a string, and the 0-based
   half-open interval convention
   (<https://github.com/RGenomicsETL/duckhts/issues/356>).
+
 - A hex sticker in `man/figures/logo.svg` heads the README and the
   pkgdown site.
 
