@@ -220,7 +220,21 @@ test-extension-symbols:
 	@set -e; test -f build/release/duckhts.duckdb_extension || { echo "test-extension-symbols: build the release extension first"; exit 1; }; \
 		symbols=$$(nm -D -u build/release/duckhts.duckdb_extension); \
 		printf '%s\n' "$$symbols" | \
-		awk '$$NF ~ /^duckdb_/ { print "Unexpected DuckDB C API import: " $$0; bad = 1 } END { exit bad }'
+		awk '$$NF ~ /^duckdb_/ { print "Unexpected DuckDB C API import: " $$0; bad = 1 } END { exit bad }'; \
+		tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		nm -D --defined-only build/release/duckhts.duckdb_extension | \
+			awk '$$2 == "T" { print $$3 }' | LC_ALL=C sort -u > "$$tmp/defined_functions"; \
+		readelf -r --wide build/release/duckhts.duckdb_extension | \
+			awk '$$3 ~ /JUMP_SLO|GLOB_DAT/ { sub(/@.*/, "", $$5); print $$5 }' | LC_ALL=C sort -u > "$$tmp/dynamic_targets"; \
+		LC_ALL=C comm -12 "$$tmp/defined_functions" "$$tmp/dynamic_targets" > "$$tmp/interposable"; \
+		test -s "$$tmp/defined_functions" || { echo "test-extension-symbols: no defined functions found"; exit 1; }; \
+		if [ -s "$$tmp/interposable" ]; then \
+			echo "test-extension-symbols: the host process can replace these functions of the extension:"; \
+			sed -n '1,20p' "$$tmp/interposable"; \
+			echo "  ($$(wc -l < "$$tmp/interposable") in total)"; \
+			exit 1; \
+		fi; \
+		bash test/scripts/htslib_binding_test.sh
 
 .PHONY: test-named-attribute-columns
 test-named-attribute-columns:

@@ -114,7 +114,17 @@ else()
 	add_library(${EXTENSION_NAME} SHARED ${EXTENSION_SOURCES})
 endif()
 
-# Hide symbols
+# The ELF extension exports htslib and DuckHTS functions with default
+# visibility, and native tests link them from the built library. Without this
+# option the dynamic loader resolves the extension's own calls to those
+# functions against the host process first, so a host that carries another
+# htslib replaces the bundled one. Bind them at link time instead.
+if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN AND NOT DUCKDB_WASM_EXTENSION)
+    target_link_options(${EXTENSION_NAME} PRIVATE "-Wl,-Bsymbolic-functions")
+endif()
+
+# These presets apply to targets created below (the native test programs).
+# The extension target above was created before them and is not affected.
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(VISIBILITY_INLINES_HIDDEN ON)

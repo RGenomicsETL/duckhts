@@ -2,6 +2,15 @@
 
 # duckhts (development version)
 
+- On Linux, a host process that carries its own htslib could replace functions of the
+  htslib bundled in the extension, because the dynamic loader resolved the extension's
+  internal calls against the host first. The extension now binds its own function calls
+  at link time (`-Bsymbolic-functions`). `make test-extension-symbols` checks that no
+  function defined in the extension is reached through a dynamic relocation, and links a
+  host program with its own `hopen()` to confirm the bundled `hts_open()` does not call
+  it. The exported symbols are unchanged. Not covered: macOS and Windows builds, which
+  were not examined, and the R package build, which links htslib as a shared library.
+
 - The optional GitHub mirror of R-universe R package binaries is now manual-only.
   Existing release assets are retained; the mirror is not a per-commit archive.
   Normal CRAN/R-universe installation and signed DuckDB extension distribution
