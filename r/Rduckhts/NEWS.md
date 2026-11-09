@@ -1,5 +1,12 @@
 # Rduckhts (development version)
 
+- The package build reads the DuckDB C API version of the bundled extension from the
+  bundled `duckdb_extension.h`, on Unix and Windows. The previous parse matched a
+  preprocessor guard line and always fell back to a hardcoded `v1.2.0`, so a newer header
+  would have produced an extension that an older DuckDB loads and then cannot serve. The
+  build now stops when the header does not define the version. The stamped version is
+  unchanged.
+
 - The optional GitHub mirror of R-universe package binaries no longer refreshes
   nightly. Use CRAN or R-universe directly for normal installation; previously
   mirrored bundles remain available, with manual refreshes only.

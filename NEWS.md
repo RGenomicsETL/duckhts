@@ -10,6 +10,9 @@
   host program with its own `hopen()` to confirm the bundled `hts_open()` does not call
   it. The exported symbols are unchanged. Not covered: macOS and Windows builds, which
   were not examined, and the R package build, which links htslib as a shared library.
+- The R package build reads the DuckDB C API version for the extension footer from the
+  bundled `duckdb_extension.h`. The previous shell parse matched a preprocessor guard
+  line and always fell back to a hardcoded `v1.2.0`. The stamped version is unchanged.
 
 - The optional GitHub mirror of R-universe R package binaries is now manual-only.
   Existing release assets are retained; the mirror is not a per-commit archive.

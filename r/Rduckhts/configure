@@ -154,15 +154,6 @@ if [ -z "${EXT_VERSION}" ]; then
   EXT_VERSION="0.0.0"
 fi
 
-DUCKDB_API_MAJOR=`awk '/DUCKDB_EXTENSION_API_VERSION_MAJOR/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
-DUCKDB_API_MINOR=`awk '/DUCKDB_EXTENSION_API_VERSION_MINOR/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
-DUCKDB_API_PATCH=`awk '/DUCKDB_EXTENSION_API_VERSION_PATCH/ {print $3; exit}' "${DUCKDB_CAPI_HEADER}" || true`
-if [ -n "${DUCKDB_API_MAJOR}" ] && [ -n "${DUCKDB_API_MINOR}" ] && [ -n "${DUCKDB_API_PATCH}" ]; then
-  DUCKDB_VERSION="v${DUCKDB_API_MAJOR}.${DUCKDB_API_MINOR}.${DUCKDB_API_PATCH}"
-else
-  DUCKDB_VERSION="v1.2.0"
-fi
-
 OS_NAME=`uname -s`
 ARCH_NAME=`uname -m`
 DUCKDB_PLATFORM=""
@@ -536,7 +527,7 @@ echo "Appending DuckDB extension metadata..."
   --out-file "${FINAL_EXT_FILE}" \
   --extension-name "duckhts" \
   --duckdb-platform "${DUCKDB_PLATFORM}" \
-  --duckdb-version "${DUCKDB_VERSION}" \
+  --duckdb-capi-header "${DUCKDB_CAPI_HEADER}" \
   --extension-version "${EXT_VERSION}" \
   --abi-type "C_STRUCT"
 

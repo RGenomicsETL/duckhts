@@ -1,6 +1,34 @@
 # Canonical DuckDB extension metadata writer used by package configure and
 # the retained command-line adapter in tools/append_extension_metadata.R.
 
+# The DuckDB C API version that the bundled sources are compiled for, as the
+# `vMAJOR.MINOR.PATCH` string DuckDB reads from the extension footer. The
+# bundled header is the only authority: DuckDB refuses a footer version newer
+# than its own API, so a footer older than the compiled sources would load
+# on a host that lacks the functions they call.
+duckhts_capi_version <- function(header) {
+  if (length(header) != 1L || is.na(header) || !file.exists(header)) {
+    stop("DuckDB C API header not found: ", header, call. = FALSE)
+  }
+  lines <- readLines(header, warn = FALSE)
+  component <- function(name) {
+    pattern <- paste0(
+      "^#define[[:space:]]+DUCKDB_EXTENSION_API_VERSION_", name,
+      "[[:space:]]+([0-9]+)[[:space:]]*$"
+    )
+    value <- sub(pattern, "\\1", grep(pattern, lines, value = TRUE))
+    if (length(value) != 1L) {
+      stop(
+        "Expected one DUCKDB_EXTENSION_API_VERSION_", name, " definition in ",
+        header, ", found ", length(value),
+        call. = FALSE
+      )
+    }
+    value
+  }
+  paste0("v", component("MAJOR"), ".", component("MINOR"), ".", component("PATCH"))
+}
+
 duckhts_append_extension_metadata <- function(
   library_file,
   out_file,

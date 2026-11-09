@@ -32,7 +32,7 @@ required <- c(
   "out-file",
   "extension-name",
   "duckdb-platform",
-  "duckdb-version",
+  "duckdb-capi-header",
   "extension-version"
 )
 missing <- required[vapply(
@@ -60,7 +60,7 @@ duckhts_append_extension_metadata(
   out_file = opts[["out-file"]],
   extension_name = opts[["extension-name"]],
   duckdb_platform = opts[["duckdb-platform"]],
-  duckdb_version = opts[["duckdb-version"]],
+  duckdb_version = duckhts_capi_version(opts[["duckdb-capi-header"]]),
   extension_version = opts[["extension-version"]],
   abi_type = abi_type
 )
