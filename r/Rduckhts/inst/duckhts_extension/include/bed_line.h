@@ -25,11 +25,21 @@ int duckhts_bed_line_is_meta(const char *line);
  * NULL with *len = 0 when the line has fewer than index + 1 fields. */
 const char *duckhts_bed_line_field(const char *line, int index, int *len);
 
-/* Parses the whole span [s, s + len) as a base-10 integer with strtoll() rules:
- * leading whitespace and a sign are accepted, trailing bytes are not. Overflow
- * saturates at INT64_MIN or INT64_MAX as strtoll() does; ERANGE is not checked.
- * The span has no length limit. Returns 1 and sets *out on success; returns 0
- * for a NULL or empty span, trailing bytes, or allocation failure. */
+/* Splits `line` at tabs in one pass and stores borrowed views of its first
+ * fields: field i is [starts[i], starts[i] + lens[i]). Stops after `max_fields`
+ * fields, so `starts` and `lens` need room for `max_fields` entries. Returns the
+ * number of fields stored, which is the field count of the line when that is
+ * below `max_fields`. A field may be empty; an empty line is one empty field.
+ * Returns 0 for a NULL line or max_fields <= 0. */
+int duckhts_bed_line_split(const char *line, int max_fields,
+                           const char **starts, int *lens);
+
+/* Parses the whole span [s, s + len) as a base-10 integer with the rules of
+ * strtoll() in the C locale: leading whitespace (space, \t, \n, \v, \f, \r)
+ * and one sign are accepted, trailing bytes are not. Overflow saturates at
+ * INT64_MIN or INT64_MAX and still succeeds. The span has no length limit and
+ * is read in place. Returns 1 and sets *out on success; returns 0 for a NULL
+ * or empty span, a span without digits, or any other byte. */
 int duckhts_bed_parse_int64_span(const char *s, int len, int64_t *out);
 
 #endif

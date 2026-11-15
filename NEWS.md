@@ -2,6 +2,13 @@
 
 # duckhts (development version)
 
+- `read_bed` splits each line at its tabs once, up to the last projected column, and
+  parses integer fields in place. Before, each projected column searched the line from
+  its first byte, a separate pass counted the fields, and each integer was copied before
+  `strtoll()` parsed it. Rows, NULLs and errors are unchanged. Integer fields follow
+  `strtoll()` rules for the C locale whatever the locale of the host process.
+  `make test-bed-line` compares the parser with `strtoll()` and the splitter with a
+  `strchr()` walk.
 - On Linux, a host process that carries its own htslib could replace functions of the
   htslib bundled in the extension, because the dynamic loader resolved the extension's
   internal calls against the host first. The extension now binds its own function calls

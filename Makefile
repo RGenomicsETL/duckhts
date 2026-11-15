@@ -157,7 +157,15 @@ test: test_debug
 test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
 test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-bam-partition test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog test-database-lifetime
-test_release: test-reference-cache test-sql-lambda-syntax test-count-mixture-model
+test_release: test-reference-cache test-sql-lambda-syntax test-count-mixture-model test-bed-line
+
+.PHONY: test-bed-line
+test-bed-line:
+	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+		$(CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pedantic \
+			-Isrc/include src/bed_line.c test/scripts/bed_line_test.c \
+			-o "$$tmp/bed_line_test"; \
+		"$$tmp/bed_line_test"
 
 .PHONY: test-count-mixture-model
 test-count-mixture-model:
