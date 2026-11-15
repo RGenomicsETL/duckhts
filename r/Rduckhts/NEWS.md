@@ -1,5 +1,9 @@
 # Rduckhts (development version)
 
+- `read_bed`, and so `rduckhts_bed()`, splits each line at its tabs once and parses
+  integer fields in place. Rows, NULLs and errors are unchanged. Integer fields follow
+  `strtoll()` rules for the C locale whatever the locale of the R session.
+
 - The package build reads the DuckDB C API version of the bundled extension from the
   bundled `duckdb_extension.h`, on Unix and Windows. The previous parse matched a
   preprocessor guard line and always fell back to a hardcoded `v1.2.0`, so a newer header
