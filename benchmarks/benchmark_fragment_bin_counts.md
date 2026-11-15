@@ -197,10 +197,10 @@ GROUP BY ALL
 
 | chrom | bin | barcode          |   n |
 |:------|----:|:-----------------|----:|
-| chr1  |   5 | TCCTACGCCAACGGTG |   1 |
-| chr1  |   6 | ATCAGCCTAAAATTAT |   1 |
-| chr1  |   9 | CGCCCGATGGGTCTAC |   1 |
-| chr1  |  14 | CGACAGAAAGCTACTC |   1 |
+| chr1  |   0 | CGCGGACTGCAACGTA |   1 |
+| chr1  |   2 | GTTCCAATATAACCGC |   1 |
+| chr1  |   6 | CAACCGACCTCTCCCC |   1 |
+| chr1  |   9 | CACCCGTGAGATGCTA |   1 |
 
 Displaying records 1 - 4
 
@@ -227,10 +227,10 @@ GROUP BY ALL
 
 | chrom | bin | barcode          |   n |
 |:------|----:|:-----------------|----:|
-| chr1  |   3 | GTGGGCGCGGAATGTC |   1 |
-| chr1  |   4 | TTAATAATAGCCGCGC |   1 |
-| chr1  |  11 | TGTCCTTCTAGGAAGA |   1 |
-| chr1  |  21 | CGGATTGTAACGGTAC |   1 |
+| chr1  |   5 | TCCTACGCCAACGGTG |   1 |
+| chr1  |   6 | ATCAGCCTAAAATTAT |   1 |
+| chr1  |   9 | CGCCCGATGGGTCTAC |   1 |
+| chr1  |  14 | CGACAGAAAGCTACTC |   1 |
 
 Displaying records 1 - 4
 
@@ -258,10 +258,10 @@ GROUP BY ALL
 
 | tile_id | cell_id |   n |
 |--------:|--------:|----:|
-|       2 |     318 |   1 |
-|      11 |    4933 |   1 |
-|      27 |     514 |   1 |
-|      27 |    3800 |   1 |
+|       1 |     575 |   1 |
+|       2 |    4246 |   1 |
+|       3 |    4961 |   1 |
+|      26 |    4602 |   1 |
 
 Displaying records 1 - 4
 
@@ -400,10 +400,10 @@ GROUP BY ALL
 
 | chrom | bin | barcode          |   n |
 |:------|----:|:-----------------|----:|
-| chr1  |  33 | TCGTTCAAAGAAAGCA |   1 |
-| chr1  |  65 | GCGGAGAGCCGAACGT |   1 |
-| chr1  |  72 | TAAAATACTAAGGACC |   1 |
-| chr1  |  73 | AGACAAGCTCAAAATA |   1 |
+| chrY  | 693 | CCTAACCGTTTGCTTT |   1 |
+| chrY  | 695 | TTGTTGCTGTAAGTGC |   1 |
+| chrY  | 696 | TGACGACACGTTGTTA |   1 |
+| chrY  | 698 | CTACCATGGAACTCTT |   1 |
 
 Displaying records 1 - 4
 
@@ -486,14 +486,14 @@ knitr::kable(median_seconds, digits = 2)
 
 |                       | read_bed 4M | parquet 4M | read_bed 8M | parquet 8M | read_bed 16M | parquet 16M |
 |:----------------------|------------:|-----------:|------------:|-----------:|-------------:|------------:|
-| reader_only           |        0.68 |       0.04 |        1.34 |       0.08 |         2.68 |        0.16 |
-| one_bin               |        1.26 |       0.32 |        2.52 |       0.62 |         5.14 |        1.21 |
-| one_bin_cell_id       |        1.19 |       0.28 |        2.38 |       0.54 |         4.86 |        1.05 |
-| one_bin_sql_blacklist |        1.47 |       0.56 |        2.86 |       1.06 |         5.75 |        2.02 |
-| all_bins              |        1.55 |       0.41 |        3.06 |       0.78 |         6.30 |        1.54 |
-| tile_cell             |        1.77 |       0.72 |        3.54 |       1.40 |         7.13 |        2.78 |
+| reader_only           |        0.53 |       0.05 |        1.08 |       0.08 |         2.41 |        0.16 |
+| one_bin               |        1.15 |       0.34 |        2.40 |       0.71 |         4.68 |        1.24 |
+| one_bin_cell_id       |        1.07 |       0.32 |        2.21 |       0.61 |         4.30 |        1.08 |
+| one_bin_sql_blacklist |        1.32 |       0.75 |        2.84 |       1.18 |         5.20 |        2.06 |
+| all_bins              |        1.43 |       0.45 |        2.97 |       0.91 |         5.75 |        1.58 |
+| tile_cell             |        1.79 |       0.99 |        3.50 |       2.18 |         6.79 |        3.87 |
 
-Across the four earlier renders, `tile_cell` from Parquet at 16M took 2.81, 4.17, 4.34 and 4.10 s with the same SQL. This render took 2.78 s. The cause is unknown, so read that cell as a range.
+Across the four earlier renders, `tile_cell` from Parquet at 16M took 2.81, 4.17, 4.34 and 4.10 s with the same SQL. This render took 3.87 s. The cause is unknown, so read that cell as a range.
 
 `reader_only` sums over all four columns, so Parquet cannot answer it from metadata.
 
@@ -501,8 +501,8 @@ At 16M, 14,235,736 of 16,000,000 fragments pass the barcode filter and blacklist
 
 Median seconds of 5 runs, 4 threads. On 16M fragments:
 
-- `read_bed` is a single-threaded scan, so the filter, overlap and aggregation above it also run on one thread. It also decompresses and parses text: `reader_only` takes 2.7 s of the 5.1 s of `one_bin`. Parquet is 4.3 times faster for `one_bin`. If you count a file more than once, convert it first (4.5 s).
-- Keep the tabix index. Without it DuckDB has no row estimate and can build its join on the fragments: `tile_cell` peaks at 1933 MiB, against 661 MiB with the index.
+- `read_bed` is a single-threaded scan, so the filter, overlap and aggregation above it also run on one thread. It also decompresses and parses text: `reader_only` takes 2.4 s of the 4.7 s of `one_bin`. Parquet is 3.8 times faster for `one_bin`. If you count a file more than once, convert it first (4.5 s).
+- Keep the tabix index. Without it DuckDB has no row estimate and can build its join on the fragments: `tile_cell` peaks at 1933 MiB, against 673 MiB with the index.
 - Joining `cells` for integer ids, instead of grouping on the barcode string, takes 87% of the time from Parquet. The two queries also differ in `JOIN` against `IN`, so this is not the string cost alone.
 - From Parquet, cgranges blacklisting is 1.7 times faster than a SQL anti join.
 
@@ -587,9 +587,9 @@ knitr::kable(data.frame(route = names(route_seconds), median_s = round(route_sec
 
 | route    | median_s |
 |:---------|---------:|
-| sql      |     0.53 |
-| dbplyr   |     0.55 |
-| duckplyr |     0.62 |
+| sql      |     0.54 |
+| dbplyr   |     0.60 |
+| duckplyr |     0.63 |
 
 Median seconds on 4M fragments. All three return the same rows. They return rows to R, while the timing table writes a temp table, so `sql` here and `one_bin` from Parquet at 4M differ.
 
@@ -634,30 +634,30 @@ in_query
 #> 4                   3   13563
 ```
 
-That took 2.1 s on 4M fragments in one run, including UDF registration and row collection.
+That took 2.2 s on 4M fragments in one run, including UDF registration and row collection.
 
 <details>
 <summary>
 Run details
 </summary>
 
-    #> source revision: f6dbbad5fd975373cf3764d7a54c165bc3fa9f09
+    #> source revision: 19b92c47e5d6e46fb48fb521adef80462eca0c13
     #> Rduckhts: 2.0.2.9000.0.1.1
     #> DuckDB: v1.5.5
     #> bedtools: bedtools v2.31.1
-    #> duckplyr: 1.2.1
-    #> dbplyr: 2.5.2
+    #> duckplyr: 1.2.2
+    #> dbplyr: 2.6.0
     #> Rducks: 0.1.1.9000
-    #> load average at end: 2.08 1.86 1.54 1/2217 4048410
+    #> load average at end: 3.47 4.36 4.13 2/2308 303199
     #> CPUs available: 8
 
 Peak RSS in MiB of a fresh R process running `tile_cell`, one run per source and size. The bounds were set after earlier renders. The 1024 MiB bound on indexed `read_bed` and Parquet fails if the index stops giving a row estimate. The 4096 MiB bound on the unindexed copy catches runaway memory:
 
 | fragments | read_bed_indexed | read_bed_unindexed | parquet |
 |:----------|-----------------:|-------------------:|--------:|
-| 4M        |              289 |                583 |     274 |
-| 8M        |              429 |               1038 |     368 |
-| 16M       |              661 |               1933 |     563 |
+| 4M        |              282 |                587 |     275 |
+| 8M        |              425 |               1037 |     375 |
+| 16M       |              673 |               1933 |     587 |
 
 Cells stay at 5,000 and only the fragment count grows. No single-thread series was run, so these times carry no scaling verdict. Render with `taskset -c 8-15 nice -n 10 Rscript -e 'rmarkdown::render("benchmarks/benchmark_fragment_bin_counts.Rmd")'`.
 

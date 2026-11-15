@@ -32,10 +32,10 @@
   barcode in SQL, with barcode selection, blacklisting and a sparse tile by cell matrix, on
   simulated single-cell fragments. At 4M fragments its queries match `bedtools intersect`
   plus `data.table` on every row, and so do the dbplyr and duckplyr counts. At 4 threads
-  on 16M fragments, `one_bin` takes 5.14 s from an indexed `read_bed` file and 1.21 s from
+  on 16M fragments, `one_bin` takes 4.68 s from an indexed `read_bed` file and 1.24 s from
   Parquet. `read_bed` is a single-threaded scan, so the query above it runs on one thread,
   and it also decompresses and parses text. Without a tabix index `read_bed` gives the
-  planner no row estimate, and `tile_cell` peaks at 1,933 MiB against 661 MiB. Only the
+  planner no row estimate, and `tile_cell` peaks at 1,933 MiB against 673 MiB. Only the
   fragment count is scaled. Rducks runs an R rule inside the query. duckplyr needs four of
   its macros defined on the Rduckhts connection, because its own connection cannot load
   the unsigned bundled extension.
