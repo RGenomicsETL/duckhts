@@ -18,6 +18,7 @@
 #include "duckhts_registration.h"
 #include "duckhts_simd.h"
 #include "wasm_http_hfile.h"
+#include "duckdb_fs_hfile.h"
 
 /* Restricts a relation carrying `region` to autosomal sites. Relatedness and
    contamination are diploid autosomal statistics; the panel also carries the
@@ -222,6 +223,14 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
      * are bound. */
     register_wasm_http_hfile_backend();
     duckhts_simd_init();
+    if (!register_duckdb_fs_hfile_backend()) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register its htslib backend for the DuckDB file system");
+    }
+    if (!duckhts_register_file_system_option(connection)) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register the " DUCKHTS_FILE_SYSTEM_OPTION " setting");
+    }
 
     register_duckhts_htslib_functions(connection);
     register_duckhts_simd_functions(connection);

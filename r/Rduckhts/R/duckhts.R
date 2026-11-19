@@ -224,6 +224,15 @@ rduckhts_bcf <- function(
 #'   threads.
 #' @param overwrite Logical. If TRUE, overwrites existing table
 #'
+#' @details
+#' After \code{DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")},
+#' \code{read_bam} reads the file and its index through the DuckDB file system
+#' of the connection, so DuckDB secrets and file-access settings apply. The
+#' default, \code{'htslib'}, keeps htslib's own file access. "File access"
+#' under \code{read_bam} in the bundled reference,
+#' \code{system.file("function_catalog", "reference.md", package = "Rduckhts")},
+#' gives the index lookup rule of that route.
+#'
 #' @return Invisible TRUE on success
 #'
 #' @examples

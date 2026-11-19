@@ -202,6 +202,7 @@ test-duckdb-v2: release test-sql-lambda-syntax
 	.pi/duckdb-v2-venv/bin/python test/scripts/test_duckdb_v2.py
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
+test_release: test-duckdb-file-system
 test_release: test-error-handling test-fasta-nuc-alloc test-bam-open-error test-score-summary-errors
 endif
 
@@ -247,6 +248,12 @@ test-extension-symbols:
 			exit 1; \
 		fi; \
 		DUCKHTS_TEST_PYTHON=$(PYTHON_VENV_BIN) bash test/scripts/htslib_binding_test.sh "$$extension"
+
+# read_bam through the DuckDB file system, against htslib's own file access.
+.PHONY: test-duckdb-file-system
+test-duckdb-file-system:
+	$(PYTHON_VENV_BIN) test/scripts/duckdb_fs_hfile_test.py \
+		--extension build/release/$(EXTENSION_NAME).duckdb_extension
 
 .PHONY: test-named-attribute-columns
 test-named-attribute-columns:

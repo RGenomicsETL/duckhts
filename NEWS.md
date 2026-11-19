@@ -2,6 +2,15 @@
 
 # duckhts (development version)
 
+- **`read_bam` can read through the DuckDB file system.** After
+  `SET duckhts_file_system = 'duckdb'`, the alignment file and its index are read through
+  the file system of the connection, by an htslib file backend built on the DuckDB 1.5.6
+  C API. DuckDB secrets, `enable_external_access`, httpfs and registered file systems then
+  apply, and an open error ends with DuckDB's reason. The route is read-only, reads the
+  CRAM reference through htslib, and looks for the index beside the file only. The default,
+  `'htslib'`, keeps htslib's own file access, and other readers ignore the setting.
+  `make test-duckdb-file-system` compares both routes on every committed BAM and CRAM
+  fixture.
 - **DuckDB 1.5.6 or newer is required.** The extension is built for the stable DuckDB C
   API v1.5.6, the last version of the v1 C API, in place of v1.2.0. DuckDB 1.5.0 to 1.5.5
   refuse to load it with an error that names both versions; DuckDB 1.5.6 and 2.0 load it.
