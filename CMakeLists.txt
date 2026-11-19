@@ -114,13 +114,13 @@ else()
 	add_library(${EXTENSION_NAME} SHARED ${EXTENSION_SOURCES})
 endif()
 
-# The ELF extension exports htslib and DuckHTS functions with default
-# visibility, and native tests link them from the built library. Without this
-# option the dynamic loader resolves the extension's own calls to those
-# functions against the host process first, so a host that carries another
-# htslib replaces the bundled one. Bind them at link time instead.
+# The ELF extension exports htslib and DuckHTS symbols with default visibility,
+# and native tests link them from the built library. Without this option the
+# dynamic loader resolves the extension's own references to those functions and
+# tables against the host process first, so a host that carries another htslib
+# replaces the bundled one. Bind them at link time instead.
 if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN AND NOT DUCKDB_WASM_EXTENSION)
-    target_link_options(${EXTENSION_NAME} PRIVATE "-Wl,-Bsymbolic-functions")
+    target_link_options(${EXTENSION_NAME} PRIVATE "-Wl,-Bsymbolic")
 endif()
 
 # These presets apply to targets created below (the native test programs).

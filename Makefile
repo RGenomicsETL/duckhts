@@ -225,24 +225,26 @@ test-score-summary-errors:
 
 .PHONY: test-extension-symbols
 test-extension-symbols:
-	@set -e; test -f build/release/duckhts.duckdb_extension || { echo "test-extension-symbols: build the release extension first"; exit 1; }; \
-		symbols=$$(nm -D -u build/release/duckhts.duckdb_extension); \
-		printf '%s\n' "$$symbols" | \
+	@set -e; extension=build/release/$(EXTENSION_NAME).duckdb_extension; \
+		test -f "$$extension" || { echo "test-extension-symbols: build the release extension first"; exit 1; }; \
+		imports=$$(nm -D -u "$$extension"); \
+		printf '%s\n' "$$imports" | \
 		awk '$$NF ~ /^duckdb_/ { print "Unexpected DuckDB C API import: " $$0; bad = 1 } END { exit bad }'; \
 		tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
-		nm -D --defined-only build/release/duckhts.duckdb_extension | \
-			awk '$$2 == "T" { print $$3 }' | LC_ALL=C sort -u > "$$tmp/defined_functions"; \
-		readelf -r --wide build/release/duckhts.duckdb_extension | \
-			awk '$$3 ~ /JUMP_SLO|GLOB_DAT/ { sub(/@.*/, "", $$5); print $$5 }' | LC_ALL=C sort -u > "$$tmp/dynamic_targets"; \
-		LC_ALL=C comm -12 "$$tmp/defined_functions" "$$tmp/dynamic_targets" > "$$tmp/interposable"; \
-		test -s "$$tmp/defined_functions" || { echo "test-extension-symbols: no defined functions found"; exit 1; }; \
+		exports=$$(nm -D --defined-only "$$extension"); \
+		printf '%s\n' "$$exports" | awk '{ print $$3 }' | LC_ALL=C sort -u > "$$tmp/defined"; \
+		test -s "$$tmp/defined" || { echo "test-extension-symbols: no defined symbols found"; exit 1; }; \
+		relocations=$$(readelf -r --wide "$$extension"); \
+		printf '%s\n' "$$relocations" | \
+			awk '$$3 ~ /^R_/ && NF >= 5 { sub(/@.*/, "", $$5); print $$5 }' | LC_ALL=C sort -u > "$$tmp/dynamic_targets"; \
+		LC_ALL=C comm -12 "$$tmp/defined" "$$tmp/dynamic_targets" > "$$tmp/interposable"; \
 		if [ -s "$$tmp/interposable" ]; then \
-			echo "test-extension-symbols: the host process can replace these functions of the extension:"; \
+			echo "test-extension-symbols: the host process can replace these symbols of the extension:"; \
 			sed -n '1,20p' "$$tmp/interposable"; \
 			echo "  ($$(wc -l < "$$tmp/interposable") in total)"; \
 			exit 1; \
 		fi; \
-		bash test/scripts/htslib_binding_test.sh
+		DUCKHTS_TEST_PYTHON=$(PYTHON_VENV_BIN) bash test/scripts/htslib_binding_test.sh "$$extension"
 
 .PHONY: test-named-attribute-columns
 test-named-attribute-columns:
