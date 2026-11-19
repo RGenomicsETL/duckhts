@@ -2,6 +2,13 @@
 
 # duckhts (development version)
 
+- On Linux, the extension binds every reference to its bundled htslib at link time,
+  lookup tables as well as functions. A host process that defines the same symbols, such
+  as another htslib's `seq_nt16_str`, no longer changes DuckHTS results: with such a host,
+  `read_fastq` returned the host table's characters for every base.
+  `make test-extension-symbols` loads the extension beside a library that defines `hopen`
+  and `seq_nt16_str` and checks the decoded reads.
+
 - The `duckhts_mosdepth` catalog entry states that `processing_threads` of 0 or 1
   processes contigs sequentially; parallel contig workers start above 1.
 - The catalog `returns` of twelve STRUCT-returning scalar and aggregate functions lists
