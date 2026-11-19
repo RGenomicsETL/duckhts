@@ -2,6 +2,14 @@
 
 # duckhts (development version)
 
+- **DuckDB 1.5.6 or newer is required.** The extension is built for the stable DuckDB C
+  API v1.5.6, the last version of the v1 C API, in place of v1.2.0. DuckDB 1.5.0 to 1.5.5
+  refuse to load it with an error that names both versions; DuckDB 1.5.6 and 2.0 load it.
+  The vendored headers in `duckdb_capi/` are the unmodified v1.5.6 ones, and CMake stops
+  the build when `TARGET_DUCKDB_VERSION` and the header's default API version differ.
+  duckdb-wasm builds that embed a DuckDB older than 1.5.6, including `1.33.1-dev57.0`, do
+  not load this extension.
+
 - On Linux, the extension binds every reference to its bundled htslib at link time,
   lookup tables as well as functions. A host process that defines the same symbols, such
   as another htslib's `seq_nt16_str`, no longer changes DuckHTS results: with such a host,

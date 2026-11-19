@@ -75,12 +75,12 @@ run them on bundled files.
 
 ## Runtime compatibility
 
-DuckHTS requires DuckDB **1.5.0 or newer** for its SQL functions and
-macros. The stable **v1.2.0 C API** recorded in `C_STRUCT` extension
-metadata is a separate interface version; it does not imply support for
-DuckDB 1.2 SQL. For duckdb-wasm, check the embedded DuckDB engine
-version rather than comparing npm package version numbers with DuckDB
-release numbers.
+DuckHTS requires DuckDB **1.5.6 or newer**. The extension is built for
+the stable **v1.5.6 C API**, recorded in its `C_STRUCT` metadata, and an
+older DuckDB refuses to load it with a message that names both versions.
+DuckDB 2.0 loads it through the same interface. For duckdb-wasm, check
+the embedded DuckDB engine version rather than comparing npm package
+version numbers with DuckDB release numbers.
 
 ## Using DuckHTS with a database file
 

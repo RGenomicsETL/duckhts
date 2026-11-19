@@ -1,5 +1,9 @@
 # Rduckhts (development version)
 
+- **The `duckdb` R package 1.5.6 or newer is required** (`Imports: duckdb (>= 1.5.6)`).
+  The bundled extension is built for the stable DuckDB C API v1.5.6, and an older DuckDB
+  refuses to load it. The bundled DuckDB C API headers are the unmodified v1.5.6 ones.
+
 - `rduckhts_functions()$returns` lists the fields and types for twelve STRUCT-returning
   scalar and aggregate functions, such as `duckhts_fastq_qc` and `sam_flag_bits`. The package
   tests check each scalar and aggregate return type against the loaded extension.

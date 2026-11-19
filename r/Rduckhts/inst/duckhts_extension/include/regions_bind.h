@@ -5,8 +5,8 @@
 
 /* Shared DuckDB bind adapter for the typed `regions` named parameter of
  * read_bcf and read_geno. Include after duckdb_extension.h /
- * DUCKDB_EXTENSION_EXTERN. Uses only LIST/STRUCT value accessors available
- * at C_STRUCT v1.2.0. The interval representation itself stays in
+ * DUCKDB_EXTENSION_EXTERN. Reads the parameter through the LIST/STRUCT value
+ * accessors. The interval representation itself stays in
  * region_list.h and knows nothing about DuckDB. */
 
 /* STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[]; caller destroys. */
