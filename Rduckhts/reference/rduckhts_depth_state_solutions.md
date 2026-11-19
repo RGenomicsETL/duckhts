@@ -164,7 +164,7 @@ DBI::dbExecute(con, paste(
 best <- rduckhts_depth_state_solutions(con, "bins", normal_fractions = 0.7, ploidies = 2)
 best[, c("tumour_fraction", "ploidy", "status")]
 #>   tumour_fraction   ploidy status
-#> 1       0.3032431 2.002865     ok
+#> 1       0.3032431 2.002864     ok
 segments <- rduckhts_depth_state_segments(con, "bins", normal_fractions = 0.7, ploidies = 2)
 segments[segments$chrom == "8", c("chrom", "copy_number", "bins")]
 #>    chrom copy_number bins

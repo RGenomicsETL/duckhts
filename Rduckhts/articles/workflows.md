@@ -228,7 +228,7 @@ norm_out[order(norm_out$alt, norm_out$alt_index),
 
 ### VariantKey and RegionKey
 
-DuckHTS now bundles the official VariantKey / RegionKey C API. The SQL
+DuckHTS bundles the official VariantKey / RegionKey C API. The SQL
 helper `variantkey(...)` accepts 1-based VCF positions to match bcftools
 `%VKX`, while `regionkey(...)` keeps 0-based half-open interval
 semantics for span work. Large, ambiguous, and symbolic alleles still
@@ -1099,8 +1099,8 @@ annotations over provider rows, use the vectorized scalar helpers
 `read_bed(...)`, `read_bam(...)`, `read_bcf(...)`, or regular tables.
 For streaming one-row-per-hit expansion while keeping provider columns,
 use `duckhts_cgranges_overlaps_list(...)` with `UNNEST(...)` in the
-SELECT list, which also covers bulk probing of any relation. There is no
-dedicated R wrapper yet, so use them through `DBI`.
+SELECT list, which also covers bulk probing of any relation. These
+helpers have no R wrapper; call them through `DBI`.
 
 ``` r
 DBI::dbGetQuery(con, "SELECT duckhts_cgranges_create('readme_idx') AS ok")
@@ -1517,7 +1517,7 @@ rduckhts_simd_info(con)[, c("backend", "selectable", "compiled", "cpu_supported"
     ## 2         sse2      FALSE    FALSE          TRUE     FALSE    FALSE
     ## 3        sse41      FALSE    FALSE          TRUE     FALSE    FALSE
     ## 4         avx2       TRUE     TRUE          TRUE      TRUE     TRUE
-    ## 5       avx512       TRUE     TRUE          TRUE      TRUE     TRUE
+    ## 5       avx512       TRUE     TRUE         FALSE     FALSE    FALSE
     ## 6         neon       TRUE    FALSE         FALSE     FALSE    FALSE
     ## 7 wasm_simd128       TRUE    FALSE         FALSE     FALSE    FALSE
 
@@ -1526,7 +1526,7 @@ rduckhts_simd_kernel_info(con)[, c("kernel", "selected_backend", "scalar_fallbac
 ```
 
     ##            kernel selected_backend scalar_fallback
-    ## 1 seq_base_counts           avx512           FALSE
+    ## 1 seq_base_counts             avx2           FALSE
     ## 2 bam_nt16_counts             avx2           FALSE
     ## 3  nt16_gc_counts             avx2           FALSE
     ## 4        fastq_qc             avx2           FALSE

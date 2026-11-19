@@ -1,7 +1,7 @@
 # Detect Complex Types in DuckDB Table
 
-Identifies columns in a DuckDB table that contain complex types (ARRAY
-or MAP) that will be returned as R lists.
+Lists the columns of a table whose DuckDB type contains `[` or `MAP`.
+`duckdb` returns such columns as R lists.
 
 ## Usage
 
@@ -21,8 +21,10 @@ detect_complex_types(con, table_name)
 
 ## Value
 
-A data frame with columns that have complex types, showing column_name,
-column_type, and a description of R type.
+A data frame with columns `column_name`, `column_type`, `r_type`
+(`"vector"` or `"data.frame"`, the class of each cell) and
+`description`; a zero-column data frame when the table has no such
+columns.
 
 ## Examples
 

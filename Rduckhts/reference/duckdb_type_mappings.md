@@ -1,29 +1,9 @@
 # DuckDB to R Type Mappings
 
-The mapping covers the most common data types used in HTS file
-processing:
-
-- BIGINT \<-\> double (not integer due to 64-bit overflow protection)
-
-- DOUBLE \<-\> numeric/double
-
-- VARCHAR \<-\> character/string
-
-- BOOLEAN \<-\> logical
-
-- ARRAY types (e.g., VARCHAR\[\], BIGINT\[\]) \<-\> list
-
-- MAP types (e.g., MAP(VARCHAR, VARCHAR)) \<-\> data.frame
-
-Important notes:
-
-- 64-bit integers (BIGINT, UBIGINT) become double to prevent overflow
-
-- DATE/TIME values return as Unix epoch numbers (double)
-
-- MAP types become data frames with 'key' and 'value' columns
-
-- ARRAY types become vectors (which are lists in R terminology)
+Returns named character vectors that map DuckDB column types to the R
+storage type that `duckdb` returns, and R type names to the DuckDB types
+used for tabix column types (see
+[`normalize_tabix_types`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/normalize_tabix_types.md)).
 
 ## Usage
 
@@ -45,9 +25,20 @@ A named list with two elements:
 
 ## Details
 
-Returns a named list mapping between DuckDB and R data types. This is
-useful for understanding type conversions when reading HTS files or when
-specifying column types in tabix functions.
+`duckdb_to_r` gives the [`typeof()`](https://rdrr.io/r/base/typeof.html)
+of the returned column, with one exception: `"MAP"` maps to
+`"data.frame"`, the class of each cell. The class is not part of the
+mapping:
+
+- DATE, TIMESTAMP and TIME columns have storage type double and class
+  `Date`, `POSIXct` and `difftime` (seconds).
+
+- BIGINT and UBIGINT columns are double under the default
+  `bigint = "numeric"` connection setting.
+
+- A LIST column such as `VARCHAR[]` is a list with one vector per row. A
+  MAP column is a list with one data frame per row, with columns `key`
+  and `value`.
 
 ## Examples
 

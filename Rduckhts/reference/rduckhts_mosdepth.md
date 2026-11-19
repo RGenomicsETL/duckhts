@@ -73,7 +73,8 @@ rduckhts_mosdepth(
 
 - processing_threads:
 
-  Number of parallel contig processing threads (0 = sequential)
+  Number of parallel contig workers; 0 or 1 processes contigs
+  sequentially.
 
 - flag:
 

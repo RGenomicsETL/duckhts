@@ -1,7 +1,8 @@
 # Extract MAP Keys and Values
 
-Helper function to work with DuckDB MAP data (returned as data frames).
-Can extract keys, values, or search for specific key-value pairs.
+Extracts keys, values, or the value of one key from each row of a DuckDB
+MAP column. `duckdb` returns a MAP column as a list of data frames with
+columns `key` and `value`.
 
 ## Usage
 
@@ -13,7 +14,7 @@ extract_map_data(map_col, operation = "keys", default = NA)
 
 - map_col:
 
-  A data frame column from DuckDB MAP data
+  A MAP column: a list of data frames with columns `key` and `value`
 
 - operation:
 

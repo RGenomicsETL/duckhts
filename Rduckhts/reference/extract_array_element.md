@@ -1,7 +1,7 @@
 # Extract Array Elements Safely
 
-Helper function to safely extract elements from DuckDB arrays (returned
-as R lists) with proper error handling.
+Extracts one element from each row of a DuckDB LIST or ARRAY column,
+which `duckdb` returns as an R list.
 
 ## Usage
 

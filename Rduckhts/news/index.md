@@ -2,6 +2,20 @@
 
 ## Rduckhts (development version)
 
+- [`?duckdb_type_mappings`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/duckdb_type_mappings.md)
+  describes what `duckdb` returns: DATE, TIMESTAMP and TIME columns are
+  double vectors of class `Date`, `POSIXct` and `difftime`, and a MAP
+  column is a list with one key/value data frame per row. The returned
+  mappings are unchanged.
+  [`?detect_complex_types`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/detect_complex_types.md),
+  [`?extract_array_element`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/extract_array_element.md)
+  and
+  [`?extract_map_data`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/extract_map_data.md)
+  use the same description.
+  [`?rduckhts_mosdepth`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_mosdepth.md)
+  and the bundled `duckhts_mosdepth` catalog entry state that
+  `processing_threads` of 0 or 1 processes contigs sequentially.
+
 - `read_bed`, and so
   [`rduckhts_bed()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bed.md),
   splits each line at its tabs once and parses integer fields in place.

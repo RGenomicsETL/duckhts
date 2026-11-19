@@ -18,9 +18,10 @@ built on htslib. It reads the following formats as DuckDB tables:
 - BigWig
 - tabix-indexed text
 
-Indexed files answer region queries without a full scan, and remote
-files are read over HTTPS and S3. Results stay in DuckDB until you
-collect them. htslib is bundled, so there is nothing else to install.
+Indexed files answer region queries without a full scan. When the
+package is built against libcurl, remote files are read over HTTPS and
+S3. Results stay in DuckDB until you collect them. htslib is bundled
+with the package.
 
 ## Installation
 
@@ -235,7 +236,7 @@ dbGetQuery(con, "SELECT * FROM duckhts_cgranges_from_table(
 #> 1    TRUE
 first_line(dbGetQuery(con, "SELECT duckhts_cgranges_count_overlaps(
   'targets_idx', chrom, start, 'end') FROM targets"))
-#> [1] "Invalid Error: Conversion Error: Could not convert string 'end' to INT64"
+#> [1] "Conversion Error: Could not convert string 'end' to INT64"
 dbGetQuery(con, 'SELECT chrom, start, "end",
   duckhts_cgranges_count_overlaps(\'targets_idx\', chrom, start, "end") AS overlaps
   FROM targets')
@@ -253,9 +254,6 @@ not overlap `10-20`. VCF `POS` and region strings such as
 `"CHROMOSOME_I:1-1000"` are 1-based and inclusive. To test a VCF
 position against a BED interval, use `start < POS AND POS <= "end"`, or
 pass `POS - 1, POS` to an interval function.
-
-Friendlier messages for these mistakes are discussed in
-[\#357](https://github.com/RGenomicsETL/duckhts/issues/357).
 
 ## Learn more
 
