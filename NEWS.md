@@ -4,6 +4,16 @@
 
 - The `duckhts_mosdepth` catalog entry states that `processing_threads` of 0 or 1
   processes contigs sequentially; parallel contig workers start above 1.
+- The catalog `returns` of twelve STRUCT-returning scalar and aggregate functions lists
+  their fields and types (for example `duckhts_fastq_qc`, `reverse_variantkey`,
+  `bcftools_norm_row` and `sam_flag_bits`). The R catalog test checks every scalar and
+  aggregate `returns` against the type DuckDB registers.
+- Catalog corrections checked against the source: `read_bed` skips any line that starts
+  with `track` or `browser`, including a data line with such a chrom; `duckhts_roh`
+  analyses a record such as ALT `[G, <*>]`; `bcf_index` defaults to `min_shift` 14 (CSI)
+  for `.bcf` paths; `read_genbank` builds gene IDs from `/locus_tag` or else `/gene` and
+  percent-encodes control characters; the `duckhts_depth_bins` scale includes
+  `high_ratio` bins; and VariantKey also codes `XT` and `YT` as 23 and 24.
 - A `functions.yaml` entry can set `details_from` to another entry's name to use that
   entry's `details` sections, followed by any headings of its own. Seventeen variant
   entries (`_map`, `_ref`, `_labelled`, the index and Parquet-conversion families, and

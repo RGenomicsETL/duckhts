@@ -576,14 +576,15 @@ expect_equal(
 
 # Catalog kinds and parameters must match the loaded extension. For each entry, at
 # least one registered overload must match the documented signature on its own:
-# scalar and aggregate functions by every documented arity (or variable arguments), native
+# scalar and aggregate functions by every documented arity (or variable arguments) and by
+# return type, native
 # table functions by positional count and exact named options, and macros by every
 # argument name in order.
 local({
   con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE))
   registered <- DBI::dbGetQuery(con, paste(
-    "SELECT function_name, function_type, parameters, varargs",
+    "SELECT function_name, function_type, parameters, varargs, return_type",
     "FROM duckdb_functions()"
   ))
   # Split a signature's top-level arguments, ignoring commas inside brackets or quotes.
@@ -640,6 +641,11 @@ local({
       for (arity in arities) {
         expect_true(varargs || arity %in% counts, info = paste(entry$name, "arity", arity))
       }
+      # The documented return type is one of the registered ones. DuckDB quotes
+      # reserved STRUCT field names such as "end"; the catalog may leave them bare.
+      type_text <- function(type) toupper(gsub("[[:space:]\"]+", "", type))
+      expect_true(type_text(entry$returns) %in% type_text(found$return_type),
+                  info = paste(entry$name, "returns", entry$returns))
       next
     }
     matches <- vapply(seq_len(nrow(found)), function(j) {
