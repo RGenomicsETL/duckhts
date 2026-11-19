@@ -1,5 +1,13 @@
 # Rduckhts (development version)
 
+- `rduckhts_functions()$returns` lists the fields and types for twelve STRUCT-returning
+  scalar and aggregate functions, such as `duckhts_fastq_qc` and `sam_flag_bits`. The package
+  tests check each scalar and aggregate return type against the loaded extension.
+- The bundled function reference corrects seven entries against the extension source:
+  `read_bed` track and browser line skipping, `duckhts_roh` ALT selection, the
+  `bcf_index` `min_shift` default, `read_genbank` gene IDs and percent-encoding, the
+  `duckhts_depth_bins` scale, and VariantKey codes for `XT` and `YT`.
+
 - `?duckdb_type_mappings` describes what `duckdb` returns: DATE, TIMESTAMP and TIME
   columns are double vectors of class `Date`, `POSIXct` and `difftime`, and a MAP column
   is a list with one key/value data frame per row. The returned mappings are unchanged.

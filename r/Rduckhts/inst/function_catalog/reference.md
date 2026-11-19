@@ -778,7 +778,7 @@ scan_mode := 'sequential' forces full-file streaming/counting instead of index-b
 
 ### validation
 
-read_bed is a lenient reader, not a BEDv1 validator (https://samtools.github.io/hts-specs/BEDv1.pdf): it also reads UCSC track files, skipping track and browser lines, and it only rejects data lines with fewer than three tab-delimited fields. Coordinates are not checked against BEDv1: a non-integer chromStart/chromEnd reads as NULL and chromEnd < chromStart is returned as is, so filter those in SQL when strict BED is required.
+read_bed is a lenient reader, not a BEDv1 validator (https://samtools.github.io/hts-specs/BEDv1.pdf): it also reads UCSC track files, skipping empty lines and lines that start with #, track or browser, and it only rejects data lines with fewer than three tab-delimited fields. The track and browser test is a prefix match, so a data line whose chrom starts with either word is skipped too. Coordinates are not checked against BEDv1: a non-integer chromStart/chromEnd reads as NULL and chromEnd < chromStart is returned as is, so filter those in SQL when strict BED is required.
 
 ### error_policy
 
@@ -1133,7 +1133,7 @@ duckhts_fastq_qc(sequence, quality [, max_cycles])
 Returns:
 
 ```
-STRUCT
+STRUCT(reads UBIGINT, bases UBIGINT, q20_bases UBIGINT, q30_bases UBIGINT, q40_bases UBIGINT, quality_sum UBIGINT, a_bases UBIGINT, c_bases UBIGINT, g_bases UBIGINT, t_bases UBIGINT, n_bases UBIGINT, other_bases UBIGINT, max_read_length UINTEGER, cycles STRUCT("cycle" UINTEGER, bases UBIGINT, quality_sum UBIGINT, a_bases UBIGINT, c_bases UBIGINT, g_bases UBIGINT, t_bases UBIGINT, n_bases UBIGINT, other_bases UBIGINT, a_quality_sum UBIGINT, c_quality_sum UBIGINT, g_quality_sum UBIGINT, t_quality_sum UBIGINT)[])
 ```
 
 ### Examples
@@ -1380,7 +1380,7 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 ### Input
 
-path is a VCF/BCF with FORMAT/PL (default) or FORMAT/GT (gt_error set), read with read_bcf(tidy_format := true) on the caller's connection. af_tag names an INFO tag declared Type=Float, Number=A; its first value is the ALT allele frequency. Sites with an absent or missing tag, or a frequency of exactly 0, are skipped as bcftools roh skips them. Records with more than one ALT, no ALT, or a first ALT that is symbolic (<*>, <NON_REF>) are not analysed. samples uses read_bcf's selectors.
+path is a VCF/BCF with FORMAT/PL (default) or FORMAT/GT (gt_error set), read with read_bcf(tidy_format := true) on the caller's connection. af_tag names an INFO tag declared Type=Float, Number=A; its first value is the ALT allele frequency. Sites with an absent or missing tag, or a frequency of exactly 0, are skipped as bcftools roh skips them. A record is analysed when exactly one ALT is not the symbolic <*> or <NON_REF> allele and that ALT comes first; for example ALT [G, <*>] is analysed, and [G, T], [<*>, G] and no ALT are not. samples uses read_bcf's selectors.
 
 ### Output
 
@@ -1434,7 +1434,7 @@ table(sample VARCHAR, chrom VARCHAR, start BIGINT, "end" BIGINT, length BIGINT, 
 
 ### Input
 
-path is a VCF/BCF with FORMAT/PL (default) or FORMAT/GT (gt_error set), read with read_bcf(tidy_format := true) on the caller's connection. af_tag names an INFO tag declared Type=Float, Number=A; its first value is the ALT allele frequency. Sites with an absent or missing tag, or a frequency of exactly 0, are skipped as bcftools roh skips them. Records with more than one ALT, no ALT, or a first ALT that is symbolic (<*>, <NON_REF>) are not analysed. samples uses read_bcf's selectors.
+path is a VCF/BCF with FORMAT/PL (default) or FORMAT/GT (gt_error set), read with read_bcf(tidy_format := true) on the caller's connection. af_tag names an INFO tag declared Type=Float, Number=A; its first value is the ALT allele frequency. Sites with an absent or missing tag, or a frequency of exactly 0, are skipped as bcftools roh skips them. A record is analysed when exactly one ALT is not the symbolic <*> or <NON_REF> allele and that ALT comes first; for example ALT [G, <*>] is analysed, and [G, T], [<*>, G] and no ALT are not. samples uses read_bcf's selectors.
 
 ### Output
 
@@ -2189,7 +2189,7 @@ duckhts_somalier_relatedness(sketch_a, sketch_b, max_sites)
 Returns:
 
 ```
-STRUCT
+STRUCT(sample_a VARCHAR, sample_b VARCHAR, assembly VARCHAR, panel_sha256 VARCHAR, method_version VARCHAR, status VARCHAR, site_count UBIGINT, jointly_called UBIGINT, ibs0 UBIGINT, ibs2 UBIGINT, shared_hets UBIGINT, het_ab UBIGINT, shared_hom_b UBIGINT, het_count_a UBIGINT, het_count_b UBIGINT, hom_b_count_a UBIGINT, hom_b_count_b UBIGINT, callable_hom_count_a UBIGINT, callable_hom_count_b UBIGINT, matching_hom_count UBIGINT, middling_balance_count_a UBIGINT, middling_balance_count_b UBIGINT, unavailable_count_a UBIGINT, unavailable_count_b UBIGINT, relatedness DOUBLE, inferred_hom_concordance DOUBLE, raw_hom_b_concordance DOUBLE, p_middling_a DOUBLE, p_middling_b DOUBLE, adjusted_concordance DOUBLE)
 ```
 
 ### Results
@@ -2236,7 +2236,7 @@ Each sketch is content-checked once and the pairs are compared from the checked 
 
 ### Limits
 
-The output has N(N-1)/2 rows for N samples. max_pairs must be a positive, finite whole number; a relation with more pairs than max_pairs is an error before any pair is compared. The default, 50,000,000, is 400 times the pairs of 500 samples. Memory model for N sketches of S sites, each with three masks of ceil(S/64) 64-bit words: the checked sketches form one list in sample_id order, which the query holds in a few shared copies. Each thread copies the list once for each chunk of blocks it scans and reads both sketches of every pair of that chunk in place from its copy. The workspace of a thread is therefore one copy of the list plus fixed 2,048-row vectors of pair indexes and results: it grows with N times S, not with the pairs, and the pair indexes are never collected. See benchmarks/benchmark_somalier_cohort_scaling.md for measured time and memory.
+The output has N(N-1)/2 rows for N samples. max_pairs must be a positive, finite whole number; a relation with more pairs than max_pairs is an error before any pair is compared. The default, 50,000,000, admits a cohort of up to 10,000 samples (49,995,000 pairs). Memory model for N sketches of S sites, each with three masks of ceil(S/64) 64-bit words: the checked sketches form one list in sample_id order, which the query holds in a few shared copies. Each thread copies the list once for each chunk of blocks it scans and reads both sketches of every pair of that chunk in place from its copy. The workspace of a thread is therefore one copy of the list plus fixed 2,048-row vectors of pair indexes and results: it grows with N times S, not with the pairs, and the pair indexes are never collected. See benchmarks/benchmark_somalier_cohort_scaling.md for measured time and memory.
 
 ### Examples
 
@@ -2524,7 +2524,7 @@ seqname is VERSION, else ACCESSION, else the LOCUS name; a segment on a remote a
 
 ### Attributes
 
-Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus_tag> for genes and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , % are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.
+Synthesized GFF3 keys ID, Name and Parent accompany the original qualifiers. ID is gene-<locus> for genes, where locus is /locus_tag or else /gene, and <key>-<n> otherwise, with n the feature's 0-based position in the file. Parent links a feature to the gene sharing its /locus_tag (or /gene) anywhere in the record. Repeated qualifiers become one key with comma-joined values, valueless qualifiers read 'true', and ; = & , %, bytes below 0x20 and 0x7f are percent-encoded. attributes_map := TRUE adds the same pairs as a MAP.
 
 ### Missing keys
 
@@ -2735,6 +2735,10 @@ min_shift must be between 0 and 30, inclusive; invalid values are rejected durin
 ### Execution
 
 The index is built during query execution, once per execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file, so a missing or unreadable input is an execution error. Each execution rebuilds the index.
+
+### Defaults
+
+When min_shift is omitted or NULL it is 14 for a path ending in .bcf, which builds a CSI index, and 0 otherwise, which builds a TBI index. index_path defaults to path plus .csi or .tbi to match.
 
 ### Examples
 
@@ -2958,7 +2962,7 @@ bins_table is a caller-named table or view with one row per sample and bin: samp
 
 ### Model
 
-A bin's read rate is reads / (end - start). Its GC stratum is floor(gc / gc_step). The training bins of a sample are its autosomal bins that pass the bin rules, have at least one read and a read rate inside the outlier_quantile and 1 - outlier_quantile quantiles of those bins' rates. expected is the bin's length times the median rate of the training bins of its sample and stratum, scaled so that the median ratio of the sample's kept positive-read autosomal bins is 1. Empty bins do not set this scale and retain zero ratios when their bin and stratum rules pass. ratio = reads / expected is then about 1 for two copies, 0.5 for one and 1.5 for three; log2_ratio is NULL for a bin without reads. Autosomal means a contig whose duckhts_contig_key is not X, Y or MT. The strata are fitted on the sample's own autosomal bins, so a change that holds a large share of the training bins of some GC strata is partly absorbed by the correction: correct a whole genome rather than a few chromosomes (on five chromosomes, a planted chr18 gain was recovered at 0.6 to 0.7 of its size; benchmarks/benchmark_depth_fraction.md), or give the estimators expected counts from a reference panel instead.
+A bin's read rate is reads / (end - start). Its GC stratum is floor(gc / gc_step). The training bins of a sample are its autosomal bins that pass the bin rules, have at least one read and a read rate inside the outlier_quantile and 1 - outlier_quantile quantiles of those bins' rates. expected is the bin's length times the median rate of the training bins of its sample and stratum, scaled so that the median ratio of the sample's positive-read autosomal bins that pass the bin and stratum rules is 1; max_ratio is applied after this scale, so high_ratio bins count toward the median. Empty bins do not set this scale and retain zero ratios when their bin and stratum rules pass. ratio = reads / expected is then about 1 for two copies, 0.5 for one and 1.5 for three; log2_ratio is NULL for a bin without reads. Autosomal means a contig whose duckhts_contig_key is not X, Y or MT. The strata are fitted on the sample's own autosomal bins, so a change that holds a large share of the training bins of some GC strata is partly absorbed by the correction: correct a whole genome rather than a few chromosomes (on five chromosomes, a planted chr18 gain was recovered at 0.6 to 0.7 of its size; benchmarks/benchmark_depth_fraction.md), or give the estimators expected counts from a reference panel instead.
 
 ### Kept bins
 
@@ -3542,7 +3546,7 @@ UBIGINT
 
 ### Chromosome code
 
-The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name must have a value from 1 through 31 to fit the upstream five-bit field; other numeric names return NULL instead of wrapping. X, Y, and M or MT, in any letter case, become 23, 24 and 25, so 25 and MT share a code. Any other name has no code, and neither does 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names.
+The chromosome part of a VariantKey is a code of the upstream format, not a contig key. A leading chr is removed in any letter case. An all-digit name must have a value from 1 through 31 to fit the upstream five-bit field; other numeric names return NULL instead of wrapping. X, Y and M, in any letter case, become 23, 24 and 25, and so do their two-letter forms with a final T (XT, YT, MT), an upstream rule; 25 and MT therefore share a code. Any other name has no code, and neither does 0: variantkey() and regionkey() return NULL for it, so scaffolds and accessions have no key rather than a shared one. Use duckhts_contig_key() to join on contig names.
 
 ### Examples
 
@@ -3695,7 +3699,7 @@ decode_variantkey(vk)
 Returns:
 
 ```
-STRUCT
+STRUCT(chrom_code UTINYINT, pos0 UINTEGER, refalt_code UINTEGER)
 ```
 
 ### Examples
@@ -3717,7 +3721,7 @@ reverse_variantkey(vk)
 Returns:
 
 ```
-STRUCT
+STRUCT(chrom VARCHAR, chrom_code UTINYINT, pos BIGINT, pos0 UINTEGER, "ref" VARCHAR, alt VARCHAR, refalt_code UINTEGER, reversible BOOLEAN)
 ```
 
 ### Examples
@@ -3739,7 +3743,7 @@ variantkey_range(chrom, pos_min, pos_max)
 Returns:
 
 ```
-STRUCT
+STRUCT(min UBIGINT, max UBIGINT)
 ```
 
 ### Examples
@@ -3937,7 +3941,7 @@ decode_regionkey(rk)
 Returns:
 
 ```
-STRUCT
+STRUCT(chrom_code UTINYINT, "start" UINTEGER, "end" UINTEGER, strand_code UTINYINT)
 ```
 
 ### Examples
@@ -3959,7 +3963,7 @@ reverse_regionkey(rk)
 Returns:
 
 ```
-STRUCT
+STRUCT(chrom VARCHAR, chrom_code UTINYINT, "start" UINTEGER, "end" UINTEGER, strand TINYINT, strand_code UTINYINT)
 ```
 
 ### Examples
@@ -4103,7 +4107,7 @@ bcftools_liftover(chrom, pos, ref, alt, chain_path, dst_fasta_ref, src_fasta_ref
 Returns:
 
 ```
-STRUCT
+STRUCT(src_chrom VARCHAR, src_pos BIGINT, src_ref VARCHAR, src_alt VARCHAR, dest_chrom VARCHAR, dest_pos BIGINT, dest_end BIGINT, dest_ref VARCHAR, dest_alt VARCHAR, mapped BOOLEAN, reverse_complemented BOOLEAN, swap INTEGER, reject_reason VARCHAR, note VARCHAR)
 ```
 
 ### Contig names
@@ -4159,7 +4163,7 @@ bcftools_norm_row(chrom, pos, ref, alt, fasta_ref, end_pos, svlen, fasta_index_p
 Returns:
 
 ```
-STRUCT
+STRUCT(pos_normed BIGINT, end_pos_normed BIGINT, ref_normed VARCHAR, alt_normed VARCHAR[], normed BOOLEAN, norm_status VARCHAR)
 ```
 
 ### Arguments
@@ -4311,7 +4315,7 @@ bcftools_munge_row(chrom, pos, a1, a2, id, p, z, or, beta, n, n_cas, n_con, info
 Returns:
 
 ```
-STRUCT
+STRUCT(chrom VARCHAR, pos BIGINT, id VARCHAR, "ref" VARCHAR, alt VARCHAR, alleles_swapped BOOLEAN, "filter" VARCHAR, ns DOUBLE, ez DOUBLE, nc DOUBLE, es DOUBLE, se DOUBLE, lp DOUBLE, af DOUBLE, ac DOUBLE, ne DOUBLE, si DOUBLE, i2 DOUBLE, cq DOUBLE, ed VARCHAR)
 ```
 
 ### Arguments
@@ -4635,7 +4639,7 @@ sam_flag_bits(flag)
 Returns:
 
 ```
-STRUCT
+STRUCT(is_paired BOOLEAN, is_proper_pair BOOLEAN, is_unmapped BOOLEAN, is_next_segment_unmapped BOOLEAN, is_reverse_complemented BOOLEAN, is_next_segment_reverse_complemented BOOLEAN, is_first_segment BOOLEAN, is_last_segment BOOLEAN, is_secondary BOOLEAN, is_qc_fail BOOLEAN, is_duplicate BOOLEAN, is_supplementary BOOLEAN)
 ```
 
 ### Examples
@@ -4921,7 +4925,7 @@ cigar_aligned_blocks(cigar, pos[, strict])
 Returns:
 
 ```
-STRUCT
+STRUCT(ref_start BIGINT[], query_start BIGINT[], width BIGINT[])
 ```
 
 ### Coordinates
