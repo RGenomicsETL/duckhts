@@ -12,12 +12,14 @@ detect_complex_types(con, table_name)
 \item{table_name}{Name of the table to analyze}
 }
 \value{
-A data frame with columns that have complex types, showing
-  column_name, column_type, and a description of R type.
+A data frame with columns \code{column_name}, \code{column_type},
+  \code{r_type} (\code{"vector"} or \code{"data.frame"}, the class of each
+  cell) and \code{description}; a zero-column data frame when the table has
+  no such columns.
 }
 \description{
-Identifies columns in a DuckDB table that contain complex types
-(ARRAY or MAP) that will be returned as R lists.
+Lists the columns of a table whose DuckDB type contains \code{[} or
+\code{MAP}. \code{duckdb} returns such columns as R lists.
 }
 \examples{
 library(DBI)

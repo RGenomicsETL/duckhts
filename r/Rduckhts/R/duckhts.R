@@ -1165,7 +1165,8 @@ rduckhts_bam_bed_coverage <- function(
 #' @param read_groups Optional comma-separated read-group IDs, matching mosdepth's `-R`
 #' @param no_per_base Skip writing `\{prefix\}.per-base.bed.gz`
 #' @param threads Number of BAM decompression threads
-#' @param processing_threads Number of parallel contig processing threads (0 = sequential)
+#' @param processing_threads Number of parallel contig workers; 0 or 1 processes
+#'   contigs sequentially.
 #' @param flag Excluded SAM flag mask, matching mosdepth's `-F`
 #' @param include_flag Required SAM flag mask, matching mosdepth's `-i`
 #' @param fast_mode Logical. If `TRUE`, use mosdepth fast mode. Defaults to

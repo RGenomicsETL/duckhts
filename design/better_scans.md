@@ -157,9 +157,8 @@ The contract for an indexed full-file BGZF BAM scan is:
   aggregate, or `CREATE TABLE AS` with `preserve_insertion_order = false`; a
   plain `CREATE TABLE AS` with the default setting runs the scan on one thread.
 
-Byte-balanced pieces replace the earlier plan to claim references in descending
-weight: they balance the work directly, so a heavy late reference no longer sets
-the tail time. A benchmark of this scheduling must record the reference
+Byte-balanced pieces balance the work directly, so a heavy reference late in the
+file does not set the tail time. A benchmark of this scheduling must record the reference
 distribution, piece count, thread count and the comparison scan.
 
 ## VCF/BCF record location

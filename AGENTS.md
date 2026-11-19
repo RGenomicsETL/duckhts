@@ -92,7 +92,7 @@ R package changelog scope is strict:
 
 ## Documentation and Catalog Workflow
 - `functions.yaml` is the source of truth for public function documentation and the community-extension descriptor.
-- Keep `description` to a concise summary. Put input, output, ordering, limits and compatibility contracts in named `details` sections; the generator includes them with signatures and examples in `inst/function_catalog/reference.md`.
+- Keep `description` to a concise summary. Put input, output, ordering, limits and compatibility contracts in named `details` sections; the generator includes them with signatures and examples in `inst/function_catalog/reference.md`. An entry whose contract is the same as another entry's sets `details_from` to that entry's name instead of copying its `details`; it may add its own headings, and the target must hold its own `details`.
 - After adding/removing/renaming public functions or changing signatures/descriptions: update `functions.yaml`, run `python3 scripts/render_function_catalog.py`, bootstrap the R package, and verify generated files under `r/Rduckhts/inst/function_catalog/` and `community-extensions/extensions/duckhts/description.yml`.
 - `community-extensions/` is a local sync copy only — do not commit it here; copy `description.yml` manually to the community-extensions repo after regenerating.
 - `r/Rduckhts/README.Rmd` consumes generated catalog output; do not hand-maintain duplicated function lists.

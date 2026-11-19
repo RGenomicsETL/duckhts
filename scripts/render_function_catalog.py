@@ -160,7 +160,40 @@ def load_manifest(path: Path) -> OrderedDict[str, object]:
                     die(f"functions[{index}].details headings must be non-empty single-line strings")
                 if not isinstance(prose, str) or not prose.strip():
                     die(f"functions[{index}].details[{heading!r}] must be a non-empty string")
+    resolve_details_from(functions)
     return payload
+
+
+def resolve_details_from(functions: list[OrderedDict[str, object]]) -> None:
+    """Replace each details_from reference with the named entry's details.
+
+    Inherited headings come first, followed by the entry's own headings. The
+    target must have its own details and no details_from, and an entry may not
+    repeat an inherited heading.
+    """
+    by_name = {entry["name"]: entry for entry in functions}
+    resolved = []
+    for index, entry in enumerate(functions):
+        if "details_from" not in entry:
+            continue
+        source_name = entry["details_from"]
+        source = by_name.get(source_name) if isinstance(source_name, str) else None
+        if source is None or source is entry:
+            die(f"functions[{index}].details_from must name another function entry")
+        if "details_from" in source or "details" not in source:
+            die(
+                f"functions[{index}].details_from target {source_name!r} "
+                "must have its own details and no details_from"
+            )
+        repeated = sorted(set(entry.get("details", {})) & set(source["details"]))
+        if repeated:
+            die(f"functions[{index}].details repeats inherited headings: {', '.join(repeated)}")
+        resolved.append((entry, source))
+    for entry, source in resolved:
+        own = entry.get("details", {})
+        entry["details"] = OrderedDict(source["details"])
+        entry["details"].update(own)
+        del entry["details_from"]
 
 
 def render_markdown(functions: list[dict[str, object]]) -> str:

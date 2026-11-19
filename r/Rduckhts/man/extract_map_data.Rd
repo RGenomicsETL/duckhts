@@ -7,7 +7,8 @@
 extract_map_data(map_col, operation = "keys", default = NA)
 }
 \arguments{
-\item{map_col}{A data frame column from DuckDB MAP data}
+\item{map_col}{A MAP column: a list of data frames with columns \code{key}
+and \code{value}}
 
 \item{operation}{What to extract: "keys", "values", or a specific key name}
 
@@ -17,8 +18,9 @@ extract_map_data(map_col, operation = "keys", default = NA)
 Extracted data based on the operation
 }
 \description{
-Helper function to work with DuckDB MAP data (returned as data frames).
-Can extract keys, values, or search for specific key-value pairs.
+Extracts keys, values, or the value of one key from each row of a DuckDB
+MAP column. \code{duckdb} returns a MAP column as a list of data frames with
+columns \code{key} and \code{value}.
 }
 \examples{
 library(DBI)

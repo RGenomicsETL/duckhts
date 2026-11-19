@@ -1,32 +1,26 @@
 #' DuckDB to R Type Mappings
 #'
-#' Returns a named list mapping between DuckDB and R data types.
-#' This is useful for understanding type conversions when reading
-#' HTS files or when specifying column types in tabix functions.
+#' Returns named character vectors that map DuckDB column types to the R
+#' storage type that \code{duckdb} returns, and R type names to the DuckDB
+#' types used for tabix column types (see \code{\link{normalize_tabix_types}}).
+#'
+#' \code{duckdb_to_r} gives the \code{typeof()} of the returned column, with
+#' one exception: \code{"MAP"} maps to \code{"data.frame"}, the class of each
+#' cell. The class is not part of the mapping:
+#' \itemize{
+#'   \item DATE, TIMESTAMP and TIME columns have storage type double and class
+#'     \code{Date}, \code{POSIXct} and \code{difftime} (seconds).
+#'   \item BIGINT and UBIGINT columns are double under the default
+#'     \code{bigint = "numeric"} connection setting.
+#'   \item A LIST column such as \code{VARCHAR[]} is a list with one vector per
+#'     row. A MAP column is a list with one data frame per row, with columns
+#'     \code{key} and \code{value}.
+#' }
 #'
 #' @return A named list with two elements:
 #' \describe{
 #'   \item{duckdb_to_r}{Named character vector mapping DuckDB types to R types}
 #'   \item{r_to_duckdb}{Named character vector mapping R types to DuckDB types}
-#' }
-#'
-#' @description
-#' The mapping covers the most common data types used in HTS file processing:
-#' \itemize{
-#'   \item BIGINT <-> double (not integer due to 64-bit overflow protection)
-#'   \item DOUBLE <-> numeric/double
-#'   \item VARCHAR <-> character/string
-#'   \item BOOLEAN <-> logical
-#'   \item ARRAY types (e.g., VARCHAR[], BIGINT[]) <-> list
-#'   \item MAP types (e.g., MAP(VARCHAR, VARCHAR)) <-> data.frame
-#' }
-#'
-#' Important notes:
-#' \itemize{
-#'   \item 64-bit integers (BIGINT, UBIGINT) become double to prevent overflow
-#'   \item DATE/TIME values return as Unix epoch numbers (double)
-#'   \item MAP types become data frames with 'key' and 'value' columns
-#'   \item ARRAY types become vectors (which are lists in R terminology)
 #' }
 #'
 #' @examples
@@ -37,29 +31,26 @@
 #' @export
 duckdb_type_mappings <- function() {
   duckdb_to_r <- c(
-    "BIGINT" = "double", # Returns double due to 64-bit integer overflow protection
-    "DOUBLE" = "double", # Returns double, not numeric
+    "BIGINT" = "double",
+    "DOUBLE" = "double",
     "VARCHAR" = "character",
     "BOOLEAN" = "logical",
-    "DATE" = "double", # Returns double (Unix epoch days)
-    "TIMESTAMP" = "double", # Returns double (Unix epoch seconds)
-    "TIME" = "double", # Returns double (nanoseconds since midnight)
-    "BLOB" = "list", # Returns list, not raw
-    # Additional integer types
+    "DATE" = "double", # class Date
+    "TIMESTAMP" = "double", # class POSIXct
+    "TIME" = "double", # class difftime, seconds
+    "BLOB" = "list", # one raw vector per row
     "INTEGER" = "integer",
     "FLOAT" = "double",
     "SMALLINT" = "integer",
     "USMALLINT" = "integer",
-    "UBIGINT" = "double", # Returns double due to 64-bit overflow protection
-    # Array types - DuckDB arrays become R lists
+    "UBIGINT" = "double",
     "VARCHAR[]" = "list",
     "BIGINT[]" = "list",
     "INTEGER[]" = "list",
     "DOUBLE[]" = "list",
     "FLOAT[]" = "list",
     "BOOLEAN[]" = "list",
-    # MAP types - DuckDB maps become R data frames
-    "MAP" = "data.frame"
+    "MAP" = "data.frame" # class of each cell; the column is a list
   )
 
   r_to_duckdb <- c(
@@ -91,14 +82,16 @@ duckdb_type_mappings <- function() {
 
 #' Detect Complex Types in DuckDB Table
 #'
-#' Identifies columns in a DuckDB table that contain complex types
-#' (ARRAY or MAP) that will be returned as R lists.
+#' Lists the columns of a table whose DuckDB type contains \code{[} or
+#' \code{MAP}. \code{duckdb} returns such columns as R lists.
 #'
 #' @param con A DuckDB connection
 #' @param table_name Name of the table to analyze
 #'
-#' @return A data frame with columns that have complex types, showing
-#'   column_name, column_type, and a description of R type.
+#' @return A data frame with columns \code{column_name}, \code{column_type},
+#'   \code{r_type} (\code{"vector"} or \code{"data.frame"}, the class of each
+#'   cell) and \code{description}; a zero-column data frame when the table has
+#'   no such columns.
 #'
 #' @examples
 #' library(DBI)
@@ -144,8 +137,8 @@ detect_complex_types <- function(con, table_name) {
 
 #' Extract Array Elements Safely
 #'
-#' Helper function to safely extract elements from DuckDB arrays
-#' (returned as R lists) with proper error handling.
+#' Extracts one element from each row of a DuckDB LIST or ARRAY column,
+#' which \code{duckdb} returns as an R list.
 #'
 #' @param array_col A list column from DuckDB array data
 #' @param index Numeric index (1-based). If NULL, returns full list
@@ -186,10 +179,12 @@ extract_array_element <- function(array_col, index = NULL, default = NA) {
 
 #' Extract MAP Keys and Values
 #'
-#' Helper function to work with DuckDB MAP data (returned as data frames).
-#' Can extract keys, values, or search for specific key-value pairs.
+#' Extracts keys, values, or the value of one key from each row of a DuckDB
+#' MAP column. \code{duckdb} returns a MAP column as a list of data frames with
+#' columns \code{key} and \code{value}.
 #'
-#' @param map_col A data frame column from DuckDB MAP data
+#' @param map_col A MAP column: a list of data frames with columns \code{key}
+#'   and \code{value}
 #' @param operation What to extract: "keys", "values", or a specific key name
 #' @param default Default value if key is not found (only used when operation is a key name)
 #'

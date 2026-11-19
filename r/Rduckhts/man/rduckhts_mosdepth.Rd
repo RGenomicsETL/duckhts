@@ -49,7 +49,8 @@ rduckhts_mosdepth(
 
 \item{threads}{Number of BAM decompression threads}
 
-\item{processing_threads}{Number of parallel contig processing threads (0 = sequential)}
+\item{processing_threads}{Number of parallel contig workers; 0 or 1 processes
+contigs sequentially.}
 
 \item{flag}{Excluded SAM flag mask, matching mosdepth's `-F`}
 
