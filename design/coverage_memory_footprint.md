@@ -14,7 +14,7 @@ mosdepth worker tiling and `bam_bin_counts(...)` streaming remain open.
 
 ## `duckhts_bam_bed_coverage(...)`
 
-The reader now walks each BED interval once and keeps lazily allocated one-megabase depth
+The reader walks each BED interval once and keeps lazily allocated one-megabase depth
 tiles. Completed tiles are reduced and evicted as coordinate-sorted input advances. Optional
 strand arrays are allocated only when strand output is requested.
 

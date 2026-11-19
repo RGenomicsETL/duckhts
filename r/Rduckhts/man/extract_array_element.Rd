@@ -17,8 +17,8 @@ extract_array_element(array_col, index = NULL, default = NA)
 The array element at the specified index, or full array if index is NULL
 }
 \description{
-Helper function to safely extract elements from DuckDB arrays
-(returned as R lists) with proper error handling.
+Extracts one element from each row of a DuckDB LIST or ARRAY column,
+which \code{duckdb} returns as an R list.
 }
 \examples{
 library(DBI)

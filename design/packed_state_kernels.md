@@ -21,7 +21,7 @@ This common shape does not imply one generic untyped function. Text bytes, nt16 
 two-bit calls have different validity and padding contracts and should remain separate typed
 kernels.
 
-## Current boundary
+## Shipped kernel behavior
 
 The shipped text GC kernel intentionally preserves `seq_gc_content(...)` behavior: ASCII case
 is folded, `A/C/G/T/N` are accepted, and another byte makes the SQL result null. The shipped

@@ -91,6 +91,53 @@ class FunctionCatalogTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 1)
                 self.assertIn("functions[0].details", error.getvalue())
 
+    def assert_load_fails(self, manifest: dict[str, object], message: str) -> None:
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error), self.assertRaises(SystemExit) as raised:
+            self.load_fixture(manifest)
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn(message, error.getvalue())
+
+    def test_details_from_copies_details_then_adds_own_headings(self) -> None:
+        manifest = manifest_fixture()
+        manifest["functions"][1]["details_from"] = "sample_scan"
+        manifest["functions"][1]["details"] = {"Version": "Runtime only."}
+        loaded = self.load_fixture(manifest)["functions"]
+        self.assertEqual(
+            list(loaded[1]["details"].items()),
+            list(manifest["functions"][0]["details"].items()) + [("Version", "Runtime only.")],
+        )
+        self.assertNotIn("details_from", loaded[1])
+        self.assertEqual(loaded[0]["details"], manifest["functions"][0]["details"])
+
+    def test_details_from_rejects_bad_targets_and_repeated_headings(self) -> None:
+        cases = [
+            (1, "missing_entry", None, "functions[1].details_from must name another"),
+            (1, 7, None, "functions[1].details_from must name another"),
+            (0, "sample_scan", None, "functions[0].details_from must name another"),
+            (0, "sample_version", None, "target 'sample_version' must have its own details"),
+            (1, "sample_scan", {"Limits": "again"}, "repeats inherited headings: Limits"),
+        ]
+        for index, target, own, message in cases:
+            with self.subTest(index=index, target=target, own=own):
+                manifest = manifest_fixture()
+                manifest["functions"][index]["details_from"] = target
+                if own is not None:
+                    manifest["functions"][index]["details"] = own
+                self.assert_load_fails(manifest, message)
+
+    def test_details_from_rejects_chains_in_either_order(self) -> None:
+        for chain_first in (True, False):
+            with self.subTest(chain_first=chain_first):
+                manifest = manifest_fixture()
+                middle = copy.deepcopy(manifest["functions"][1])
+                middle.update(name="sample_middle", details_from="sample_scan")
+                leaf = copy.deepcopy(manifest["functions"][1])
+                leaf.update(details_from="sample_middle")
+                scan = manifest["functions"][0]
+                manifest["functions"] = [middle, leaf, scan] if chain_first else [scan, leaf, middle]
+                self.assert_load_fails(manifest, "target 'sample_middle' must have its own details")
+
     def test_duplicate_headings_are_not_silently_dropped(self) -> None:
         with tempfile.TemporaryDirectory(prefix="duckhts-catalog-test-") as directory:
             path = Path(directory) / "functions.yaml"

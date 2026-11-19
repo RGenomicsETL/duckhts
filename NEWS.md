@@ -2,6 +2,15 @@
 
 # duckhts (development version)
 
+- The `duckhts_mosdepth` catalog entry states that `processing_threads` of 0 or 1
+  processes contigs sequentially; parallel contig workers start above 1.
+- A `functions.yaml` entry can set `details_from` to another entry's name to use that
+  entry's `details` sections, followed by any headings of its own. Seventeen variant
+  entries (`_map`, `_ref`, `_labelled`, the index and Parquet-conversion families, and
+  the CIGAR helpers) use it in place of copied text. `scripts/render_function_catalog.py`
+  rejects a missing target, a chain, and a repeated heading; the rendered reference is
+  byte-identical.
+
 - `read_bed` splits each line at its tabs once, up to the last projected column, and
   parses integer fields in place. Before, each projected column searched the line from
   its first byte, a separate pass counted the fields, and each integer was copied before

@@ -1,5 +1,12 @@
 # Rduckhts (development version)
 
+- `?duckdb_type_mappings` describes what `duckdb` returns: DATE, TIMESTAMP and TIME
+  columns are double vectors of class `Date`, `POSIXct` and `difftime`, and a MAP column
+  is a list with one key/value data frame per row. The returned mappings are unchanged.
+  `?detect_complex_types`, `?extract_array_element` and `?extract_map_data` use the same
+  description. `?rduckhts_mosdepth` and the bundled `duckhts_mosdepth` catalog entry
+  state that `processing_threads` of 0 or 1 processes contigs sequentially.
+
 - `read_bed`, and so `rduckhts_bed()`, splits each line at its tabs once and parses
   integer fields in place. Rows, NULLs and errors are unchanged. Integer fields follow
   `strtoll()` rules for the C locale whatever the locale of the R session.

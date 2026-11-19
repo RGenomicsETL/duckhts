@@ -38,7 +38,8 @@ has been measured and found insufficient for a defined workload.
 7. **Compatibility is evidence.** A rewrite names an upstream version and supported
    contract, then earns claims through differential tests, properties, sanitizers,
    statistical trials, and real data. Similar output is not conformance.
-8. **Stable interfaces first.** DuckDB's stable C API is the default boundary. An unstable
+8. **Stable interfaces first.** DuckDB's stable C API is the default interface between
+   DuckHTS and DuckDB. An unstable
    call is acceptable only when a measured requirement cannot be expressed otherwise; it
    must be isolated behind one compatibility module with an explicit removal condition.
 
@@ -77,7 +78,7 @@ formats.
 `Rduckhts` packages the same extension and provides R-native validation and DBI workflows.
 Native DuckDB, CRAN, MinGW, macOS, Linux, and browser runtimes share semantics but may have
 different transport and threading capabilities. Platform-specific code stays behind a
-small adapter boundary.
+small per-platform adapter.
 
 ## Ownership and concurrency
 
@@ -104,7 +105,7 @@ evidence and provenance can be joined as typed relations.
 - Numeric ordinals and bitsets are valid internal contracts when a normal relation maps
   them to stable biological identifiers.
 - Sortedness, coordinate conventions, ownership, nullability, and unsupported event shapes
-  are explicit at every boundary.
+  are explicit wherever a value passes between the layers above.
 - `functions.yaml` is the public SQL catalog. Internal headers describe only callable
   behavior present in the current tree.
 
@@ -117,4 +118,5 @@ Before adding a function, format, cache, or dependency, ask:
 3. What state owns the memory, and what bounds it?
 4. Which sort order, representation, and cache-line behavior does the hot path rely on?
 5. What pinned implementation or independent property proves correctness?
-6. Does the change strengthen one of the boundaries above, or create a second authority?
+6. Does the change keep each responsibility in one of the layers above, or create a second
+   authority?

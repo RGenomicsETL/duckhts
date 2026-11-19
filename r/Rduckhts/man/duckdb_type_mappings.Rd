@@ -14,28 +14,23 @@ A named list with two elements:
 }
 }
 \description{
-The mapping covers the most common data types used in HTS file processing:
-\itemize{
-  \item BIGINT <-> double (not integer due to 64-bit overflow protection)
-  \item DOUBLE <-> numeric/double
-  \item VARCHAR <-> character/string
-  \item BOOLEAN <-> logical
-  \item ARRAY types (e.g., VARCHAR[], BIGINT[]) <-> list
-  \item MAP types (e.g., MAP(VARCHAR, VARCHAR)) <-> data.frame
-}
-
-Important notes:
-\itemize{
-  \item 64-bit integers (BIGINT, UBIGINT) become double to prevent overflow
-  \item DATE/TIME values return as Unix epoch numbers (double)
-  \item MAP types become data frames with 'key' and 'value' columns
-  \item ARRAY types become vectors (which are lists in R terminology)
-}
+Returns named character vectors that map DuckDB column types to the R
+storage type that \code{duckdb} returns, and R type names to the DuckDB
+types used for tabix column types (see \code{\link{normalize_tabix_types}}).
 }
 \details{
-Returns a named list mapping between DuckDB and R data types.
-This is useful for understanding type conversions when reading
-HTS files or when specifying column types in tabix functions.
+\code{duckdb_to_r} gives the \code{typeof()} of the returned column, with
+one exception: \code{"MAP"} maps to \code{"data.frame"}, the class of each
+cell. The class is not part of the mapping:
+\itemize{
+  \item DATE, TIMESTAMP and TIME columns have storage type double and class
+    \code{Date}, \code{POSIXct} and \code{difftime} (seconds).
+  \item BIGINT and UBIGINT columns are double under the default
+    \code{bigint = "numeric"} connection setting.
+  \item A LIST column such as \code{VARCHAR[]} is a list with one vector per
+    row. A MAP column is a list with one data frame per row, with columns
+    \code{key} and \code{value}.
+}
 }
 \examples{
 mappings <- duckdb_type_mappings()

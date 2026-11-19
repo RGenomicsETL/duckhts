@@ -3398,7 +3398,7 @@ Default fast_mode=FALSE uses CIGAR-aware coverage and mate-overlap correction. f
 
 ### Threads
 
-processing_threads=0 is sequential; positive values select parallel contig-worker count.
+processing_threads of 0 or 1 processes contigs sequentially; a value above 1 is the number of parallel contig workers.
 
 ### Examples
 
