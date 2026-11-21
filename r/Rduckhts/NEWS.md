@@ -1,5 +1,10 @@
 # Rduckhts (development version)
 
+- `bcftools_munge_row` and `bcftools_liftover` read no file and build no `.fai` while
+  DuckDB plans a query (`PREPARE`, `EXPLAIN`). SQL that repeats one of these calls to read
+  several fields runs the function once for each written call; call it once in a
+  subquery. `rduckhts_liftover()` and `rduckhts_munge()` go through table macros that call
+  it once for each row.
 - `DBI::dbExecute(con, "SET duckhts_remote_block_size = 4194304")` sets the bytes htslib
   asks for in each read of a remote file, in every reader; the default, 0, keeps the size
   DuckHTS chooses.

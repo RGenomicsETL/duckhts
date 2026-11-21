@@ -1346,6 +1346,51 @@ class ReferenceScalarsThroughBothFileSystems(unittest.TestCase):
             thread.join()
 
 
+class VolatileScalarsDoNoWorkAtPlanning(unittest.TestCase):
+    """bcftools_munge_row and bcftools_liftover with constant arguments wait for the query to run."""
+
+    @staticmethod
+    def calls(fasta):
+        fasta = quoted(fasta)
+        return {
+            "bcftools_munge_row": (
+                "SELECT bcftools_munge_row('chrF', 2, 'A', 'C', 'rs1', 0.01, NULL, NULL, 0.12, 1000, NULL, NULL, NULL,"
+                " 0.3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '+-', " + fasta + ", NULL, NULL, NULL, NULL, NULL)"
+            ),
+            "bcftools_liftover": (
+                "SELECT bcftools_liftover('chrF', 2, 'C', 'T', " + quoted(DATA / "liftover.chain") + ", " + fasta + ", "
+                + fasta + ", 1, 250, false, NULL::BIGINT, false)"
+            ),
+        }
+
+    def test_prepare_and_explain_open_no_reference(self):
+        for file_system in ("htslib", "duckdb"):
+            with tempfile.TemporaryDirectory() as directory, connect(file_system) as connection:
+                absent = Path(directory) / "absent.fa"
+                for function, call in self.calls(absent).items():
+                    with self.subTest(file_system=file_system, function=function):
+                        connection.execute("PREPARE planned AS " + call)
+                        connection.execute("EXPLAIN " + call).fetchall()
+                        with self.assertRaisesRegex(duckdb.Error, function):
+                            connection.execute(call).fetchall()
+                        with self.assertRaisesRegex(duckdb.Error, function):
+                            connection.execute("EXECUTE planned").fetchall()
+                        self.assertEqual(os.listdir(directory), [])
+
+    def test_prepare_and_explain_build_no_index(self):
+        for function in ("bcftools_munge_row", "bcftools_liftover"):
+            with self.subTest(function=function), tempfile.TemporaryDirectory() as directory:
+                copy = Path(directory) / "reference.fa"
+                shutil.copy(DATA / "liftover_src.fa", copy)
+                call = self.calls(copy)[function]
+                with connect("htslib") as connection:
+                    connection.execute("PREPARE planned AS " + call)
+                    connection.execute("EXPLAIN " + call).fetchall()
+                    self.assertEqual(os.listdir(directory), ["reference.fa"])
+                    self.assertEqual(len(connection.execute(call).fetchall()), 1)
+                    self.assertEqual(sorted(os.listdir(directory)), ["reference.fa", "reference.fa.fai"])
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--extension", required=True, type=Path)

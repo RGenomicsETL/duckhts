@@ -4226,6 +4226,10 @@ Input names and chain source names are compared after one rule: a leading chr is
 
 Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
+### Evaluation
+
+The function is volatile: DuckDB evaluates it when the query runs, never while it plans, so PREPARE and EXPLAIN read no file and build no index. DuckDB evaluates each written call, so read several fields from one call in a subquery instead of repeating the call.
+
 ### Examples
 
 ```sql
@@ -4297,6 +4301,10 @@ The reference sequence of a record is looked up in the FASTA index under, in ord
 ### File access
 
 Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
+### Evaluation
+
+DuckDB evaluates identical calls in one query once, and evaluates a call whose arguments are all constants while it plans the query: PREPARE and EXPLAIN of such a call read the FASTA and, with duckhts_file_system = 'htslib', build a missing .fai.
 
 ### Examples
 
@@ -4449,6 +4457,10 @@ The reference sequence of a record is looked up in the FASTA index under, in ord
 ### File access
 
 Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
+### Evaluation
+
+The function is volatile: DuckDB evaluates it when the query runs, never while it plans, so PREPARE and EXPLAIN read no file and build no index. DuckDB evaluates each written call, so read several fields from one call in a subquery instead of repeating the call.
 
 ### Examples
 

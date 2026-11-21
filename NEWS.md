@@ -2,6 +2,16 @@
 
 # duckhts (development version)
 
+- `bcftools_munge_row` and `bcftools_liftover` are volatile. `PREPARE` and `EXPLAIN` of a
+  call whose arguments are all constants read no file and build no `.fai`; the query does
+  that when it runs. DuckDB evaluates each written call of a volatile function, so SQL
+  that repeats one call to read several fields runs the function once for each: call it
+  once in a subquery and read the fields of that result, as `duckhts_munge` and
+  `duckhts_liftover` do. `bcftools_norm_row` is not volatile, because
+  `duckhts_bcftools_norm` writes its call once for each output field and relies on DuckDB
+  to evaluate identical calls once; a call of it with all-constant arguments is evaluated
+  at planning, where it reads the FASTA and, with `duckhts_file_system = 'htslib'`, builds
+  a missing `.fai`.
 - The browser test lane (`make wasm-playwright-test`, `wasm-playwright.yml`) runs on
   duckdb-wasm `1.33.1-dev119.0` (DuckDB v2.0.0), the first lane runtime that loads the
   v1.5.6 C API extension. Its `base` bundle replaces `eh`: the staging script pins

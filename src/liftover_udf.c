@@ -2421,6 +2421,9 @@ static duckdb_scalar_function build_liftover_overload(duckdb_logical_type varcha
         duckdb_scalar_function_add_parameter(fn, bool_type);  /* no_left_align */
     duckdb_scalar_function_set_return_type(fn, struct_type);
     duckdb_scalar_function_set_special_handling(fn);
+    /* Volatile: the function reads files, so DuckDB must not evaluate a call
+     * with constant arguments while it plans the query. */
+    duckdb_scalar_function_set_volatile(fn);
     duckdb_scalar_function_set_init(fn, liftover_init);
     duckdb_scalar_function_set_function(fn, bcftools_liftover_scalar);
     return fn;

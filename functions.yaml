@@ -2028,7 +2028,8 @@
       "r_wrapper": "rduckhts_liftover",
       "details": {
         "Contig names": "Input names and chain source names are compared after one rule: a leading chr is removed in any letter case; M, MT and 26 become MT; 23, 25, X, XY, XX, PAR1 and PAR2 become X; 24 and Y become Y. A lifted record carries the first name that the destination FASTA index has among: the chain's destination name; that name with chr added or removed; its form under the rule above, without and with chr; and for the mitochondrion MT, chrM and M. A FASTA that holds two of these names is not an error. A mitochondrial record that passes through without lifting takes the first of chrM, MT and M that the destination FASTA has.",
-        "File access": "Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract."
+        "File access": "Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.",
+        "Evaluation": "The function is volatile: DuckDB evaluates it when the query runs, never while it plans, so PREPARE and EXPLAIN read no file and build no index. DuckDB evaluates each written call, so read several fields from one call in a subquery instead of repeating the call."
       },
       "description": "Row-oriented liftover kernel intended to mirror bcftools +liftover semantics as closely as possible while returning one STRUCT per input row with fields: src_chrom, src_pos, src_ref, src_alt, dest_chrom, dest_pos, dest_end, dest_ref, dest_alt, mapped, reverse_complemented, swap, reject_reason, and note. Set no_left_align := true to skip post-liftover left-alignment of lifted indels (mirrors --no-left-align in bcftools +liftover).",
       "examples": [
@@ -2064,7 +2065,8 @@
         "Input": "alt accepts comma-delimited VARCHAR or VARCHAR[]. Symbolic `<DEL>` may use end_pos; `<DUP>` may use svlen.",
         "Output": "Return pos_normed, end_pos_normed, ref_normed, alt_normed (always VARCHAR[]), nullable normed and norm_status. gVCF `<NON_REF>`/`<*>` reference blocks pass through with GVCFReferenceBlock. Mixed real/gVCF-symbolic rows normalize real alleles while preserving symbolic alleles and supplied reference-block END. Rows containing a spanning-deletion `*` pass through with SpanningDeletion and NULL normed. REF-only rows require a valid REF matching the FASTA before returning RefOnly.",
         "Contig names": "The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error.",
-        "File access": "Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract."
+        "File access": "Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.",
+        "Evaluation": "DuckDB evaluates identical calls in one query once, and evaluates a call whose arguments are all constants while it plans the query: PREPARE and EXPLAIN of such a call read the FASTA and, with duckhts_file_system = 'htslib', build a missing .fai."
       },
       "examples": [
         "SELECT nr.pos_normed, nr.ref_normed, nr.alt_normed FROM (SELECT bcftools_norm_row('chr1', 100, 'AC', 'A', 'ref.fa', NULL::BIGINT, NULL::BIGINT, NULL, NULL) AS nr);"
@@ -2135,7 +2137,8 @@
       "details": {
         "Arguments": "All 29 arguments are positional and required. DuckDB ignores a `name :=` label on a scalar argument and binds the value by position, so pass NULL for an unused argument. NULL iffy_tag and mismatch_tag select IFFY and REF_MISMATCH. NULL ns, nc and ne keep the values derived from the row; a non-NULL value replaces them. duckhts_munge maps source columns to these positions.",
         "Contig names": "The reference sequence of a record is looked up in the FASTA index under, in order: the record's name; the name without chr (any letter case), or with chr added when it has none; and for M, MT or chrM also MT, chrM and M. The first name that the index has is used. A FASTA that holds both 1 and chr1 is not an error.",
-        "File access": "Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract."
+        "File access": "Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.",
+        "Evaluation": "The function is volatile: DuckDB evaluates it when the query runs, never while it plans, so PREPARE and EXPLAIN read no file and build no index. DuckDB evaluates each written call, so read several fields from one call in a subquery instead of repeating the call."
       },
       "description": "Normalize one summary-statistics row into GWAS-VCF-style fields (chrom/pos/ref/alt/effect metrics), resolving REF/ALT orientation against a FASTA reference and applying swap-aware sign/frequency/count transforms. The output flag `alleles_swapped` means REF/ALT orientation was swapped to match the FASTA reference.",
       "examples": [

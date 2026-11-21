@@ -521,6 +521,9 @@ void register_munge_functions(duckdb_connection connection) {
     struct_type = duckdb_create_struct_type(fields, MUNGE_FIELD_NAMES, MUNGE_OUT_COUNT);
     duckdb_scalar_function_set_return_type(fn, struct_type);
     duckdb_scalar_function_set_special_handling(fn);
+    /* Volatile: the function reads files, so DuckDB must not evaluate a call
+     * with constant arguments while it plans the query. */
+    duckdb_scalar_function_set_volatile(fn);
     duckdb_scalar_function_set_function(fn, bcftools_munge_row_scalar);
     duckdb_scalar_function_set_init(fn, bcftools_munge_row_init);
     duckdb_register_scalar_function(connection, fn);
