@@ -34,7 +34,7 @@ permissions:
 jobs:
   test:
     name: loader, staging and browser tests (${{ matrix.channel }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         # Pull requests test both runtimes; dispatch tests only the selected channel.
@@ -83,7 +83,7 @@ jobs:
     name: publish to npm
     if: github.event_name == 'workflow_dispatch' && inputs.publish
     needs: test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
