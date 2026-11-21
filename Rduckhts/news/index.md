@@ -2,6 +2,10 @@
 
 ## Rduckhts (development version)
 
+- `DBI::dbExecute(con, "SET duckhts_remote_block_size = 4194304")` sets
+  the bytes htslib asks for in each read of a remote file in `read_bam`;
+  the default, 0, keeps the size DuckHTS chooses.
+
 - `read_bam`, and so
   [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md),
   can read through the DuckDB file system: run
