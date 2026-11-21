@@ -10,7 +10,10 @@
   CRAM reference through htslib, and looks for the index beside the file only. The default,
   `'htslib'`, keeps htslib's own file access, and other readers ignore the setting.
   `make test-duckdb-file-system` compares both routes on every committed BAM and CRAM
-  fixture.
+  fixture. `benchmarks/benchmark_duckdb_file_system.md` measures both routes over HTTP:
+  on a loopback server the DuckDB route sends one closed range per htslib block where
+  htslib's libcurl backend streams a few open-ended ranges, so it is slower once each
+  request has latency; on a local file the two routes take the same time.
 - **DuckDB 1.5.6 or newer is required.** The extension is built for the stable DuckDB C
   API v1.5.6, the last version of the v1 C API, in place of v1.2.0. DuckDB 1.5.0 to 1.5.5
   refuse to load it with an error that names both versions; DuckDB 1.5.6 and 2.0 load it.
