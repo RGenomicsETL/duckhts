@@ -2,6 +2,10 @@
 
 # duckhts (development version)
 
+- `SET duckhts_remote_block_size = N` sets the bytes htslib asks for in each read of a
+  remote file in `read_bam`, on either file-access route, from 131072 to 268435456. The
+  default, 0, keeps the size DuckHTS chooses by scan type. A value outside that range is a
+  bind error.
 - **`read_bam` can read through the DuckDB file system.** After
   `SET duckhts_file_system = 'duckdb'`, the alignment file and its index are read through
   the file system of the connection, by an htslib file backend built on the DuckDB 1.5.6

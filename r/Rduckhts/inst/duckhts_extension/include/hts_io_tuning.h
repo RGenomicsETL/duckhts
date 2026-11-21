@@ -167,6 +167,14 @@ static inline void duckhts_apply_remote_hts_tuning(htsFile *fp,
     }
 }
 
+/* Replaces the hFILE block size that duckhts_apply_remote_hts_tuning chose for
+ * a remote file. block_size 0 keeps that choice. */
+static inline void duckhts_apply_remote_block_size(htsFile *fp, const char *path, int block_size) {
+    if (fp && block_size > 0 && duckhts_is_remote_path(path)) {
+        (void)hts_set_opt(fp, HTS_OPT_BLOCK_SIZE, block_size);
+    }
+}
+
 static inline void duckhts_apply_remote_hfile_tuning(hFILE *fp,
                                                       const char *path,
                                                       duckhts_hts_io_profile_t profile) {

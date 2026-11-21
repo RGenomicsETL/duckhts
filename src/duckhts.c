@@ -227,9 +227,10 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         return duckhts_registration_error(&registration,
             "DuckHTS could not register its htslib backend for the DuckDB file system");
     }
-    if (!duckhts_register_file_system_option(connection)) {
+    if (!duckhts_register_file_access_options(connection)) {
         return duckhts_registration_error(&registration,
-            "DuckHTS could not register the " DUCKHTS_FILE_SYSTEM_OPTION " setting");
+            "DuckHTS could not register the " DUCKHTS_FILE_SYSTEM_OPTION " and "
+            DUCKHTS_REMOTE_BLOCK_SIZE_OPTION " settings");
     }
 
     register_duckhts_htslib_functions(connection);
