@@ -560,3 +560,69 @@ test_bcftools_norm <- function() {
 }
 
 test_bcftools_norm()
+
+# rduckhts_bcftools_norm() through the DuckDB file system of the connection
+# (SET duckhts_file_system = 'duckdb'). htslib's own file access is the oracle:
+# the same variants must normalise to the same rows. That route reads the
+# .fai beside the FASTA and builds none.
+test_bcftools_norm_duckdb_file_system <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  directory <- tempfile("duckhts_norm_file_system_")
+  dir.create(directory)
+  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
+
+  fasta_path <- system.file("extdata", "liftover_repeat_src.fa", package = "Rduckhts", mustWork = TRUE)
+  dbExecute(con, paste(
+    "CREATE TEMP TABLE norm_routes AS SELECT * FROM (VALUES",
+    "('chrS', 2, 'T', 'TT,TTT'),",
+    "('chrS', 2, 'TT', 'T,TTT'),",
+    "('chrS', 2, 'T', '*,TT'),",
+    "('chrMissing', 2, 'T', 'TT')",
+    ") AS t(chrom, pos, ref, alt)"
+  ))
+  expected <- rduckhts_bcftools_norm(con, "norm_routes", fasta_path)
+  expect_equal(nrow(expected), 4)
+  expect_true(any(expected$norm_status == "Normalized"))
+  expected_split <- rduckhts_bcftools_norm(con, "norm_routes", fasta_path, split_multiallelic = TRUE)
+
+  unindexed <- file.path(directory, "unindexed.fa")
+  file.copy(fasta_path, unindexed)
+
+  dbExecute(con, "SET duckhts_file_system = 'duckdb'")
+  expect_equal(rduckhts_bcftools_norm(con, "norm_routes", fasta_path), expected)
+  expect_equal(
+    rduckhts_bcftools_norm(con, "norm_routes", fasta_path, split_multiallelic = TRUE),
+    expected_split
+  )
+  expect_equal(
+    rduckhts_bcftools_norm(con, "norm_routes", fasta_path,
+      fasta_index_path = paste0(fasta_path, ".fai")),
+    expected
+  )
+  expect_error(
+    rduckhts_bcftools_norm(con, "norm_routes", unindexed),
+    "No such file or directory",
+    fixed = TRUE
+  )
+  expect_identical(list.files(directory), "unindexed.fa")
+  expect_error(
+    rduckhts_bcftools_norm(con, "norm_routes", file.path(directory, "absent.fa")),
+    "bcftools_norm_row: failed to load FASTA index",
+    fixed = TRUE
+  )
+
+  dbExecute(con, "SET duckhts_file_system = 'tabix'")
+  expect_error(
+    rduckhts_bcftools_norm(con, "norm_routes", fasta_path),
+    "bcftools_norm_row: duckhts_file_system must be 'htslib' or 'duckdb'",
+    fixed = TRUE
+  )
+
+  # htslib's file access builds the index the DuckDB route refused to build.
+  dbExecute(con, "SET duckhts_file_system = 'htslib'")
+  expect_equal(rduckhts_bcftools_norm(con, "norm_routes", unindexed), expected)
+  expect_true(file.exists(paste0(unindexed, ".fai")))
+}
+
+test_bcftools_norm_duckdb_file_system()

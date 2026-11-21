@@ -5,12 +5,18 @@ for the committed fixtures through both settings, on full scans and on index
 or region paths, and must fail on the same inputs. The remaining tests cover
 what only the DuckDB route does: DuckDB's access policy, its error text, index
 lookup that ignores the working directory, a read-only route that builds no
-missing index, and HTTP secrets, including the reference of a CRAM.
+missing index, and HTTP secrets, including the reference of a CRAM. The scalar
+functions that read a FASTA row by row, bcftools_norm_row and
+bcftools_munge_row, are compared row for row over variants cut from the
+fixture FASTAs, and their handles are shown to stay with the query that
+opened them.
 """
 
 import argparse
 import collections
 import contextlib
+import csv
+import gzip
 import hashlib
 import os
 import re
@@ -101,6 +107,139 @@ def contigs(connection, path):
         "SELECT DISTINCT RNAME FROM read_bam(?) WHERE RNAME IS NOT NULL ORDER BY 1", [str(path)]
     ).fetchall()
     return [row[0] for row in rows]
+
+
+# One row of each scalar function that reads a FASTA; the one ? is the FASTA path.
+NORM_ONE_ROW = "SELECT bcftools_norm_row('chrF', 2, 'C', 'CT', ?, NULL::BIGINT, NULL::BIGINT, NULL, NULL)"
+MUNGE_ONE_ROW = (
+    "SELECT bcftools_munge_row('chrF', 2, 'A', 'C', 'rs1', 0.01, NULL, NULL, 0.12, 1000, NULL, NULL, NULL, 0.3,"
+    " NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '+-', ?, NULL, NULL, NULL, NULL, NULL)"
+)
+
+
+def norm_cases(where="", fasta="fasta", fai="NULL", gzi="NULL", alt="alt", cases="norm_cases"):
+    """bcftools_norm_row over the cases load_reference_cases creates; fasta, fai, gzi and alt are SQL."""
+    return (
+        "SELECT id, kind, bcftools_norm_row(chrom, pos, ref, " + alt + ", " + fasta + ", end_pos, svlen, "
+        + fai + ", " + gzi + ") AS normed FROM " + cases + where + " ORDER BY id"
+    )
+
+
+def munge_cases(where="", fasta="fasta", cases="munge_cases"):
+    """bcftools_munge_row over the cases load_reference_cases creates; fasta is SQL."""
+    return (
+        "SELECT id, kind, bcftools_munge_row(chrom, pos, a1, a2, 'rs' || id, 0.01, NULL, NULL, 0.12, 1000, NULL,"
+        " NULL, NULL, 0.3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '+-', " + fasta + ", NULL, NULL, NULL,"
+        " NULL, NULL) AS munged FROM " + cases + where + " ORDER BY id"
+    )
+
+
+REFERENCE_WINDOW_BASES = 65536  # DUCKHTS_REFERENCE_WINDOW_BASES in src/include/reference_cache.h
+
+
+def fasta_sequences(path):
+    """The sequences of a FASTA read by Python alone, as (name, bases) in file order."""
+    opener = gzip.open if path.suffix == ".gz" else open
+    sequences = []
+    with opener(path, "rt") as lines:
+        for line in lines:
+            line = line.rstrip("\r\n")
+            if line.startswith(">"):
+                sequences.append([line[1:].split()[0] if line[1:].split() else "", []])
+            elif sequences:
+                sequences[-1][1].append(line)
+    return [(name, "".join(parts)) for name, parts in sequences if name]
+
+
+def sampled_positions(length):
+    """1-based positions: all of a short sequence; the ends and each cache-window edge of a long one."""
+    if length <= 2000:
+        return list(range(1, length + 1))
+    positions = set(range(1, 301)) | set(range(length - 299, length + 1))
+    for edge in range(REFERENCE_WINDOW_BASES, length, REFERENCE_WINDOW_BASES):
+        if edge > 4 * REFERENCE_WINDOW_BASES:
+            break
+        positions |= set(range(edge - 150, edge + 150))
+    return sorted(positions)
+
+
+def other_base(base, skip=""):
+    return next(candidate for candidate in "ACGT" if candidate != base.upper() and candidate not in skip)
+
+
+def reference_cases(fasta):
+    """Variants and summary-statistic rows cut from the bases of one FASTA.
+
+    The alleles come from the file as Python reads it, so they do not depend on
+    either file-access route. Deletions and insertions inside a repeat
+    left-align; one tandem pair is multi-allelic.
+    """
+    norm_rows = []
+    munge_rows = []
+    for name, bases in fasta_sequences(fasta):
+        for position in sampled_positions(len(bases)):
+            start = position - 1
+            base = bases[start]
+            three = bases[start : start + 3]
+            other = other_base(base)
+            norm_rows.append(("snp", name, position, base, other, None, None))
+            norm_rows.append(("ref_mismatch", name, position, other, base.upper(), None, None))
+            norm_rows.append(("symbolic_del", name, position, base, "<DEL>", position + 4, None))
+            norm_rows.append(("symbolic_dup", name, position, base, "<DUP>", None, 3))
+            if len(bases) - start >= 2:
+                norm_rows.append(("deletion_shared_tail", name, position, bases[start : start + 2], bases[start + 1],
+                                  None, None))
+            if len(three) == 3:
+                norm_rows.append(("deletion", name, position, three, base, None, None))
+                norm_rows.append(("insertion", name, position, base, three, None, None))
+                norm_rows.append(("multi_allelic", name, position, three, base + "," + three + three[1:], None, None))
+            munge_rows.append(("a2_is_reference", name, position, other, base))
+            munge_rows.append(("a1_is_reference", name, position, base, other))
+            munge_rows.append(("neither_is_reference", name, position, other, other_base(base, skip=other)))
+            if len(bases) - start >= 2:
+                munge_rows.append(("both_match", name, position, bases[start : start + 2], base))
+        alias = name[3:] if name.lower().startswith("chr") else "chr" + name
+        if alias and bases:
+            norm_rows.append(("contig_alias", alias, 1, bases[0], other_base(bases[0]), None, None))
+            munge_rows.append(("contig_alias", alias, 1, other_base(bases[0]), bases[0]))
+    norm_rows.append(("missing_contig", "no_such_contig", 1, "A", "C", None, None))
+    munge_rows.append(("missing_contig", "no_such_contig", 1, "A", "C"))
+    return norm_rows, munge_rows
+
+
+def load_reference_cases(connections, directory, cases_by_fasta):
+    """Creates norm_cases and munge_cases, the same rows in every connection.
+
+    cases_by_fasta maps the FASTA path each row names to reference_cases() of
+    the file its bases were cut from. Returns the number of rows of each table.
+    """
+    norm_file = Path(directory) / "norm_cases.csv"
+    munge_file = Path(directory) / "munge_cases.csv"
+    counts = []
+    for target, table, width in ((norm_file, 0, 7), (munge_file, 1, 5)):
+        with open(target, "w", newline="") as handle:
+            writer = csv.writer(handle)
+            identifier = 0
+            for fasta, cases in cases_by_fasta.items():
+                for row in cases[table]:
+                    identifier += 1
+                    assert len(row) == width
+                    writer.writerow([identifier, str(fasta)] + ["" if value is None else value for value in row])
+            counts.append(identifier)
+    for connection in connections:
+        connection.execute(
+            "CREATE OR REPLACE TEMP TABLE norm_cases AS SELECT * FROM read_csv(?, header = false, quote = '\"',"
+            " nullstr = '', columns = {'id': 'BIGINT', 'fasta': 'VARCHAR', 'kind': 'VARCHAR', 'chrom': 'VARCHAR',"
+            " 'pos': 'BIGINT', 'ref': 'VARCHAR', 'alt': 'VARCHAR', 'end_pos': 'BIGINT', 'svlen': 'BIGINT'})",
+            [str(norm_file)],
+        )
+        connection.execute(
+            "CREATE OR REPLACE TEMP TABLE munge_cases AS SELECT * FROM read_csv(?, header = false, quote = '\"',"
+            " nullstr = '', columns = {'id': 'BIGINT', 'fasta': 'VARCHAR', 'kind': 'VARCHAR', 'chrom': 'VARCHAR',"
+            " 'pos': 'BIGINT', 'a1': 'VARCHAR', 'a2': 'VARCHAR'})",
+            [str(munge_file)],
+        )
+    return tuple(counts)
 
 
 class RangeHandler(BaseHTTPRequestHandler):
@@ -697,6 +836,8 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             "bcftools_liftover": (
                 "SELECT bcftools_liftover('chrF', 2, 'C', 'T', ?, ?, ?, 1, 250, false, NULL::BIGINT, false)",
                 [missing, str(DATA / "liftover_dst.fa"), str(DATA / "liftover_src.fa")]),
+            "bcftools_norm_row": (NORM_ONE_ROW, [missing]),
+            "bcftools_munge_row": (MUNGE_ONE_ROW, [missing]),
         }
         # These report the failure without a slot for the reason.
         class_only = {
@@ -738,6 +879,8 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             "bcftools_liftover": (
                 "SELECT bcftools_liftover('chrF', 2, 'C', 'T', ?, ?, ?, 1, 250, false, NULL::BIGINT, false)",
                 [str(DATA / "liftover.chain"), str(DATA / "liftover_dst.fa"), str(DATA / "liftover_src.fa")]),
+            "bcftools_norm_row": (NORM_ONE_ROW, [str(DATA / "liftover_src.fa")]),
+            "bcftools_munge_row": (MUNGE_ONE_ROW, [str(DATA / "liftover_src.fa")]),
         }
         with connect("duckdb") as connection:
             for reader, (relation, parameters) in relations.items():
@@ -895,6 +1038,8 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             ("bcftools_liftover",
              "SELECT bcftools_liftover('chrF', 2, 'C', 'T', ?, ?, ?, 1, 250, false, NULL::BIGINT, false)",
              [str(DATA / "liftover.chain"), str(DATA / "liftover_dst.fa"), str(DATA / "liftover_src.fa")]),
+            ("bcftools_norm_row", NORM_ONE_ROW, [str(DATA / "liftover_src.fa")]),
+            ("bcftools_munge_row", MUNGE_ONE_ROW, [str(DATA / "liftover_src.fa")]),
         )
         with connect("tabix") as connection:
             for reader, relation, parameters in relations:
@@ -912,6 +1057,293 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
                         reader + ": duckhts_remote_block_size must be 0 or between 131072 and 268435456 bytes",
                     ):
                         connection.execute(relation, parameters).fetchall()
+
+
+class ReferenceScalarsThroughBothFileSystems(unittest.TestCase):
+    """bcftools_norm_row and bcftools_munge_row give htslib's rows through the DuckDB file system."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.oracle = connect("htslib")
+        cls.routed = connect("duckdb")
+        cls.scratch = tempfile.TemporaryDirectory()
+        # Only FASTAs whose indexes are committed, so that htslib builds nothing in test/data.
+        cls.fastas = [
+            fasta
+            for fasta in fixtures("*.fa", "*.fa.gz")
+            if Path(str(fasta) + ".fai").is_file()
+            and (fasta.suffix != ".gz" or Path(str(fasta) + ".gzi").is_file())
+        ]
+        cls.cases = {fasta: reference_cases(fasta) for fasta in cls.fastas}
+        cls.norm_count, cls.munge_count = load_reference_cases(
+            (cls.oracle, cls.routed), cls.scratch.name, cls.cases
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.oracle.close()
+        cls.routed.close()
+        cls.scratch.cleanup()
+
+    def rows_through_both(self, relation, parameters=()):
+        """Asserts the rows of relation are htslib's through the DuckDB route; returns them."""
+        expected = self.oracle.execute(relation, list(parameters)).fetchall()
+        observed = self.routed.execute(relation, list(parameters)).fetchall()
+        self.assertEqual(len(observed), len(expected))
+        for observed_row, expected_row in zip(observed, expected):
+            self.assertEqual(observed_row, expected_row)
+        return expected
+
+    def test_fixture_set(self):
+        compressed = [fasta for fasta in self.fastas if fasta.suffix == ".gz"]
+        self.assertGreaterEqual(len(self.fastas), 25)
+        self.assertGreaterEqual(len(compressed), 2)
+        self.assertGreater(self.norm_count, 20000)
+        self.assertGreater(self.munge_count, 10000)
+
+    def test_bcftools_norm_row_rows_are_the_same(self):
+        rows = self.rows_through_both(norm_cases())
+        self.assertEqual(len(rows), self.norm_count)
+        status = collections.Counter((kind, normed["norm_status"]) for _, kind, normed in rows)
+        left_aligned = collections.Counter()
+        positions = dict(self.oracle.execute("SELECT id, pos FROM norm_cases").fetchall())
+        for identifier, kind, normed in rows:
+            if normed["norm_status"] == "Normalized" and normed["pos_normed"] < positions[identifier]:
+                left_aligned[kind] += 1
+        print("\nbcftools_norm_row: %d rows equal over %d FASTAs; statuses %s; left-aligned %s" % (
+            len(rows), len(self.fastas), dict(collections.Counter(s for _, s in status.elements())),
+            dict(left_aligned)))
+        # The oracle's rows must exercise normalisation, not only pass-through.
+        for kind in ("deletion", "deletion_shared_tail", "insertion", "multi_allelic", "symbolic_del"):
+            with self.subTest(kind=kind):
+                self.assertGreaterEqual(left_aligned[kind], 100)
+        self.assertGreaterEqual(status[("snp", "Unchanged")], 1000)
+        self.assertGreaterEqual(status[("ref_mismatch", "RefMismatch")], 1000)
+        self.assertGreaterEqual(status[("contig_alias", "Unchanged")], 10)
+        self.assertEqual(status[("missing_contig", "MissingContig")], len(self.fastas))
+        as_list = self.rows_through_both(norm_cases(alt="string_split(alt, ',')"))
+        self.assertEqual(as_list, rows)
+
+    def test_bcftools_munge_row_rows_are_the_same(self):
+        rows = self.rows_through_both(munge_cases())
+        self.assertEqual(len(rows), self.munge_count)
+        outcome_of = collections.Counter(
+            (kind, munged["alleles_swapped"], munged["filter"]) for _, kind, munged in rows
+        )
+        print("\nbcftools_munge_row: %d rows equal over %d FASTAs; (swapped, filter) %s" % (
+            len(rows), len(self.fastas),
+            dict(collections.Counter((swapped, tag) for _, swapped, tag in outcome_of.elements()))))
+        self.assertGreaterEqual(outcome_of[("a2_is_reference", False, None)], 1000)
+        self.assertGreaterEqual(outcome_of[("a1_is_reference", True, None)], 1000)
+        self.assertGreaterEqual(outcome_of[("neither_is_reference", False, "REF_MISMATCH")], 1000)
+        self.assertGreaterEqual(outcome_of[("both_match", False, "IFFY")], 1000)
+        self.assertGreaterEqual(outcome_of[("contig_alias", False, None)], 10)
+        self.assertEqual(outcome_of[("missing_contig", False, "MissingContig")], len(self.fastas))
+
+    def test_more_references_than_one_worker_keeps_open(self):
+        """Rows that name another FASTA each time, over more files than a worker holds handles for."""
+        plain = [fasta for fasta in self.fastas if fasta.suffix != ".gz"][:12]
+        self.assertGreater(len(plain), 8)  # DUCKHTS_REFERENCE_CACHE_ENTRIES
+        chosen = ", ".join(quoted(fasta) for fasta in plain)
+        # Three rows of each file; one thread evaluates them file after file, three times round.
+        round_robin = (
+            "(SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY fasta ORDER BY id) AS turn FROM {table}"
+            " WHERE fasta IN (" + chosen + ")) WHERE turn <= 3 ORDER BY turn, fasta) cases"
+        )
+        for connection in (self.oracle, self.routed):
+            connection.execute("SET threads = 1")
+        try:
+            for relation in (norm_cases(cases=round_robin.format(table="norm_cases")),
+                             munge_cases(cases=round_robin.format(table="munge_cases"))):
+                self.assertEqual(len(self.rows_through_both(relation)), 3 * len(plain))
+        finally:
+            for connection in (self.oracle, self.routed):
+                connection.execute("RESET threads")
+
+    def test_explicit_index_paths(self):
+        """An index named by the fai and gzi arguments, kept apart from the FASTA."""
+        for source in (DATA / "region_names.fa.gz", DATA / "bam_mismatch.long.fa.gz", DATA / "liftover_src.fa"):
+            with self.subTest(fasta=source.name), tempfile.TemporaryDirectory() as directory:
+                directory = Path(directory)
+                (directory / "index").mkdir()
+                copy = directory / ("reference" + "".join(source.suffixes[-2:] if source.suffix == ".gz"
+                                                         else source.suffixes[-1:]))
+                shutil.copy(source, copy)
+                fai = directory / "index" / "names.fai"
+                shutil.copy(str(source) + ".fai", fai)
+                gzi = "NULL"
+                if source.suffix == ".gz":
+                    shutil.copy(str(source) + ".gzi", directory / "index" / "blocks.gzi")
+                    gzi = quoted(directory / "index" / "blocks.gzi")
+                listing = sorted(str(entry.relative_to(directory)) for entry in directory.rglob("*"))
+                beside = " WHERE fasta = " + quoted(source)
+                expected = self.oracle.execute(norm_cases(beside)).fetchall()
+                self.assertGreater(len(expected), 30)
+                self.assertTrue(any(normed["norm_status"] in ("Normalized", "Unchanged") for _, _, normed in expected))
+                # The same rows, each naming the copy instead of the fixture.
+                apart = norm_cases(beside, fasta=quoted(copy), fai=quoted(fai), gzi=gzi)
+                self.assertEqual(self.rows_through_both(apart), expected)
+                with self.assertRaises(duckdb.Error) as failure:
+                    self.routed.execute(norm_cases(beside, fasta=quoted(copy))).fetchall()
+                self.assertIn("bcftools_norm_row: failed to load FASTA index: FASTA '" + str(copy) + "'",
+                              str(failure.exception))
+                self.assertIn("No such file or directory", str(failure.exception))
+                self.assertEqual(
+                    sorted(str(entry.relative_to(directory)) for entry in directory.rglob("*")), listing)
+
+    def test_the_duckdb_route_builds_no_missing_fasta_index(self):
+        """Both functions build a missing .fai with htslib; the DuckDB route is read-only."""
+        source = DATA / "liftover_src.fa"
+        where = " WHERE fasta = " + quoted(source)
+        for function, cases in (("bcftools_norm_row", norm_cases), ("bcftools_munge_row", munge_cases)):
+            with self.subTest(function=function), tempfile.TemporaryDirectory() as directory:
+                directory = Path(directory)
+                copy = directory / "reference.fa"
+                absent = directory / "absent.fa"
+                shutil.copy(source, copy)
+                expected = self.oracle.execute(cases(where)).fetchall()
+                self.assertGreater(len(expected), 30)
+                for path, missing in ((copy, str(copy) + ".fai"), (absent, str(absent) + ".fai")):
+                    with self.subTest(fasta=path.name):
+                        with self.assertRaises(duckdb.Error) as failure:
+                            self.routed.execute(cases(where, fasta=quoted(path))).fetchall()
+                        message = str(failure.exception)
+                        self.assertIn(function + ": failed to load FASTA index: FASTA '" + str(path) + "'", message)
+                        self.assertIn('(Cannot open file "' + missing + '": No such file or directory)', message)
+                        self.assertNotIn("duckdbfs:", message)
+                        self.assertEqual([entry.name for entry in directory.iterdir()], ["reference.fa"])
+                relation = cases(where, fasta=quoted(copy))
+                self.assertEqual(self.oracle.execute(relation).fetchall(), expected)
+                self.assertEqual(sorted(entry.name for entry in directory.iterdir()),
+                                 ["reference.fa", "reference.fa.fai"])
+                self.assertEqual(self.routed.execute(relation).fetchall(), expected)
+
+    def test_routed_references_stay_with_their_query(self):
+        """A reference opened through one connection serves no later query, of either route."""
+        fasta = DATA / "ce.fa"
+        where = " WHERE fasta = " + quoted(fasta) + " AND chrom = 'CHROMOSOME_I' AND pos {range}"
+        near = where.format(range="<= 300")
+        far = where.format(range="> 4 * %d" % REFERENCE_WINDOW_BASES)
+        for function, cases in (("bcftools_norm_row", norm_cases), ("bcftools_munge_row", munge_cases)):
+            with self.subTest(function=function):
+                expected_near = self.oracle.execute(cases(near)).fetchall()
+                expected_far = self.oracle.execute(cases(far)).fetchall()
+                self.assertGreater(len(expected_near), 500)
+                self.assertGreater(len(expected_far), 500)
+                first = connect("duckdb")
+                second = connect("htslib")
+                try:
+                    # One thread runs every query below, so they share one htslib thread cache.
+                    for connection in (first, second):
+                        connection.execute("SET threads = 1")
+                        load_reference_cases((connection,), self.scratch.name, self.cases)
+                    self.assertEqual(first.execute(cases(near)).fetchall(), expected_near)
+                    first.execute("SET duckhts_file_system = 'htslib'")
+                    self.assertEqual(first.execute(cases(near)).fetchall(), expected_near)
+                    self.assertEqual(second.execute(cases(near)).fetchall(), expected_near)
+                    first.execute("SET duckhts_file_system = 'duckdb'")
+                    self.assertEqual(first.execute(cases(far)).fetchall(), expected_far)
+                    first.close()
+                    # Bases outside every window read so far need a live handle.
+                    self.assertEqual(second.execute(cases(far)).fetchall(), expected_far)
+                    self.assertEqual(second.execute(cases(near)).fetchall(), expected_near)
+                finally:
+                    first.close()
+                    second.close()
+
+    def test_routed_references_close_with_their_query(self):
+        """After a query through DuckDB this process holds the FASTA open no longer; htslib's cache does."""
+        descriptors = Path("/proc/self/fd")
+        if not descriptors.is_dir():
+            self.skipTest("no /proc/self/fd to list open files")
+        source = DATA / "liftover_src.fa"
+        where = " WHERE fasta = " + quoted(source)
+
+        def open_copies(directory):
+            held = []
+            for descriptor in descriptors.iterdir():
+                try:
+                    target = os.readlink(descriptor)
+                except OSError:
+                    continue
+                if target.startswith(str(directory)):
+                    held.append(Path(target).name)
+            return sorted(held)
+
+        for function, cases in (("bcftools_norm_row", norm_cases), ("bcftools_munge_row", munge_cases)):
+            with self.subTest(function=function), tempfile.TemporaryDirectory() as directory:
+                directory = Path(directory).resolve()
+                copy = directory / "reference.fa"
+                shutil.copy(source, copy)
+                shutil.copy(str(source) + ".fai", str(copy) + ".fai")
+                expected = self.oracle.execute(cases(where)).fetchall()
+                relation = cases(where, fasta=quoted(copy))
+                with connect("duckdb") as connection:
+                    connection.execute("SET threads = 1")
+                    load_reference_cases((connection,), self.scratch.name, self.cases)
+                    self.assertEqual(connection.execute(relation).fetchall(), expected)
+                    connection.execute("SELECT 1").fetchall()
+                    self.assertEqual(open_copies(directory), [])
+                    # The same listing sees the handle htslib's thread cache keeps.
+                    connection.execute("SET duckhts_file_system = 'htslib'")
+                    self.assertEqual(connection.execute(relation).fetchall(), expected)
+                    connection.execute("SELECT 1").fetchall()
+                    self.assertEqual(open_copies(directory), ["reference.fa"])
+
+    def test_a_reference_htslib_keeps_open_does_not_serve_the_duckdb_route(self):
+        """htslib's cached handle must not answer a query that DuckDB's access policy forbids."""
+        fasta = DATA / "liftover_src.fa"
+        where = " WHERE fasta = " + quoted(fasta)
+        for function, cases in (("bcftools_norm_row", norm_cases(where)), ("bcftools_munge_row", munge_cases(where))):
+            with self.subTest(function=function), connect("htslib") as connection:
+                connection.execute("SET threads = 1")
+                load_reference_cases((connection,), self.scratch.name, self.cases)
+                expected = self.oracle.execute(cases).fetchall()
+                self.assertEqual(connection.execute(cases).fetchall(), expected)
+                connection.execute("SET duckhts_file_system = 'duckdb'")
+                self.assertEqual(connection.execute(cases).fetchall(), expected)
+                connection.execute("SET enable_external_access = false")
+                with self.assertRaisesRegex(duckdb.Error, "(?i)disabled|permission"):
+                    connection.execute(cases).fetchall()
+                connection.execute("SET duckhts_file_system = 'htslib'")
+                self.assertEqual(connection.execute(cases).fetchall(), expected)
+
+    def test_http_reference_uses_the_connection_secret(self):
+        with connect("duckdb") as probe:
+            try:
+                probe.execute("LOAD httpfs")
+            except duckdb.Error as failure:
+                self.skipTest("httpfs is not installed for this DuckDB: " + str(failure).splitlines()[0])
+        fasta = DATA / "ce.fa"
+        where = " WHERE fasta = " + quoted(fasta) + " AND chrom = 'CHROMOSOME_II' AND pos <= 200"
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RangeHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = "http://127.0.0.1:" + str(server.server_address[1]) + "/protected/ce.fa"
+            with connect("duckdb") as routed:
+                routed.execute("LOAD httpfs")
+                load_reference_cases((routed,), self.scratch.name, self.cases)
+                for function, cases in (("bcftools_norm_row", norm_cases), ("bcftools_munge_row", munge_cases)):
+                    relation = cases(where, fasta=quoted(url))
+                    with self.subTest(function=function, secret="absent"):
+                        with self.assertRaisesRegex(duckdb.Error, function + ": failed to load FASTA index.*403"):
+                            routed.execute(relation).fetchall()
+                routed.execute(
+                    "CREATE SECRET (TYPE http, BEARER_TOKEN 'sesame', SCOPE '" + url.rsplit("/", 1)[0] + "')")
+                for function, cases in (("bcftools_norm_row", norm_cases), ("bcftools_munge_row", munge_cases)):
+                    relation = cases(where, fasta=quoted(url))
+                    with self.subTest(function=function, secret="present"):
+                        expected = self.oracle.execute(cases(where)).fetchall()
+                        self.assertGreater(len(expected), 500)
+                        RangeHandler.requested_paths.clear()
+                        self.assertEqual(routed.execute(relation).fetchall(), expected)
+                        for path in ("/protected/ce.fa", "/protected/ce.fa.fai"):
+                            self.assertGreater(RangeHandler.requested_paths[path], 0, path)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
 
 if __name__ == "__main__":

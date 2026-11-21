@@ -8,7 +8,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <stdlib.h>
 #include <string.h>
 
-#include "reference_cache.h"
+#include "reference_access.h"
 
 #define MUNGE_TAG_BUF 128
 
@@ -121,14 +121,22 @@ static char *normalize_allele(const char *s, size_t n) {
     return out;
 }
 
-static duckhts_reference_entry_t *get_munge_reference(const char *fasta_path, char **err) {
+static void bcftools_munge_row_init(duckdb_init_info info) {
+    duckhts_reference_access_scalar_init(info, "bcftools_munge_row");
+}
+
+static duckhts_reference_entry_t *get_munge_reference(duckhts_reference_access_t *references,
+                                                      const char *fasta_path, char **err) {
     const char *cause = NULL;
+    const char *reason = "";
     duckhts_reference_entry_t *entry =
-        duckhts_reference_cache_get(fasta_path, NULL, NULL, 0, &cause);
+        duckhts_reference_access_get(references, fasta_path, NULL, NULL, 0, &cause, &reason);
     if (!entry) {
         char message[1024];
+        char with_reason[sizeof(message) + 512];
         snprintf(message, sizeof(message), "bcftools_munge_row: %s: %s", cause, fasta_path);
-        *err = dup_cstr(message);
+        snprintf(with_reason, sizeof(with_reason), "%s%s", message, reason);
+        *err = dup_cstr(with_reason);
     }
     return entry;
 }
@@ -183,6 +191,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
     char *cached_fasta_path = NULL;
     idx_t cached_fasta_len = 0;
     duckhts_reference_entry_t *cached_fai = NULL;
+    duckhts_reference_access_t *references = duckdb_scalar_function_get_state(info);
 
     for (int i = 0; i < MUNGE_OUT_COUNT; i++) child_vecs[i] = duckdb_struct_vector_get_child(output, (idx_t)i);
 
@@ -329,7 +338,7 @@ static void bcftools_munge_row_scalar(duckdb_function_info info, duckdb_data_chu
                 free(cached_fasta_path);
                 return;
             }
-            fai = get_munge_reference(fasta_path, &err);
+            fai = get_munge_reference(references, fasta_path, &err);
             if (fai) {
                 free(cached_fasta_path);
                 cached_fasta_path = fasta_path;
@@ -513,6 +522,7 @@ void register_munge_functions(duckdb_connection connection) {
     duckdb_scalar_function_set_return_type(fn, struct_type);
     duckdb_scalar_function_set_special_handling(fn);
     duckdb_scalar_function_set_function(fn, bcftools_munge_row_scalar);
+    duckdb_scalar_function_set_init(fn, bcftools_munge_row_init);
     duckdb_register_scalar_function(connection, fn);
     duckdb_destroy_scalar_function(&fn);
 

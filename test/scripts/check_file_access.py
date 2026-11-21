@@ -36,7 +36,8 @@ ALLOWED = {
     ("src/bgzip.c", "bgzf_open"):
         "bgunzip writes its output with this process; bgzip reads its input with stdio",
     ("src/reference_cache.c", "fai_load3_format"):
-        "FAI_CREATE builds a missing index, and the cached handle outlives the connection",
+        "the thread cache of the 'htslib' route: FAI_CREATE builds a missing index and the "
+        "handle is kept across queries; src/reference_access.c opens the 'duckdb' route's",
     ("src/libbigwig_hfile_io.c", "bwOpen"):
         "the libBigWig adapter: its urlOpen() opens the file through the module",
 }

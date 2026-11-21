@@ -1,6 +1,7 @@
 #ifndef DUCKHTS_REFERENCE_CACHE_H
 #define DUCKHTS_REFERENCE_CACHE_H
 
+#include <htslib/faidx.h>
 #include <htslib/hts.h>
 
 #define DUCKHTS_REFERENCE_CACHE_ENTRIES 8u
@@ -21,6 +22,23 @@ typedef struct duckhts_reference_entry duckhts_reference_entry_t;
 duckhts_reference_entry_t *duckhts_reference_cache_get(
     const char *fasta_path, const char *fai_path, const char *gzi_path,
     int tune_indexed_remote_io, const char **error);
+
+/* An entry outside the thread cache, for a handle that must not outlive its
+ * opener: a faidx_t read through one connection's file access. Takes ownership
+ * of fai on success; on NULL (out of memory) fai stays with the caller. The
+ * caller owns the entry, uses it from one thread at a time with
+ * duckhts_reference_fetch, and releases it with duckhts_reference_entry_destroy,
+ * which closes fai and frees the entry's one sequence window. cache_get never
+ * returns such an entry and must not be asked to release one. */
+duckhts_reference_entry_t *duckhts_reference_entry_wrap(faidx_t *fai);
+void duckhts_reference_entry_destroy(duckhts_reference_entry_t *entry);
+
+/* The diagnostic cache_get reports when the index of these paths does not
+ * load. A NULL or empty fai_path or gzi_path names the FASTA path with .fai or
+ * .gzi appended. Borrowed, per-thread storage, valid until the next failed
+ * cache_get or the next call on this thread. */
+const char *duckhts_reference_load_error(
+    const char *fasta_path, const char *fai_path, const char *gzi_path);
 
 typedef enum {
     DUCKHTS_REFERENCE_EXACT,       /* require the complete requested interval */

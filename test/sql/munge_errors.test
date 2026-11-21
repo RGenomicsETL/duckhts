@@ -70,3 +70,64 @@ SELECT (bcftools_munge_row(
 )).filter;
 ----
 chrMissing	MissingContig
+
+# SET duckhts_file_system = 'duckdb' reads the FASTA through the connection.
+# The route builds no index: a FASTA that is not there is DuckDB's error.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+statement error
+SELECT (bcftools_munge_row(
+  'chrF', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/does_not_exist.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom;
+----
+No such file or directory
+
+# The missing-contig row above is the same through the connection.
+query TT
+SELECT m.chrom, m.filter
+FROM (
+  SELECT bcftools_munge_row(
+    'chrMissing', 2, 'A', 'C', 'rs1',
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+  ) AS m
+) s;
+----
+chrMissing	MissingContig
+
+statement ok
+SET duckhts_file_system = 'tabix';
+
+statement error
+SELECT (bcftools_munge_row(
+  'chrF', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom;
+----
+bcftools_munge_row: duckhts_file_system must be 'htslib' or 'duckdb'
+
+statement ok
+RESET duckhts_file_system;
+
+statement ok
+SET duckhts_remote_block_size = 1;
+
+statement error
+SELECT (bcftools_munge_row(
+  'chrF', 2, 'A', 'C', 'rs1',
+  NULL, NULL, NULL, NULL,
+  NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+  '__WORKING_DIRECTORY__/test/data/liftover_src.fa', 'IFFY', 'REF_MISMATCH', NULL, NULL, NULL
+)).chrom;
+----
+bcftools_munge_row: duckhts_remote_block_size must be 0 or between 131072 and 268435456 bytes
+
+statement ok
+RESET duckhts_remote_block_size;

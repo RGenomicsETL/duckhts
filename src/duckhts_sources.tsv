@@ -23,6 +23,7 @@ src/liftover_udf.c|liftover_udf.c
 src/bcftools_norm_udf.c|bcftools_norm_udf.c
 src/munge_udf.c|munge_udf.c
 src/reference_cache.c|reference_cache.c
+src/reference_access.c|reference_access.c
 src/seq_reader.c|seq_reader.c
 src/fastq_qc.c|fastq_qc.c
 src/somalier.c|somalier.c

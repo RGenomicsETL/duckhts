@@ -291,6 +291,49 @@ static int bounds_and_aliases(void) {
     return 1;
 }
 
+/* A wrapped entry fetches like a cached one, stays out of the thread cache,
+ * and closes its handle when the caller destroys it. */
+static int wrapped_entry(void) {
+    CHECK(duckhts_reference_entry_wrap(NULL) == NULL);
+    duckhts_reference_entry_destroy(NULL);
+    CHECK(pthread_getspecific(reference_key) == NULL && atomic_load(&live_handles) == 0);
+    for (unsigned r = 0; r < 2; r++) {
+        faidx_t *fai = observed_load(paths[r], NULL, NULL, 0, FAI_FASTA);
+        CHECK(fai != NULL);
+        duckhts_reference_entry_t *entry = duckhts_reference_entry_wrap(fai);
+        CHECK(entry != NULL && entry->fai == fai && atomic_load(&live_handles) == 1);
+        char *bases = duckhts_reference_fetch(entry, "1", 4001, 4100, DUCKHTS_REFERENCE_EXACT);
+        CHECK(bases && strlen(bases) == 100 && !memcmp(bases, expected[r] + 4001, 100));
+        free(bases);
+        unsigned long calls = atomic_load(&fetch_calls);
+        bases = duckhts_reference_fetch(entry, "chr1", 4050, 4059, DUCKHTS_REFERENCE_EXACT);
+        CHECK(bases && !memcmp(bases, expected[r] + 4050, 10));
+        CHECK(atomic_load(&fetch_calls) == calls);
+        free(bases);
+        bases = duckhts_reference_fetch(entry, "chr1", BASES - 3, BASES + 5,
+                                       DUCKHTS_REFERENCE_CLIP_END);
+        CHECK(bases && strlen(bases) == 3 && !memcmp(bases, expected[r] + BASES - 3, 3));
+        free(bases);
+        CHECK(pthread_getspecific(reference_key) == NULL);
+        duckhts_reference_entry_destroy(entry);
+        CHECK(atomic_load(&live_handles) == 0);
+    }
+    /* The diagnostic of a failed load is the one cache_get reports. */
+    const char *error = NULL;
+    char absent[1100], reported[1024];
+    snprintf(absent, sizeof(absent), "%s.absent", paths[0]);
+    CHECK(duckhts_reference_cache_get(absent, NULL, "", 0, &error) == NULL && error);
+    snprintf(reported, sizeof(reported), "%s", error);
+    CHECK(strstr(reported, ".absent.fai'") && strstr(reported, ".absent.gzi'"));
+    CHECK(!strcmp(duckhts_reference_load_error(absent, "", NULL), reported));
+    CHECK(strstr(duckhts_reference_load_error(absent, "x.fai", "y.gzi"), "FAI 'x.fai'; GZI 'y.gzi'"));
+    reference_cache_t *cache = pthread_getspecific(reference_key);
+    CHECK(pthread_setspecific(reference_key, NULL) == 0);
+    reference_cache_destroy(cache);
+    CHECK(atomic_load(&live_handles) == 0);
+    return 1;
+}
+
 static int bounded_fetch_matches(faidx_t *fai, unsigned reference,
     size_t position, size_t length) {
     unsigned char buffer[4102], saved[4102];
@@ -364,7 +407,8 @@ int main(int argc, char **argv) {
     if (argc > 2) seed = (uint32_t)strtoul(argv[2], NULL, 10);
     if (argc > 3) trials = (unsigned)strtoul(argv[3], NULL, 10);
     if (!seed || !trials) return 2;
-    if (!write_references(argv[1]) || !bounded_fetch_failures(argv[1]) || !bounds_and_aliases()) return 1;
+    if (!write_references(argv[1]) || !bounded_fetch_failures(argv[1]) || !bounds_and_aliases() ||
+        !wrapped_entry()) return 1;
     char index[1100];
     snprintf(index, sizeof(index), "%s.fai", paths[0]);
     if (remove(index)) return 1;

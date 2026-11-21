@@ -66,6 +66,37 @@ static void reference_entry_destroy(duckhts_reference_entry_t *entry) {
     free(entry);
 }
 
+duckhts_reference_entry_t *duckhts_reference_entry_wrap(faidx_t *fai) {
+    duckhts_reference_entry_t *entry;
+    if (!fai) return NULL;
+    entry = calloc(1, sizeof(*entry));
+    if (entry) entry->fai = fai;
+    return entry;
+}
+
+void duckhts_reference_entry_destroy(duckhts_reference_entry_t *entry) {
+    if (entry) reference_entry_destroy(entry);
+}
+
+const char *duckhts_reference_load_error(
+    const char *fasta_path, const char *fai_path, const char *gzi_path) {
+    if (fai_path && !*fai_path) fai_path = NULL;
+    if (gzi_path && !*gzi_path) gzi_path = NULL;
+    const char *fai_name = fai_path ? fai_path : fasta_path;
+    const char *gzi_name = gzi_path ? gzi_path : fasta_path;
+    snprintf(reference_load_error, sizeof(reference_load_error),
+             "failed to load FASTA index: FASTA '%.*s%s'; FAI '%.*s%s%s'; GZI '%.*s%s%s'",
+             REFERENCE_ERROR_PATH_LIMIT, fasta_path,
+             strlen(fasta_path) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
+             REFERENCE_ERROR_PATH_LIMIT, fai_name,
+             strlen(fai_name) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
+             fai_path ? "" : ".fai",
+             REFERENCE_ERROR_PATH_LIMIT, gzi_name,
+             strlen(gzi_name) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
+             gzi_path ? "" : ".gzi");
+    return reference_load_error;
+}
+
 static void reference_cache_destroy(void *pointer) {
     reference_cache_t *cache = pointer;
     if (!cache) return;
@@ -141,20 +172,8 @@ duckhts_reference_entry_t *duckhts_reference_cache_get(
     entry->fai = fai_load3_format(fasta_path, fai_path, gzi_path, FAI_CREATE, FAI_FASTA);
     pthread_mutex_unlock(&reference_index_mutex);
     if (!entry->fai) {
-        const char *fai_name = fai_path ? fai_path : fasta_path;
-        const char *gzi_name = gzi_path ? gzi_path : fasta_path;
-        snprintf(reference_load_error, sizeof(reference_load_error),
-                 "failed to load FASTA index: FASTA '%.*s%s'; FAI '%.*s%s%s'; GZI '%.*s%s%s'",
-                 REFERENCE_ERROR_PATH_LIMIT, fasta_path,
-                 strlen(fasta_path) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
-                 REFERENCE_ERROR_PATH_LIMIT, fai_name,
-                 strlen(fai_name) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
-                 fai_path ? "" : ".fai",
-                 REFERENCE_ERROR_PATH_LIMIT, gzi_name,
-                 strlen(gzi_name) > REFERENCE_ERROR_PATH_LIMIT ? "...[truncated]" : "",
-                 gzi_path ? "" : ".gzi");
         reference_entry_destroy(entry);
-        *error = reference_load_error;
+        *error = duckhts_reference_load_error(fasta_path, fai_path, gzi_path);
         return NULL;
     }
     entry->indexed_remote_tuned = (tune_indexed_remote_io != 0);

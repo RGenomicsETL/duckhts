@@ -17,18 +17,19 @@
 - **Every reader can read through the DuckDB file system.** After
   `SET duckhts_file_system = 'duckdb'`, the alignment, VCF/BCF, tabix, GFF/GTF, BED,
   FASTA/FASTQ, GenBank and bigWig readers, the coverage, counting and metadata functions,
-  `bcftools_score` and `bcftools_liftover` open their inputs through the file system of
-  the connection, by an htslib file backend built on the DuckDB 1.5.6 C API. That covers
+  `bcftools_score`, `bcftools_liftover`, `bcftools_norm_row` and `bcftools_munge_row` open
+  their inputs through the file system of the connection, by an htslib file backend built on the DuckDB 1.5.6 C API. That covers
   the data file, its index, a FASTA with its `.fai` and `.gzi`, and the reference given to
   an alignment reader, CRAM included. DuckDB secrets, `enable_external_access`, httpfs and
   registered file systems then apply, and an open error ends with DuckDB's reason. The
   route is read-only: it looks for an index beside the file only, never reads or writes
-  the working directory, and does not build a missing index, so `bcftools_liftover` fails
-  on a FASTA without a `.fai` where htslib's file access builds one. Writers and index
-  builders (`bgzip`, `bgunzip`, `bam_index`, `bcf_index`, `tabix_index`, `fasta_index`),
-  everything a function writes, the FASTA of `bcftools_norm_row` and `bcftools_munge_row`,
-  and the `columns_file` and a summaries directory of `bcftools_score` keep htslib's file
-  access. The default, `'htslib'`, is unchanged. "File access" under `read_bam` in the
+  the working directory, and does not build a missing index, so `bcftools_liftover`,
+  `bcftools_norm_row` and `bcftools_munge_row` fail on a FASTA without a `.fai` where
+  htslib's file access builds one. A FASTA those three open through the DuckDB file system
+  is closed when the query ends; with htslib's file access it stays open for later
+  queries. Writers and index builders (`bgzip`, `bgunzip`, `bam_index`, `bcf_index`,
+  `tabix_index`, `fasta_index`), everything a function writes, and the `columns_file` and
+  a summaries directory of `bcftools_score` keep htslib's file access. The default, `'htslib'`, is unchanged. "File access" under `read_bam` in the
   function reference states the contract.
   One module, `src/hts_file_access.c`, opens every input and index for both file systems;
   `make test-file-access-guard` fails when another source file calls an htslib read-open
