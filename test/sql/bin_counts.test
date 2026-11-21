@@ -192,3 +192,59 @@ query II
 EXECUTE bins_by_path('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam');
 ----
 10	10
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query TTIIIII
+SELECT rmdup, chrom, bin_id, count_total, count_fwd, count_rev, count_pre
+FROM (
+  SELECT 'none' AS rmdup, * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'none', stats := 'mq')
+  UNION ALL
+  SELECT 'streaming' AS rmdup, * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'streaming', stats := 'mq')
+  UNION ALL
+  SELECT 'flag' AS rmdup, * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/fixture_mixed.bam', 5000, rmdup := 'flag', stats := 'mq')
+)
+ORDER BY rmdup, bin_id;
+----
+flag	11	0	4	2	2	4
+flag	11	1	0	0	0	2
+flag	11	2	2	2	0	2
+flag	11	3	2	2	0	2
+flag	11	4	0	0	0	0
+flag	11	5	0	0	0	0
+flag	11	6	0	0	0	0
+flag	11	7	0	0	0	0
+flag	11	8	0	0	0	0
+flag	11	9	0	0	0	0
+none	11	0	4	2	2	4
+none	11	1	2	1	1	2
+none	11	2	2	2	0	2
+none	11	3	2	2	0	2
+none	11	4	0	0	0	0
+none	11	5	0	0	0	0
+none	11	6	0	0	0	0
+none	11	7	0	0	0	0
+none	11	8	0	0	0	0
+none	11	9	0	0	0	0
+streaming	11	0	2	1	1	4
+streaming	11	1	2	1	1	2
+streaming	11	2	1	1	0	2
+streaming	11	3	0	0	0	0
+streaming	11	4	0	0	0	0
+streaming	11	5	0	0	0	0
+streaming	11	6	0	0	0	0
+streaming	11	7	0	0	0	0
+streaming	11	8	0	0	0	0
+streaming	11	9	0	0	0	0
+
+statement error
+SELECT * FROM bam_bin_counts('__WORKING_DIRECTORY__/test/data/no_such_input', 5000);
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

@@ -19,11 +19,10 @@ bwInit(size_t size)
 }
 
 bigWigFile_t *
-bwOpen(const char *path, CURLcode (*callback)(CURL *), const char *mode)
+duckhts_bigwig_open(const duckhts_file_access_t *access, const char *path)
 {
+    (void)access;
     (void)path;
-    (void)callback;
-    (void)mode;
     abort();
 }
 

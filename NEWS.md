@@ -11,21 +11,33 @@
   `orig$time`, which this duckdb-wasm does not export; it binds the plain i64 symbols.
 
 - `SET duckhts_remote_block_size = N` sets the bytes htslib asks for in each read of a
-  remote file in `read_bam`, on either file-access route, from 131072 to 268435456. The
-  default, 0, keeps the size DuckHTS chooses by scan type. A value outside that range is a
-  bind error.
-- **`read_bam` can read through the DuckDB file system.** After
-  `SET duckhts_file_system = 'duckdb'`, the alignment file and its index are read through
-  the file system of the connection, by an htslib file backend built on the DuckDB 1.5.6
-  C API. DuckDB secrets, `enable_external_access`, httpfs and registered file systems then
-  apply, and an open error ends with DuckDB's reason. The route is read-only, reads the
-  CRAM reference through htslib, and looks for the index beside the file only. The default,
-  `'htslib'`, keeps htslib's own file access, and other readers ignore the setting.
-  `make test-duckdb-file-system` compares both routes on every committed BAM and CRAM
-  fixture. `benchmarks/benchmark_duckdb_file_system.md` measures both routes over HTTP on
-  a loopback server. On a local file the two routes take the same time. Over HTTP the
-  DuckDB route is slower, and with DuckDB 2.0.0 much slower once each request has latency:
-  there it sends one closed range per htslib block, 128 requests for a 10 Mb region where
+  remote file, in every reader and on either file-access route, from 131072 to 268435456.
+  The default, 0, keeps the size DuckHTS chooses by scan type. A value outside that range
+  is an error that names the function.
+- **Every reader can read through the DuckDB file system.** After
+  `SET duckhts_file_system = 'duckdb'`, the alignment, VCF/BCF, tabix, GFF/GTF, BED,
+  FASTA/FASTQ, GenBank and bigWig readers, the coverage, counting and metadata functions,
+  `bcftools_score` and `bcftools_liftover` open their inputs through the file system of
+  the connection, by an htslib file backend built on the DuckDB 1.5.6 C API. That covers
+  the data file, its index, a FASTA with its `.fai` and `.gzi`, and the reference given to
+  an alignment reader, CRAM included. DuckDB secrets, `enable_external_access`, httpfs and
+  registered file systems then apply, and an open error ends with DuckDB's reason. The
+  route is read-only: it looks for an index beside the file only, never reads or writes
+  the working directory, and does not build a missing index, so `bcftools_liftover` fails
+  on a FASTA without a `.fai` where htslib's file access builds one. Writers and index
+  builders (`bgzip`, `bgunzip`, `bam_index`, `bcf_index`, `tabix_index`, `fasta_index`),
+  everything a function writes, the FASTA of `bcftools_norm_row` and `bcftools_munge_row`,
+  and the `columns_file` and a summaries directory of `bcftools_score` keep htslib's file
+  access. The default, `'htslib'`, is unchanged. "File access" under `read_bam` in the
+  function reference states the contract.
+  One module, `src/hts_file_access.c`, opens every input and index for both file systems;
+  `make test-file-access-guard` fails when another source file calls an htslib read-open
+  function. `make test-duckdb-file-system` compares both routes for every reader on the
+  committed fixtures, on full scans, region and index paths, and failing opens.
+  `benchmarks/benchmark_duckdb_file_system.md` measures both routes for `read_bam` over
+  HTTP on a loopback server; the other readers are not measured. For `read_bam`, the two
+  routes take the same time on a local file. Over HTTP the DuckDB route is slower, and
+  with DuckDB 2.0.0 much slower once each request has latency: there it sends one closed range per htslib block, 128 requests for a 10 Mb region where
   htslib's libcurl backend sends 22. With DuckDB 1.5.6 it sends 16. The report also
   measures `duckhts_remote_block_size` from 128 KiB to 64 MiB on both versions: on DuckDB
   2.0.0, 16 MiB cuts that region from 4.7 s to 1.4 s at 20 ms per request, and 128 KiB

@@ -534,3 +534,28 @@ SELECT
     index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.empty.vcf.gz.index.csi'));
 ----
 0	0
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query TITT rowsort
+SELECT CHROM, POS, ID, FORMAT_GT_S1
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.partial.vcf.gz',
+  index_path := '__WORKING_DIRECTORY__/test/data/bcf_scan_contigs.partial.vcf.gz.index.csi',
+  region := 'chr3:20-40,chr3:20-20');
+----
+chr3	20	allele	1/1
+chr3	20	duplicate	./1
+chr3	20	duplicate	./1
+chr3	40	last	1
+
+statement error
+SELECT * FROM read_bcf('__WORKING_DIRECTORY__/test/data/no_such_input');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

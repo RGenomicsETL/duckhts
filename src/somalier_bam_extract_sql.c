@@ -18,7 +18,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 
 #include "include/bam_site_counts.h"
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "duckhts_registration.h"
 #include "duckhts_somalier_panel_sql.h"
 
@@ -88,6 +88,7 @@ typedef struct bam_extract_panel {
 
 typedef struct bam_extract_bind {
     char *source_path;
+    duckhts_file_access_t *access;
     char *panel_table;
     char *panel_parquet;
     char *sample_id;
@@ -436,6 +437,7 @@ static bool set_remote_tuning(htsFile *fp, const char *path,
 static void bam_extract_bind_destroy(void *pointer) {
     bam_extract_bind_t *bind = pointer;
     if (!bind) return;
+    duckhts_file_access_destroy(bind->access);
     duckdb_free(bind->panel.assembly);
     duckdb_free(bind->panel.region_storage);
     duckdb_free(bind->panel.sites);
@@ -588,6 +590,10 @@ static void bam_extract_bind(duckdb_bind_info info) {
         return;
     }
     memset(bind, 0, sizeof(*bind));
+    if (!duckhts_file_access_bind(info, "duckhts_somalier_bam_counts", &bind->access)) {
+        bam_extract_bind_destroy(bind);
+        return;
+    }
     bind->source_path = bind_positional_string(info, 0u, false,
         BAM_EXTRACT_MAX_PATH_BYTES, "source_path", error, sizeof(error));
     bind->panel_table = bind_positional_string(info, 1u, true,
@@ -1040,7 +1046,7 @@ static bool process_job(const bam_extract_bind_t *bind,
     const char *error = NULL;
     bool ok = false;
 
-    fp = sam_open(bind->source_path, "r");
+    fp = duckhts_file_access_open(bind->access, bind->source_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
         error = "duckhts_somalier_bam_counts: failed to open BAM/CRAM source";
         goto cleanup;
@@ -1058,8 +1064,8 @@ static bool process_job(const bam_extract_bind_t *bind,
         error = "duckhts_somalier_bam_counts: failed to read alignment header";
         goto cleanup;
     }
-    fai = fai_load3_format(bind->reference_path, bind->reference_index_path,
-                           NULL, 0, FAI_FASTA);
+    fai = duckhts_file_access_fai_load(bind->access, bind->reference_path, bind->reference_index_path,
+                                       NULL, 0, FAI_FASTA, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fai) {
         error = "duckhts_somalier_bam_counts: failed to open reference and existing faidx";
         goto cleanup;
@@ -1067,14 +1073,14 @@ static bool process_job(const bam_extract_bind_t *bind,
     /* Read @SQ and require an existing FAI before attaching a CRAM reference,
      * so FASTA lengths cannot replace the alignment coordinate domain and the
      * CRAM loader cannot create an inferred reference sidecar. */
-    if (hts_set_opt(fp, CRAM_OPT_REFERENCE,
-                    bind->cram_reference ? bind->cram_reference :
-                                           bind->reference_path) < 0) {
+    if (duckhts_file_access_set_cram_reference(bind->access, fp,
+                                               bind->cram_reference ? bind->cram_reference :
+                                                                      bind->reference_path) < 0) {
         error = "duckhts_somalier_bam_counts: failed to configure CRAM reference";
         goto cleanup;
     }
-    index = sam_index_load3(fp, bind->source_path, bind->index_path,
-                            HTS_IDX_SILENT_FAIL);
+    index = duckhts_file_access_sam_index_load(bind->access, fp, bind->source_path, bind->index_path,
+                                               HTS_IDX_SILENT_FAIL);
     if (!index) {
         error = "duckhts_somalier_bam_counts: indexed BAM/CRAM source is required";
         goto cleanup;

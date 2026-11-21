@@ -104,3 +104,29 @@ statement error
 SELECT * FROM read_bigwig('__WORKING_DIRECTORY__/test/data/range.bam');
 ----
 read_bigwig: failed to open a valid BigWig file
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query TIIR
+SELECT CHROM, START0, END0, round(VALUE::DOUBLE, 1)
+FROM read_bigwig('__WORKING_DIRECTORY__/third_party/libBigWig/test/test.bw')
+ORDER BY CHROM, START0;
+----
+1	0	1	0.1
+1	1	2	0.2
+1	2	3	0.3
+1	100	150	1.4
+1	150	151	1.5
+10	200	300	2.0
+
+statement error
+SELECT * FROM read_bigwig('__WORKING_DIRECTORY__/test/data/no_such_input');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

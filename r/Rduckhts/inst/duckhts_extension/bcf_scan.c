@@ -129,18 +129,18 @@ void duckhts_bcf_scan_close(duckhts_bcf_scan_t *scan) {
     memset(scan, 0, sizeof(*scan));
 }
 
-int duckhts_bcf_scan_open(duckhts_bcf_scan_t *scan, const char *path,
-                         const duckhts_bcf_index_t *index, int decompression_threads,
+int duckhts_bcf_scan_open(duckhts_bcf_scan_t *scan, const duckhts_file_access_t *access,
+                         const char *path, const duckhts_bcf_index_t *index, int decompression_threads,
                          duckhts_hts_io_profile_t profile, const char *reader_name,
                          char *error, size_t error_size) {
     const char *name = reader_name ? reader_name : "read_bcf";
     scan->index = index;
-    scan->fp = hts_open(path, "r");
+    scan->fp = duckhts_file_access_open(access, path, profile);
     if (!scan->fp) {
-        snprintf(error, error_size, "%s: failed to open BCF/VCF file: %s", name, path);
+        snprintf(error, error_size, "%s: failed to open BCF/VCF file: %s%s", name, path,
+                 duckhts_file_access_reason(access, path));
         goto fail;
     }
-    duckhts_apply_remote_hts_tuning(scan->fp, path, profile);
     if (decompression_threads > 0 &&
         hts_get_format(scan->fp)->compression != no_compression &&
         hts_set_threads(scan->fp, decompression_threads) < 0) {

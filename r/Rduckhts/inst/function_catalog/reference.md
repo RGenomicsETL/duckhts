@@ -432,6 +432,10 @@ include_file_offset := TRUE adds FILE_OFFSET UBIGINT after FILTER: the BGZF virt
 
 decompression_threads controls per-file HTSlib workers, default 0; it is separate from DuckDB scan parallelism.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -494,6 +498,10 @@ regions := STRUCT(chrom VARCHAR, start BIGINT, "end" BIGINT)[] has the same cont
 
 Exact alleles: regions plus SQL restore requested (chrom, pos, REF, ALT) alleles without changing the reader. Keep requests unchanged, plan I/O with SELECT DISTINCT chrom, pos, read with non_reference_only := false and format_fields such as ['GP','DS','HS'] so hom-ref and missing calls are returned, expand ALT with its ordinal, and join on equality: WITH alleles AS (SELECT record_index, CHROM, POS, REF, ALT AS full_alt, calls, unnest(ALT) AS match_alt, generate_subscripts(ALT, 1) AS alt_index FROM read_geno('f.bcf', regions := getvariable('p'), non_reference_only := false)) SELECT s.*, a.record_index, a.full_alt, a.alt_index, a.calls FROM requests s LEFT JOIN alleles a ON s.chrom = a.CHROM AND s.pos = a.POS AND s.ref = a.REF AND s.alt = a.match_alt. Use equality on the expanded ALT: list_contains(a.ALT, s.alt) in the join condition plans a nested-loop join. Multi-ALT records keep every ALT in file order with the matched 1-based alt_index, and a request matching two ALT slots or two physical records returns a row each. GP, DS, HS and phase are full-site values: no allele splitting, GP remapping, dosage selection, trimming, strand flip or liftover, so a shifted indel representation is not matched. An ALT-less record disappears under unnest, so diagnosing unmatched requests needs a second step; rduckhts_geno_sites() composes the complete recipe on the caller connection, labelling each request matched, allele_not_at_site, ref_mismatch or absent (position-level diagnostics only, never a fabricated genotype). record_index is scan-local; order with ORDER BY request_id, record_index, alt_index. The reader does not deduplicate requests.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -519,6 +527,10 @@ Returns:
 ```
 table
 ```
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -576,7 +588,7 @@ With decompression_threads > 0, a CRAM scan that projects tag data keeps htslib'
 
 ### File access
 
-By default htslib opens the file, its index and the CRAM reference with its own file access. After SET duckhts_file_system = 'duckdb', read_bam reads the alignment file and its index through the DuckDB file system of the connection, so DuckDB secrets, settings such as enable_external_access, httpfs and registered file systems apply, and an open error ends with DuckDB's reason. That route is read-only and reads the CRAM reference through htslib. Without index_path it looks for the index beside the file only: .csi then .bai for BAM and SAM, each appended to the name and then in place of its extension, and .crai appended for CRAM; it does not look in the working directory or save a copy of a remote index there. Any other value of the setting is a bind error. Other readers ignore the setting. SET duckhts_remote_block_size = N sets the bytes htslib asks for in each read of a remote file, on either route, from 131072 to 268435456; each open handle allocates one block. The default, 0, keeps the size DuckHTS chooses by scan type: 1 MiB for a region query or a split scan and 4 MiB for a single streaming scan. It applies to a path that htslib itself treats as remote, such as http://, https:// or s3://, and a value outside the range is a bind error.
+By default htslib opens every input, its index and the CRAM reference with its own file access. After SET duckhts_file_system = 'duckdb', every DuckHTS reader opens its inputs through the DuckDB file system of the connection, so DuckDB secrets, settings such as enable_external_access, httpfs and registered file systems apply, and an open error ends with DuckDB's reason. This holds for the data file, an index_path, the index found beside the file, a FASTA with its .fai and .gzi, the reference and reference index given to an alignment reader, and the other paths a reader takes: a BED or mask file, a mate FASTQ, score summaries and region files, and a chain file. A function that follows the setting says so under File access; it is captured when the query binds, and bcftools_liftover captures it when the query starts. The route is read-only and reads nothing from, and writes nothing to, the working directory. Without index_path it looks for the index beside the file only, under the names htslib uses: .csi then .bai for BAM and SAM, .csi then .tbi for tabix-indexed text and VCF, each appended to the name and then in place of its extension; .crai for CRAM; .csi for BCF. It does not save a copy of a remote index. It does not build a missing index: bcftools_liftover, which builds a missing .fai with htslib's file access, fails instead. A CRAM reference that htslib finds through REF_PATH, REF_CACHE or the UR field of the header is read by htslib. These read with htslib's file access whatever the setting: bgzip, bgunzip, bam_index, bcf_index, tabix_index and fasta_index; everything a function writes; the FASTA of bcftools_norm_row and bcftools_munge_row, whose handles are kept across queries; the columns_file and a summaries directory of bcftools_score. Any other value of the setting is an error that names the function. SET duckhts_remote_block_size = N sets the bytes htslib asks for in each read of a remote file, on either route, from 131072 to 268435456; each open handle allocates one block. The default, 0, keeps the size DuckHTS chooses by scan type: 1 MiB for a region query or a split scan and 4 MiB for a single streaming scan. With htslib's file access it applies to a path that htslib treats as remote, such as http://, https:// or s3://; through the DuckDB file system, to a path that starts with a URL scheme other than file. duckhts_somalier_bam_counts uses its remote_block_bytes parameter instead, and an indexed FASTA has no block size to set. A value outside the range is an error that names the function.
 
 ### Examples
 
@@ -724,6 +736,10 @@ table
 
 Uses htslib's default pileup admission limit of 8000 reads per input file, as does samtools mpileup -d 8000. At high depth, reads can be discarded before bases and qualities are emitted; this is not an uncapped depth counter. The limit is not configurable. Alignment I/O and decode failures return an error.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -753,6 +769,10 @@ sequence_encoding='nt16' returns SEQUENCE UTINYINT[] using HTSlib nt16 codes ins
 ### Scanning
 
 For bgzipped FASTA, gzi_path selects a non-colocated .gzi sidecar. scan_mode='sequential' streams/counts without indexed count paths and rejects region. NULL/empty region means no filter; empty comma-separated items error.
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -788,6 +808,10 @@ read_bed is a lenient reader, not a BEDv1 validator (https://samtools.github.io/
 
 error_policy := 'error' aborts on data lines with fewer than three tab-delimited fields; 'skip' drops those lines; 'report' emits them with NULL normal columns and adds error (VARCHAR), line_number (BIGINT, 1-based physical line including headers/comments), and raw_line (VARCHAR, without newline). Good rows have NULL error and raw_line. Report requires a full-file scan, not a region query. Non-integer numeric fields become NULL, reversed intervals remain accepted, and blank/header/track/browser lines are ignored in all modes.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -809,6 +833,10 @@ Returns:
 ```
 table
 ```
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -1088,6 +1116,10 @@ Returns:
 table
 ```
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -1117,6 +1149,10 @@ Output intervals are zero-based half-open. region uses HTSlib one-based inclusiv
 ### Execution
 
 Full scans parallelize over nonempty contigs and region scans over merged ranges, with worker-owned handles/iterators. blocks_per_iteration controls libBigWig batching, not DuckDB worker count. Local, native remote and browser wasm reads use HTSlib hFILE transport.
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -1275,6 +1311,10 @@ Every panel site, autosomal or X/Y, is counted in the one scan. A and B are exac
 ### Limits and transport
 
 The private reader keeps no connection into the caller's database, so a closed database is released; it also cannot see the caller's tables, so write the panel with COPY ... TO 'panel.parquet' first (rduckhts_somalier_bam_counts does this for a panel_table). panel_parquet must be a local ordinary Parquet file: remote URLs are not read. max_sites bounds the shared panel. max_depth, max_overlap_qnames and max_region_bytes bound each active scan job; concurrent workspace can therefore grow with worker_count. remote_block_bytes, remote_cache_bytes and reference_cache_bytes apply per worker-owned handle, and zero disables that cache override. Explicit non-colocated BAM/CRAM and FASTA indexes are honored; CRAM keeps the alignment file's original @SQ lengths and does not create a default FASTA-index sidecar. overlap_policy='hileup_v0.1.0' pins encounter-order mate suppression only, while 'none' counts every retained observation. The panel reader never runs on a DuckDB worker thread: Rtools-built DuckDB hosts destroy a thread_local on freed memory when a worker that closed a DuckDB instance exits (see Runtime compatibility in the README).
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -2420,6 +2460,10 @@ Returns:
 table
 ```
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -2458,6 +2502,10 @@ attributes := ['Parent', 'ID'] appends VARCHAR columns named for the requested k
 
 Comma-separated indexed regions emit each row once across overlaps. scan_mode='sequential' streams/counts instead of using indexed count paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -2495,6 +2543,10 @@ attributes := ['gene_id', 'transcript_id'] appends VARCHAR columns named for the
 ### Scanning
 
 Comma-separated indexed regions emit each row once across overlaps. scan_mode='sequential' streams/counts instead of using indexed count paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy.
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -2542,6 +2594,10 @@ attributes := ['gene', 'product'] appends VARCHAR columns named for the requeste
 
 Records stream one at a time, so memory follows the largest record. A record without a terminating //, a FEATURES table with no sequence section, a malformed location, an unsupported location form (one-of, gap, bond, nested join/order, a.b), an origin-spanning span on a linear record, or a /codon_start outside 1..3 is an error naming the feature and line. Table layout and these rules follow BioPython's GenBank scanner, and test/scripts/genbank_oracle_test.py diffs the reader against it.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -2576,6 +2632,10 @@ Records are written under the same name read_genbank reports as seqname, so feat
 
 output_path defaults to path with .fa appended. The FASTA is written to a temporary file beside output_path and renamed into place only after the input has been read to a clean end, so a failure never leaves a partial output and an existing file is never lost; with overwrite := FALSE an existing output is an error. Records without an ORIGIN block are skipped; zero written records is an error. line_width must be at least 1.
 
+### File access
+
+The input follows SET duckhts_file_system and SET duckhts_remote_block_size; the output is written by this process. File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -2601,6 +2661,10 @@ table
 ### Scanning
 
 Comma-separated indexed regions emit each row once across overlaps. scan_mode='sequential' streams/counts instead of using indexed count paths and rejects region. NULL/empty region means no filter; empty comma-separated items and malformed known-contig intervals error. Unknown contigs follow HTSlib's skip policy.
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -2866,6 +2930,10 @@ Counts are over the whole file, not grouped by read group or sample. reference s
 
 duckhts_bam_insert_size_counts_sql composes projected read_bam, flag predicates and packed-CIGAR lengths in SQL. benchmarks/benchmark_insert_size_counts.md records both arms against riker; native takes the unsuffixed name by measurement. Native BAM misses the declared 1x targets at 1, 4 and 8 threads; native CRAM meets all four. Both arms remain public and face the same targets.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -2937,6 +3005,10 @@ The scan runs when the query executes, not at bind: binding checks only that the
 ### Unmapped records
 
 include_unmapped := TRUE appends one synthetic row with chrom = '*' for no-coordinate records, even when no such records are present; start, end and bin_id are NULL. The default FALSE omits this row. SAM-flag filters, MAPQ filtering and flag-based duplicate removal apply to these records; streaming duplicate removal is not applied to them. Reference-GC fields are NULL for this row.
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -3306,6 +3378,10 @@ The contig names of the alignment header, the reference and the mask are compare
 
 One worker. Memory does not grow with the alignments read: 36.5 MB of counters, one reference window of 1 MiB with its mask, the alignment in hand and the longest mask line read, plus htslib's state for the file. For CRAM that includes the reference of the slice being decoded; a slice over a sparse region can span many megabases. A cycle above 1000 is counted as 1000 and a base quality above 93 as 93. The window moves along an alignment that reaches past it, so no alignment needs more reference in memory; an alignment with a reference skip of more than 1 MiB fetches a window on each side of the skip, and many such alignments are slow. Alignments are expected in coordinate order; an unsorted file is counted correctly but fetches a reference window for each alignment.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -3344,6 +3420,10 @@ Each reference position where both mates of a pair have an aligned base (CIGAR M
 
 One worker. The counters are fixed at 1.2 MB, and a base quality above 93 is counted as 93. The first mate of a pair is held until its mate arrives, with its name, CIGAR, sequence and qualities: about 400 bytes plus 1.5 bytes per read base and 4 bytes per CIGAR operation. A held mate whose mate start the scan has passed without a match is dropped, and a change of contig drops every held mate. Mates are matched by read name. A record that has the name of a held mate but does not pair with it is left out, and the held mate stays held for its own mate. SAM gives one name to one template, so such a record occurs only in a malformed file. More than max_pending (1 to 100,000,000) mates held at once is an error that names the limit. Held entries are reused but kept until the scan ends, so held memory is at most max_pending times the size of the longest alignment held, and in practice follows the most mates held at once.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -3369,6 +3449,10 @@ table
 ### Execution
 
 The BED file and the alignments are read when the query executes, not at bind, so EXPLAIN and PREPARE read neither and a prepared statement reflects the files as they are at each execution. Errors in either input are execution errors.
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -3408,6 +3492,10 @@ Default fast_mode=FALSE uses CIGAR-aware coverage and mate-overlap correction. f
 
 processing_threads of 0 or 1 processes contigs sequentially; a value above 1 is the number of parallel contig workers.
 
+### File access
+
+The input follows SET duckhts_file_system and SET duckhts_remote_block_size; the output is written by this process. File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -3433,6 +3521,10 @@ table
 ### Execution
 
 The output is written during query execution. Binding, PREPARE, and EXPLAIN without ANALYZE write no file. Each execution enforces overwrite, so a repeated execution without overwrite fails and keeps the earlier output.
+
+### File access
+
+The input follows SET duckhts_file_system and SET duckhts_remote_block_size; the output is written by this process. File access under read_bam states the contract.
 
 ### Examples
 
@@ -3460,6 +3552,10 @@ table
 
 key_values leaves out a pair whose key is not valid UTF-8, since a MAP key cannot be NULL; a value that is not valid UTF-8 is NULL.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -3482,6 +3578,10 @@ Returns:
 table
 ```
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -3503,6 +3603,10 @@ Returns:
 ```
 table
 ```
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 
@@ -4118,6 +4222,10 @@ STRUCT(src_chrom VARCHAR, src_pos BIGINT, src_ref VARCHAR, src_alt VARCHAR, dest
 
 Input names and chain source names are compared after one rule: a leading chr is removed in any letter case; M, MT and 26 become MT; 23, 25, X, XY, XX, PAR1 and PAR2 become X; 24 and Y become Y. A lifted record carries the first name that the destination FASTA index has among: the chain's destination name; that name with chr added or removed; its form under the rule above, without and with chr; and for the mitochondrion MT, chrM and M. A FASTA that holds two of these names is not an error. A mitochondrial record that passes through without lifting takes the first of chrM, MT and M that the destination FASTA has.
 
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
+
 ### Examples
 
 ```sql
@@ -4291,6 +4399,10 @@ log_path writes per-PRS loaded/matched/allele-mismatch/duplicate-marker counts.
 ### Contig names
 
 Chromosome names of the summary statistics are looked up in the genotype VCF header as the upstream plugin does, in this order: the exact name; the name without a lowercase chr prefix; chr plus a name of at most two characters; 23, 25, XY, XX, PAR1 and PAR2 as X or chrX; 24 as Y or chrY; 26, MT and chrM as MT or chrM. The lookup is case-sensitive, and M alone does not find MT. A marker whose chromosome is not found is skipped without an error.
+
+### File access
+
+Follows SET duckhts_file_system and SET duckhts_remote_block_size; File access under read_bam states the contract.
 
 ### Examples
 

@@ -21,7 +21,7 @@
  */
 #include "duckdb_extension.h"
 DUCKDB_EXTENSION_EXTERN
-#include "hts_io_tuning.h"
+#include "hts_file_access.h"
 #include <htslib/sam.h>
 #include <htslib/khash.h>
 #include <limits.h>
@@ -38,6 +38,7 @@ KHASH_MAP_INIT_INT64(isize, uint64_t)
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     char *reference;
     char *index_path;
     bool duplicates;
@@ -69,6 +70,7 @@ static void isize_bind_destroy(void *ptr) {
     isize_bind_t *bind = ptr;
     if (!bind) return;
     free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     free(bind->reference);
     free(bind->index_path);
     free(bind->task_offsets);
@@ -100,13 +102,12 @@ static char *isize_string(duckdb_bind_info info, const char *name) {
 }
 
 static samFile *isize_open(const isize_bind_t *bind) {
-    samFile *fp = sam_open(bind->path, "r");
-    if (!fp) return NULL;
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
+    samFile *fp = duckhts_file_access_open(bind->access, bind->path,
         bind->sequential ? DUCKHTS_HTS_IO_PROFILE_STREAMING : DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
+    if (!fp) return NULL;
     /* Riker sam/pair_orientation.rs:43-51 needs CIGAR only for the reverse
      * read's end. CRAM can omit SEQ, QUAL, AUX, QNAME and MAPQ entirely. */
-    if ((bind->reference && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) ||
+    if ((bind->reference && duckhts_file_access_set_cram_reference(bind->access, fp, bind->reference) < 0) ||
         duckhts_cram_require_fields(fp, SAM_FLAG | SAM_RNAME | SAM_POS | SAM_CIGAR |
                                         SAM_RNEXT | SAM_PNEXT | SAM_TLEN) < 0 ||
         (bind->decompression_threads && hts_set_threads(fp, bind->decompression_threads) < 0)) {
@@ -123,6 +124,7 @@ static void isize_bind(duckdb_bind_info info) {
         return;
     }
     duckdb_bind_set_bind_data(info, bind, isize_bind_destroy);
+    if (!duckhts_file_access_bind(info, "insert-size counts", &bind->access)) return;
     bind->threads = 1;
     bind->path = isize_string(info, NULL);
     bind->reference = isize_string(info, "reference");
@@ -185,7 +187,10 @@ static void isize_bind(duckdb_bind_info info) {
     }
     samFile *fp = isize_open(bind);
     if (!fp) {
-        duckdb_bind_set_error(info, "insert-size counts: cannot open/configure alignment file");
+        char message[640];
+        snprintf(message, sizeof(message), "insert-size counts: cannot open/configure alignment file%s",
+                 duckhts_file_access_reason(bind->access, bind->path));
+        duckdb_bind_set_error(info, message);
         return;
     }
     bind->header = sam_hdr_read(fp);
@@ -195,7 +200,7 @@ static void isize_bind(duckdb_bind_info info) {
         return;
     }
     if (!bind->sequential) {
-        hts_idx_t *index = sam_index_load3(fp, bind->path, bind->index_path,
+        hts_idx_t *index = duckhts_file_access_sam_index_load(bind->access, fp, bind->path, bind->index_path,
             duckhts_index_save_remote_flag(bind->path, bind->index_path) | HTS_IDX_SILENT_FAIL);
         if (!index && (require_index || bind->index_path)) {
             sam_close(fp);
@@ -302,7 +307,7 @@ static void *isize_worker_main(void *ptr) {
             if (!isize_count(worker, record)) goto cleanup;
         }
     } else {
-        index = sam_index_load3(fp, bind->path, bind->index_path,
+        index = duckhts_file_access_sam_index_load(bind->access, fp, bind->path, bind->index_path,
             duckhts_index_save_remote_flag(bind->path, bind->index_path));
         if (!index) {
             worker->error = "insert-size counts: cannot load worker index";

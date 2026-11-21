@@ -15,11 +15,12 @@ DUCKDB_EXTENSION_EXTERN
 #include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <htslib/hts.h>
-#include "bigWig.h"
+#include "duckhts_bigwig_io.h"
 
 #define DUCKHTS_BIGWIG_DEFAULT_BLOCKS 64u
 #define DUCKHTS_BIGWIG_MAX_BLOCKS 1048576u
@@ -40,6 +41,7 @@ enum {
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     char *region;
     uint32_t blocks_per_iteration;
 } bigwig_bind_data_t;
@@ -97,6 +99,7 @@ bigwig_bind_destroy(void *data)
     if (bind == NULL)
         return;
     duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     duckdb_free(bind->region);
     duckdb_free(bind);
 }
@@ -127,13 +130,13 @@ bigwig_local_destroy(void *data)
 }
 
 static int
-bigwig_open_checked(const char *path, bigWigFile_t **out)
+bigwig_open_checked(const bigwig_bind_data_t *bind, bigWigFile_t **out)
 {
     bigWigFile_t *file;
 
     if (!duckhts_bigwig_init())
         return 0;
-    file = bwOpen(path, NULL, "r");
+    file = duckhts_bigwig_open(bind->access, bind->path);
     if (file == NULL)
         return 0;
     *out = file;
@@ -313,6 +316,10 @@ read_bigwig_bind(duckdb_bind_info info)
     bind->path = path;
     bind->region = region;
     bind->blocks_per_iteration = DUCKHTS_BIGWIG_DEFAULT_BLOCKS;
+    if (!duckhts_file_access_bind(info, "read_bigwig", &bind->access)) {
+        bigwig_bind_destroy(bind);
+        return;
+    }
 
     blocks_value = duckdb_bind_get_named_parameter(info,
         "blocks_per_iteration");
@@ -443,9 +450,12 @@ read_bigwig_global_init(duckdb_init_info info)
         return;
     }
     memset(global, 0, sizeof(*global));
-    if (!bigwig_open_checked(bind->path, &global->seed_file)) {
-        duckdb_init_set_error(info,
-            "read_bigwig: failed to open a valid BigWig file");
+    if (!bigwig_open_checked(bind, &global->seed_file)) {
+        char message[640];
+
+        snprintf(message, sizeof(message), "read_bigwig: failed to open a valid BigWig file%s",
+            duckhts_file_access_reason(bind->access, bind->path));
+        duckdb_init_set_error(info, message);
         bigwig_global_destroy(global);
         return;
     }
@@ -505,7 +515,7 @@ bigwig_local_open(bigwig_local_data_t *local, bigwig_global_data_t *global)
         global->seed_file = NULL;
         return local->file != NULL;
     }
-    return bigwig_open_checked(local->bind->path, &local->file);
+    return bigwig_open_checked(local->bind, &local->file);
 }
 
 static int

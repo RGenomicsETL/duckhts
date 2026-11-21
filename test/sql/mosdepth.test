@@ -574,3 +574,32 @@ SELECT * FROM duckhts_mosdepth(
 );
 ----
 duckhts_mosdepth: invalid quantize string
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query TT
+SELECT
+  CASE WHEN per_base_path IS NULL THEN 'NULL' ELSE 'SET' END,
+  CASE WHEN regions_path LIKE '%/mosdepth_noper_sqltest.regions.bed.gz' THEN 'OK' ELSE 'BAD' END
+FROM duckhts_mosdepth(
+  '__WORKING_DIRECTORY__/mosdepth_noper_sqltest',
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  by := '1000',
+  no_per_base := TRUE,
+  fast_mode := TRUE,
+  overwrite := TRUE
+);
+----
+NULL	OK
+
+statement error
+SELECT * FROM duckhts_mosdepth('__WORKING_DIRECTORY__/mosdepth_missing_sqltest', '__WORKING_DIRECTORY__/test/data/no_such_input');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

@@ -43,7 +43,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 
 #include "include/duckdb_map.h"
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "include/duckhts_errors.h"
 #include "include/region_list.h"
 #include "include/named_attribute_columns.h"
@@ -55,7 +55,8 @@ DUCKDB_EXTENSION_EXTERN
 #define TABIX_MAX_GENERIC_COLS 256
 #define TABIX_NUM_PARSE_BUF 128
 
-static tbx_t *tabix_reader_load_index(const char *path, const char *index_path) {
+static tbx_t *tabix_reader_load_index(const duckhts_file_access_t *access, const char *path,
+                                      const char *index_path) {
     int flags = duckhts_index_save_remote_flag(path, index_path);
 #ifdef __EMSCRIPTEN__
     /* Object URLs have no sibling index files. An explicit index_path still
@@ -64,7 +65,7 @@ static tbx_t *tabix_reader_load_index(const char *path, const char *index_path) 
         flags |= HTS_IDX_SILENT_FAIL;
     }
 #endif
-    return tbx_index_load3(path, index_path, flags);
+    return duckhts_file_access_tbx_index_load(access, path, index_path, flags);
 }
 
 static inline void set_null(duckdb_vector vec, idx_t row) {
@@ -125,6 +126,7 @@ typedef enum {
 
 typedef struct {
     char *file_path;
+    duckhts_file_access_t *access;
     char *index_path;
     char *region;          /* NULL = full scan */
     char **regions;        /* parsed comma-separated regions */
@@ -157,6 +159,7 @@ static void tabix_bind_data_destroy(void *data) {
     tabix_bind_data_t *bd = (tabix_bind_data_t *)data;
     if (bd) {
         free(bd->file_path);
+        duckhts_file_access_destroy(bd->access);
         free(bd->index_path);
         free(bd->region);
         free(bd->regions); /* one region-list allocation, including strings */
@@ -1084,6 +1087,12 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         return;
     }
     bd->mode = mode;
+    if (!duckhts_file_access_bind(info, mode == TABIX_MODE_GTF ? "read_gtf" :
+                                        mode == TABIX_MODE_GFF ? "read_gff" : "read_tabix",
+                                  &bd->access)) {
+        tabix_bind_data_destroy(bd);
+        return;
+    }
     bd->meta_char = '#';
     bd->line_skip = 0;
     bd->col_types_provided = 0;
@@ -1310,9 +1319,10 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         if (val) duckdb_destroy_value(&val);
 
         /* Generic tabix: if indexed, use header/meta settings; otherwise peek */
-        htsFile *fp = hts_open(bd->file_path, "r");
+        htsFile *fp = duckhts_file_access_open(bd->access, bd->file_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
         if (!fp) {
-            duckhts_bind_errorf(info, "read_tabix: Cannot open file: %s", bd->file_path);
+            duckhts_bind_errorf(info, "read_tabix: Cannot open file: %s%s", bd->file_path,
+                                duckhts_file_access_reason(bd->access, bd->file_path));
             tabix_bind_data_destroy(bd);
             return;
         }
@@ -1323,7 +1333,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
         int header_from_skip = 0;
         char *header_candidate = NULL;
 
-        tbx_t *tbx = tabix_reader_load_index(bd->file_path, bd->index_path);
+        tbx_t *tbx = tabix_reader_load_index(bd->access, bd->file_path, bd->index_path);
         if (tbx) {
             tbx_conf_t conf = tbx->conf;
             meta_char = conf.meta_char ? conf.meta_char : '#';
@@ -1405,7 +1415,8 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
             for (int i = 0; i < bd->n_cols; i++) type_state[i] = DUCKDB_TYPE_INTEGER;
 
             /* Reopen to scan for type inference */
-            htsFile *fp2 = hts_open(bd->file_path, "r");
+            htsFile *fp2 = duckhts_file_access_open(bd->access, bd->file_path,
+                                                    DUCKHTS_HTS_IO_PROFILE_METADATA);
             if (fp2) {
                 kstring_t l2 = {0, 0, NULL};
                 int skip2 = bd->line_skip;
@@ -1479,7 +1490,7 @@ static void tabix_bind(duckdb_bind_info info, tabix_mode_t mode) {
     }
 
     if (bd->n_regions == 0 && !bd->scan_sequential) {
-        tbx_t *tbx_stats = tabix_reader_load_index(bd->file_path, bd->index_path);
+        tbx_t *tbx_stats = tabix_reader_load_index(bd->access, bd->file_path, bd->index_path);
         if (tbx_stats) {
             bd->index_row_count_valid =
                 tabix_try_get_index_row_count(tbx_stats, &bd->index_row_count);
@@ -1565,23 +1576,19 @@ static void tabix_init(duckdb_init_info info) {
 
     const char *name = bd->mode == TABIX_MODE_GTF ? "read_gtf" :
                        bd->mode == TABIX_MODE_GFF ? "read_gff" : "read_tabix";
-    id->fp = hts_open(bd->file_path, "r");
+    id->fp = duckhts_file_access_open(bd->access, bd->file_path,
+                                      bd->n_regions > 0 ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+                                                        : DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!id->fp) {
-        duckhts_init_errorf(info, "%s: Cannot open file: %s", name, bd->file_path);
+        duckhts_init_errorf(info, "%s: Cannot open file: %s%s", name, bd->file_path,
+                            duckhts_file_access_reason(bd->access, bd->file_path));
         tabix_init_data_destroy(id);
         return;
     }
-    duckhts_apply_remote_hts_tuning(
-        id->fp,
-        bd->file_path,
-        bd->n_regions > 0
-            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
-            : DUCKHTS_HTS_IO_PROFILE_STREAMING
-    );
 
     /* Try to load tabix index when it is needed for region scans or auto metadata use. */
     if (bd->n_regions > 0 || !bd->scan_sequential) {
-        id->tbx = tabix_reader_load_index(bd->file_path, bd->index_path);
+        id->tbx = tabix_reader_load_index(bd->access, bd->file_path, bd->index_path);
     }
 
     if (bd->n_regions > 0) {

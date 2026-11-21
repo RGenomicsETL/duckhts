@@ -24,7 +24,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "duckhts_simd_internal.h"
 
 #define DUCKHTS_DEFAULT_BINCOUNT_DECOMPRESSION_THREADS 2
@@ -86,6 +86,7 @@ typedef struct {
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     char *chrom;
     char *reference;
     char *index_path;
@@ -208,6 +209,7 @@ static void destroy_bam_bin_bind(void *data) {
     bam_bin_bind_t *bind = (bam_bin_bind_t *)data;
     if (!bind) return;
     if (bind->path) duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->chrom) duckdb_free(bind->chrom);
     if (bind->reference) duckdb_free(bind->reference);
     if (bind->index_path) duckdb_free(bind->index_path);
@@ -574,14 +576,15 @@ static int bam_bin_set_required_fields(samFile *fp, char *err, size_t errlen) {
  * with `err` set. */
 static int open_worker_handles(const bam_bin_bind_t *run, bam_bin_local_t *local,
                                char *err, size_t errlen) {
-    local->fp = sam_open(run->path, "r");
+    local->fp = duckhts_file_access_open(run->access, run->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!local->fp) {
-        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
+        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file%s",
+                 duckhts_file_access_reason(run->access, run->path));
         return -1;
     }
     if (bam_bin_set_required_fields(local->fp, err, errlen) < 0) return -1;
-    duckhts_apply_remote_hts_tuning(local->fp, run->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
-    if (run->reference && hts_set_opt(local->fp, CRAM_OPT_REFERENCE, run->reference) < 0) {
+    if (run->reference &&
+        duckhts_file_access_set_cram_reference(run->access, local->fp, run->reference) < 0) {
         snprintf(err, errlen, "bam_bin_counts: failed to set CRAM reference");
         return -1;
     }
@@ -595,7 +598,8 @@ static int open_worker_handles(const bam_bin_bind_t *run, bam_bin_local_t *local
         snprintf(err, errlen, "bam_bin_counts: failed to read alignment header");
         return -1;
     }
-    local->idx = sam_index_load3(local->fp, run->path, run->index_path, HTS_IDX_SILENT_FAIL);
+    local->idx = duckhts_file_access_sam_index_load(run->access, local->fp, run->path, run->index_path,
+                                                    HTS_IDX_SILENT_FAIL);
     if (!local->idx) {
         snprintf(err, errlen, "bam_bin_counts: indexed worker requires a BAM/CRAM index");
         return -1;
@@ -712,19 +716,18 @@ static int sequential_scan_no_index(bam_bin_bind_t *bind, char *err, size_t errl
     int *tid_to_selected = NULL;
     bam_bin_stream_state_t state = {0};
 
-    fp = sam_open(bind->path, "r");
+    fp = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!fp) {
-        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
+        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file%s",
+                 duckhts_file_access_reason(bind->access, bind->path));
         return -1;
     }
     if (bam_bin_set_required_fields(fp, err, errlen) < 0) {
         sam_close(fp);
         return -1;
     }
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
-                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (bind->reference) {
-        if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
+        if (duckhts_file_access_set_cram_reference(bind->access, fp, bind->reference) < 0) {
             sam_close(fp);
             snprintf(err, errlen, "bam_bin_counts: failed to set CRAM reference");
             return -1;
@@ -817,19 +820,18 @@ static int indexed_unmapped_scan(bam_bin_bind_t *bind, char *err, size_t errlen)
 
     if (!bind || !bind->include_unmapped) return 0;
 
-    fp = sam_open(bind->path, "r");
+    fp = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (!fp) {
-        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
+        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file%s",
+                 duckhts_file_access_reason(bind->access, bind->path));
         return -1;
     }
     if (bam_bin_set_required_fields(fp, err, errlen) < 0) {
         sam_close(fp);
         return -1;
     }
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
-                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (bind->reference) {
-        if (hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
+        if (duckhts_file_access_set_cram_reference(bind->access, fp, bind->reference) < 0) {
             sam_close(fp);
             snprintf(err, errlen, "bam_bin_counts: failed to set CRAM reference");
             return -1;
@@ -848,7 +850,8 @@ static int indexed_unmapped_scan(bam_bin_bind_t *bind, char *err, size_t errlen)
         snprintf(err, errlen, "bam_bin_counts: failed to read alignment header");
         return -1;
     }
-    idx = sam_index_load3(fp, bind->path, bind->index_path, HTS_IDX_SILENT_FAIL);
+    idx = duckhts_file_access_sam_index_load(bind->access, fp, bind->path, bind->index_path,
+                                             HTS_IDX_SILENT_FAIL);
     if (!idx) {
         sam_hdr_destroy(hdr);
         sam_close(fp);
@@ -952,7 +955,8 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
     }
 
     if (bind->want_gc && bind->reference) {
-        fai = fai_load3_format(bind->reference, NULL, NULL, 0, FAI_FASTA);
+        fai = duckhts_file_access_fai_load(bind->access, bind->reference, NULL, NULL, 0, FAI_FASTA,
+                                           DUCKHTS_HTS_IO_PROFILE_METADATA);
         if (!fai) {
             snprintf(err, errlen, "bam_bin_counts: failed to open FASTA index for reference GC");
             return -1;
@@ -1051,12 +1055,13 @@ static int append_rows_from_contigs(bam_bin_bind_t *bind, char *err, size_t errl
 /* Opens the file and its header at bind, and checks a requested chromosome,
  * so that a missing file or unknown chromosome stays a binder error. */
 static int validate_alignment_input(const bam_bin_bind_t *bind, char *err, size_t errlen) {
-    samFile *fp = sam_open(bind->path, "r");
+    samFile *fp = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     sam_hdr_t *hdr;
     int rc = 0;
 
     if (!fp) {
-        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file");
+        snprintf(err, errlen, "bam_bin_counts: failed to open alignment file%s",
+                 duckhts_file_access_reason(bind->access, bind->path));
         return -1;
     }
     hdr = sam_hdr_read(fp);
@@ -1129,12 +1134,13 @@ static void bam_bin_counts_global_init(duckdb_init_info info) {
     duckdb_init_set_init_data(info, global, destroy_bam_bin_global);
 
     memset(err, 0, sizeof(err));
-    fp = sam_open(run->path, "r");
+    fp = duckhts_file_access_open(run->access, run->path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     hdr = fp ? sam_hdr_read(fp) : NULL;
     if (!fp || !hdr) {
         snprintf(err, sizeof(err), "bam_bin_counts: failed to read alignment header");
     } else {
-        idx = sam_index_load3(fp, run->path, run->index_path, HTS_IDX_SILENT_FAIL);
+        idx = duckhts_file_access_sam_index_load(run->access, fp, run->path, run->index_path,
+                                                 HTS_IDX_SILENT_FAIL);
         if (build_selected_contigs(run, hdr, idx, err, sizeof(err)) == 0 && idx &&
             run->rmdup != BAM_BIN_RMDUP_STREAMING && build_claim_order(run) != 0) {
             snprintf(err, sizeof(err), "bam_bin_counts: out of memory building contig claim order");
@@ -1283,6 +1289,10 @@ static void bam_bin_counts_bind(duckdb_bind_info info) {
     if (bind->bin_width <= 0) {
         destroy_bam_bin_bind(bind);
         duckdb_bind_set_error(info, "bam_bin_counts requires a positive bin_width");
+        return;
+    }
+    if (!duckhts_file_access_bind(info, "bam_bin_counts", &bind->access)) {
+        destroy_bam_bin_bind(bind);
         return;
     }
 

@@ -41,7 +41,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 
 #include "include/bed_line.h"
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "include/duckhts_output_file.h"
 #include "include/duckhts_bind_params.h"
 
@@ -112,6 +112,7 @@ typedef struct {
 typedef struct {
     char *prefix;
     char *path;
+    duckhts_file_access_t *access;
     char *chrom;
     char *by;
     char *fasta;
@@ -940,16 +941,17 @@ static int region_list_append(mosdepth_region_list_t *list,
     return 0;
 }
 
-static int parse_bed_regions(const char *path, sam_hdr_t *hdr,
+static int parse_bed_regions(const duckhts_file_access_t *access, const char *path, sam_hdr_t *hdr,
                              mosdepth_region_list_t *per_tid,
                              char *err, size_t errlen) {
     htsFile *fp = NULL;
     kstring_t line = {0, 0, NULL};
     int rc = -1;
 
-    fp = hts_open(path, "r");
+    fp = duckhts_file_access_open(access, path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        snprintf(err, errlen, "duckhts_mosdepth: failed to open BED file '%s'", path);
+        snprintf(err, errlen, "duckhts_mosdepth: failed to open BED file '%s'%s", path,
+                 duckhts_file_access_reason(access, path));
         goto cleanup;
     }
 
@@ -1422,14 +1424,12 @@ static void *mosdepth_parallel_worker(void *arg) {
     kstring_t line = {0, 0, NULL};
 
     /* Each worker opens its own BAM file handle for independent I/O */
-    fp = sam_open(bind->path, "r");
+    fp = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!fp) {
         mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to open alignment file");
         goto worker_done;
     }
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
-                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
-    if (bind->fasta && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->fasta) < 0) {
+    if (bind->fasta && duckhts_file_access_set_cram_reference(bind->access, fp, bind->fasta) < 0) {
         mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to set CRAM reference");
         goto worker_done;
     }
@@ -1442,7 +1442,7 @@ static void *mosdepth_parallel_worker(void *arg) {
         mosdepth_parallel_set_error(ctx, "duckhts_mosdepth: worker failed to read header");
         goto worker_done;
     }
-    idx = sam_index_load3(fp, bind->path, bind->index_path,
+    idx = duckhts_file_access_sam_index_load(bind->access, fp, bind->path, bind->index_path,
                           HTS_IDX_SILENT_FAIL |
                               duckhts_index_save_remote_flag(bind->path, bind->index_path));
     if (!idx) {
@@ -1828,14 +1828,13 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
     stat_clear(&total_stat);
     stat_clear(&total_region_stat);
 
-    fp = sam_open(bind->path, "r");
+    fp = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!fp) {
-        snprintf(err, errlen, "duckhts_mosdepth: failed to open alignment file '%s'", bind->path);
+        snprintf(err, errlen, "duckhts_mosdepth: failed to open alignment file '%s'%s", bind->path,
+                 duckhts_file_access_reason(bind->access, bind->path));
         goto cleanup;
     }
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
-                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
-    if (bind->fasta && hts_set_opt(fp, CRAM_OPT_REFERENCE, bind->fasta) < 0) {
+    if (bind->fasta && duckhts_file_access_set_cram_reference(bind->access, fp, bind->fasta) < 0) {
         snprintf(err, errlen, "duckhts_mosdepth: failed to set CRAM reference '%s'", bind->fasta);
         goto cleanup;
     }
@@ -1854,7 +1853,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
         }
         goto cleanup;
     }
-    idx = sam_index_load3(fp, bind->path, bind->index_path,
+    idx = duckhts_file_access_sam_index_load(bind->access, fp, bind->path, bind->index_path,
                           HTS_IDX_SILENT_FAIL |
                               duckhts_index_save_remote_flag(bind->path, bind->index_path));
     if (!idx) {
@@ -1888,7 +1887,7 @@ static int run_duckhts_mosdepth(mosdepth_bind_t *bind, char *err, size_t errlen)
                 snprintf(err, errlen, "duckhts_mosdepth: out of memory");
                 goto cleanup;
             }
-            if (parse_bed_regions(bind->by, hdr, region_lists, err, errlen) != 0) {
+            if (parse_bed_regions(bind->access, bind->by, hdr, region_lists, err, errlen) != 0) {
                 goto cleanup;
             }
         }
@@ -2335,6 +2334,7 @@ static void destroy_mosdepth_bind(void *data) {
     if (!bind) return;
     if (bind->prefix) duckdb_free(bind->prefix);
     if (bind->path) duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->chrom) duckdb_free(bind->chrom);
     if (bind->by) duckdb_free(bind->by);
     if (bind->fasta) duckdb_free(bind->fasta);
@@ -2404,6 +2404,10 @@ static void duckhts_mosdepth_bind(duckdb_bind_info info) {
     memset(bind, 0, sizeof(mosdepth_bind_t));
     bind->prefix = prefix;
     bind->path = path;
+    if (!duckhts_file_access_bind(info, "duckhts_mosdepth", &bind->access)) {
+        destroy_mosdepth_bind(bind);
+        return;
+    }
     char *thresholds = NULL;
     char *quantize = NULL;
     int read_ok = duckhts_bind_varchar(info, "chrom", &bind->chrom) &&

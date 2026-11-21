@@ -1,4 +1,11 @@
-/* Read-only libBigWig transport implemented with htslib hFILE. */
+/*
+ * Read-only libBigWig transport implemented with htslib hFILE.
+ *
+ * libBigWig opens its file by name through urlOpen() and offers no argument
+ * for the file access of the calling connection. duckhts_bigwig_open() is the
+ * only caller of bwOpen(); it leaves the file access where urlOpen() on the
+ * same thread reads it.
+ */
 
 #include <errno.h>
 #include <limits.h>
@@ -9,10 +16,23 @@
 
 #include <htslib/hfile.h>
 
-#include "hts_io_tuning.h"
-#include "bigWig.h"
+#include "duckhts_bigwig_io.h"
 
 size_t GLOBAL_DEFAULTBUFFERSIZE;
+
+/* Borrowed; set only while duckhts_bigwig_open() runs on this thread. */
+static _Thread_local const duckhts_file_access_t *open_access;
+
+bigWigFile_t *
+duckhts_bigwig_open(const duckhts_file_access_t *access, const char *path)
+{
+    bigWigFile_t *file;
+
+    open_access = access;
+    file = bwOpen(path, NULL, "r");
+    open_access = NULL;
+    return file;
+}
 
 static hFILE *
 duckhts_bigwig_hfile(URL_t *url)
@@ -145,11 +165,10 @@ urlOpen(const char *path, CURLcode (*callback)(CURL *), const char *mode)
         errno = EINVAL;
         return NULL;
     }
-    file = hopen(path, "r");
+    file = duckhts_file_access_hopen(open_access, path,
+        DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (file == NULL)
         return NULL;
-    duckhts_apply_remote_hfile_tuning(file, path,
-        DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     url = calloc(1u, sizeof(*url));
     if (url == NULL) {
         hclose_abruptly(file);
@@ -157,7 +176,8 @@ urlOpen(const char *path, CURLcode (*callback)(CURL *), const char *mode)
     }
     url->x.fp = (FILE *)file;
     url->fname = path;
-    url->type = hisremote(path) ? BWG_HTTPS : BWG_FILE;
+    url->type = duckhts_file_access_is_remote(open_access, path) ?
+        BWG_HTTPS : BWG_FILE;
     url->filePos = SIZE_MAX;
     if (url->type != BWG_FILE) {
         url->bufSize = GLOBAL_DEFAULTBUFFERSIZE;

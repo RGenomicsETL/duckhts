@@ -104,3 +104,27 @@ FROM read_pileup(
 );
 ----
 failed to parse region
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query I
+SELECT count(*)
+FROM read_pileup(
+  '__WORKING_DIRECTORY__/test/data/range.bam',
+  region := 'CHROMOSOME_I:900-1100',
+  index_path := '__WORKING_DIRECTORY__/test/data/range.bam.bai'
+);
+----
+133
+
+statement error
+SELECT * FROM read_pileup('__WORKING_DIRECTORY__/test/data/no_such_input', region := 'CHROMOSOME_I');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

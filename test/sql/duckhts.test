@@ -1990,3 +1990,54 @@ query II
 SELECT count(*), count(DISTINCT duckhts_region_shard) FROM query(getvariable('hts_rq'));
 ----
 4	2
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query II
+SELECT NAME, length(SEQUENCE)
+FROM read_fasta('__WORKING_DIRECTORY__/test/data/ce.fa', region := 'CHROMOSOME_I:1-10');
+----
+CHROMOSOME_I	10
+
+query I
+SELECT count(*) FROM read_fastq('__WORKING_DIRECTORY__/test/data/r1.fq', mate_path := '__WORKING_DIRECTORY__/test/data/r2.fq');
+----
+10
+
+query I
+SELECT count(*) FROM read_tabix('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
+----
+4
+
+query I
+SELECT count(*) FROM read_gff('__WORKING_DIRECTORY__/test/data/gff_file.gff.gz', region := 'X:2934816-2935190');
+----
+4
+
+query RRIIIIIII
+SELECT pct_at, pct_gc, num_a, num_c, num_g, num_t, num_n, num_other, seq_len
+FROM fasta_nuc(
+  '__WORKING_DIRECTORY__/test/data/ce.fa',
+  bed_path := '__WORKING_DIRECTORY__/test/data/targets.bed'
+)
+WHERE chrom = 'CHROMOSOME_I' AND start = 0
+LIMIT 1;
+----
+0.4	0.6	2	4	2	2	0	0	10
+
+statement error
+SELECT * FROM read_fasta('__WORKING_DIRECTORY__/test/data/no_such_input');
+----
+No such file or directory
+
+statement error
+SELECT * FROM read_tabix('__WORKING_DIRECTORY__/test/data/no_such_input');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

@@ -13,7 +13,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 #include <htslib/vcf.h>
 
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 
 typedef enum {
     INDEX_BUILD_BAM,
@@ -158,12 +158,13 @@ static int run_index_build(const index_build_bind_t *bind, char *err, size_t err
     int ret;
 
     if (bind->kind == INDEX_BUILD_BAM) {
-        htsFile *fp = hts_open(bind->path, "r");
+        /* An index builder writes beside its input, so it reads with htslib's
+         * own file access whatever the connection reads with. */
+        htsFile *fp = duckhts_file_access_open(NULL, bind->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
         if (!fp) {
             snprintf(err, errlen, "%s: failed to open %s", name, bind->path);
             return -1;
         }
-        duckhts_apply_remote_hts_tuning(fp, bind->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
         ret = sam_index_build4(fp, bind->path, bind->requested_index_path, bind->min_shift,
                                bind->threads);
         hts_close(fp);

@@ -39,9 +39,8 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/hfile.h>
 #include <htslib/kstring.h>
 
-#include "include/hts_io_tuning.h"
 #include "include/duckdb_alloc.h"
-#include "include/duckdb_fs_hfile.h"
+#include "include/hts_file_access.h"
 #include "include/duckdb_list.h"
 #include "include/duckdb_map.h"
 #include "include/bam_format.h"
@@ -202,14 +201,7 @@ typedef struct {
     char *file_path;
     char *index_path;
     char *reference;
-    /* The names htslib opens. With duckhts_file_system = 'duckdb' they are
-     * the routed forms of file_path and of the index; otherwise copies.
-     * The CRAM reference is opened by htslib's own file access either way. */
-    duckhts_fs_route_t *route;
-    char *open_path;
-    char *open_index_path;
-    /* duckhts_remote_block_size of the binding connection; 0 is automatic. */
-    int remote_block_size;
+    duckhts_file_access_t *access;
 
     /* Parsed from the "region" named parameter.
      * May contain comma-separated multi-region specs. */
@@ -309,16 +301,10 @@ typedef struct {
  * Destructors
  * ================================================================ */
 
-static void bam_release_open_names(duckhts_fs_route_t *route, char *open_path, char *open_index_path) {
-    duckdb_free(open_path);
-    duckdb_free(open_index_path);
-    duckhts_fs_route_destroy(route);
-}
-
 static void destroy_bam_bind(void *data) {
     bam_bind_data_t *b = (bam_bind_data_t *)data;
     if (!b) return;
-    bam_release_open_names(b->route, b->open_path, b->open_index_path);
+    duckhts_file_access_destroy(b->access);
     if (b->file_path) duckdb_free(b->file_path);
     if (b->index_path) duckdb_free(b->index_path);
     if (b->reference) duckdb_free(b->reference);
@@ -614,53 +600,6 @@ static int bam_index_locates_unplaced_reads(hts_idx_t *idx) {
     return 0;
 }
 
-/*
- * The index beside a routed alignment file, as a routed name, or NULL when
- * none opens. Candidates follow htslib's order: .csi then .bai for BAM and
- * SAM, each appended to the name and then in place of its extension, and
- * .crai appended for CRAM.
- */
-static char *bam_find_routed_index(const duckhts_fs_route_t *route, const char *file_path, bool is_cram) {
-    static const char *const cram_suffixes[] = {".crai"};
-    static const char *const bam_suffixes[] = {".csi", ".bai"};
-    const char *const *suffixes = is_cram ? cram_suffixes : bam_suffixes;
-    const size_t n_suffixes = is_cram ? 1 : 2;
-    const size_t path_length = strlen(file_path);
-    const char *slash = strrchr(file_path, '/');
-    const char *dot = strrchr(slash ? slash : file_path, '.');
-    const size_t stem_length = dot ? (size_t)(dot - file_path) : path_length;
-    char *candidate = duckdb_malloc(path_length + sizeof(".crai"));
-    if (!candidate) return NULL;
-
-    for (size_t s = 0; s < n_suffixes; s++) {
-        const size_t bases[] = {path_length, stem_length};
-        const size_t n_bases = (is_cram || stem_length == path_length) ? 1 : 2;
-        for (size_t b = 0; b < n_bases; b++) {
-            memcpy(candidate, file_path, bases[b]);
-            strcpy(candidate + bases[b], suffixes[s]);
-            char *routed = duckhts_fs_route_path(route, candidate);
-            hFILE *probe = routed ? hopen(routed, "r") : NULL;
-            if (probe && hclose(probe) == 0) {
-                duckdb_free(candidate);
-                return routed;
-            }
-            duckdb_free(routed);
-        }
-    }
-    duckdb_free(candidate);
-    return NULL;
-}
-
-/*
- * Loads the index of an open alignment file. A routed file reads only the
- * index that bind resolved: htslib's own search for a remote name looks in
- * the working directory first and, for CRAM, saves a copy of the index there.
- */
-static hts_idx_t *bam_load_index(const bam_bind_data_t *bind, samFile *fp) {
-    if (bind->route && !bind->open_index_path) return NULL;
-    return sam_index_load3(fp, bind->open_path, bind->open_index_path, HTS_IDX_SILENT_FAIL);
-}
-
 /* ================================================================
  * Bind
  * ================================================================ */
@@ -729,22 +668,8 @@ static void bam_read_bind(duckdb_bind_info info) {
         reference = duckdb_get_varchar(ref_val);
     if (ref_val) duckdb_destroy_value(&ref_val);
 
-    duckhts_fs_route_t *route = NULL;
-    char *open_path = NULL;
-    char *open_index_path = NULL;
-    int remote_block_size = 0;
-    bool names_ready = duckhts_remote_block_size_bind(info, "read_bam", &remote_block_size) &&
-                       duckhts_fs_route_bind(info, "read_bam", &route);
-    if (names_ready) {
-        open_path = duckhts_fs_route_path(route, file_path);
-        open_index_path = duckhts_fs_route_path(route, index_path);
-        if (!open_path || (index_path && !open_index_path)) {
-            duckdb_bind_set_error(info, "read_bam: out of memory naming the input file");
-            names_ready = false;
-        }
-    }
-    if (!names_ready) {
-        bam_release_open_names(route, open_path, open_index_path);
+    duckhts_file_access_t *access = NULL;
+    if (!duckhts_file_access_bind(info, "read_bam", &access)) {
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
@@ -753,17 +678,13 @@ static void bam_read_bind(duckdb_bind_info info) {
     }
 
     /* Probe the file: open, read header, check index */
-    samFile *fp = sam_open(open_path, "r");
+    samFile *fp = duckhts_file_access_open(access, file_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        char detail[256];
         char err[1024];
-        if (duckhts_fs_route_error(route, file_path, detail, sizeof(detail))) {
-            snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s (%s)", file_path, detail);
-        } else {
-            snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s", file_path);
-        }
+        snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s%s", file_path,
+                 duckhts_file_access_reason(access, file_path));
         duckdb_bind_set_error(info, err);
-        bam_release_open_names(route, open_path, open_index_path);
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
@@ -772,13 +693,13 @@ static void bam_read_bind(duckdb_bind_info info) {
     }
 
     if (reference) {
-        hts_set_opt(fp, CRAM_OPT_REFERENCE, reference);
+        duckhts_file_access_set_cram_reference(access, fp, reference);
     }
     sam_hdr_t *hdr = sam_hdr_read(fp);
     if (!hdr) {
         sam_close(fp);
         duckdb_bind_set_error(info, "Failed to read SAM/BAM/CRAM header");
-        bam_release_open_names(route, open_path, open_index_path);
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
@@ -791,17 +712,14 @@ static void bam_read_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "read_bam: out of memory allocating bind state");
         sam_hdr_destroy(hdr);
         sam_close(fp);
-        bam_release_open_names(route, open_path, open_index_path);
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
         if (reference) duckdb_free(reference);
         return;
     }
-    bind->route = route;
-    bind->remote_block_size = remote_block_size;
-    bind->open_path = open_path;
-    bind->open_index_path = open_index_path;
+    bind->access = access;
     bind->file_path = file_path;
     bind->index_path = index_path;
     bind->reference = reference;
@@ -908,11 +826,8 @@ static void bam_read_bind(duckdb_bind_info info) {
 
     /* Check for index availability unless the caller explicitly requested a sequential scan. */
     if (!bind->scan_sequential) {
-        if (bind->route && !bind->open_index_path) {
-            bind->open_index_path =
-                bam_find_routed_index(bind->route, file_path, fp->format.format == cram);
-        }
-        hts_idx_t *idx = bam_load_index(bind, fp);
+        hts_idx_t *idx = duckhts_file_access_sam_index_load(bind->access, fp, bind->file_path,
+                                                            bind->index_path, HTS_IDX_SILENT_FAIL);
         if (idx) {
             bind->has_index = 1;
             /* The index totals describe the whole file. Only a full-file scan
@@ -1281,30 +1196,21 @@ static void bam_read_local_init(duckdb_init_info info) {
     local->qual_repr = bind->qual_repr;
 
     /* Each thread opens its own file handle (required for parallel seeks) */
-    local->fp = sam_open(bind->open_path, "r");
+    local->fp = duckhts_file_access_open(bind->access, bind->file_path,
+                                         (bind->n_regions > 0 || is_parallel)
+                                             ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+                                             : DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!local->fp) {
-        char detail[256];
         char err[1024];
-        if (duckhts_fs_route_error(bind->route, bind->file_path, detail, sizeof(detail))) {
-            snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s (%s)", bind->file_path, detail);
-        } else {
-            snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s", bind->file_path);
-        }
+        snprintf(err, sizeof(err), "read_bam: failed to open SAM/BAM/CRAM file: %s%s", bind->file_path,
+                 duckhts_file_access_reason(bind->access, bind->file_path));
         duckdb_init_set_error(info, err);
         destroy_bam_local(local);
         return;
     }
-    duckhts_apply_remote_hts_tuning(
-        local->fp,
-        bind->file_path,
-        (bind->n_regions > 0 || is_parallel)
-            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
-            : DUCKHTS_HTS_IO_PROFILE_STREAMING
-    );
-    duckhts_apply_remote_block_size(local->fp, bind->file_path, bind->remote_block_size);
 
     if (bind->reference) {
-        if (hts_set_opt(local->fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {
+        if (duckhts_file_access_set_cram_reference(bind->access, local->fp, bind->reference) < 0) {
             duckdb_init_set_error(info, "Failed to set CRAM reference");
             destroy_bam_local(local);
             return;
@@ -1355,7 +1261,8 @@ static void bam_read_local_init(duckdb_init_info info) {
 
     /* Load index if needed for parallel scanning or region queries */
     if (is_parallel || bind->n_regions > 0) {
-        local->idx = bam_load_index(bind, local->fp);
+        local->idx = duckhts_file_access_sam_index_load(bind->access, local->fp, bind->file_path,
+                                                        bind->index_path, HTS_IDX_SILENT_FAIL);
         if (!local->idx) {
             if (bind->n_regions > 0) {
                 duckdb_init_set_error(info,

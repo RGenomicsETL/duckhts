@@ -22,6 +22,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "filter.h"
 #include "duckhts_column_names.h"
 #include "duckhts_bind_params.h"
+#include "hts_file_access.h"
 
 #ifndef duckdb_malloc
 #define duckdb_malloc malloc
@@ -64,6 +65,7 @@ typedef struct {
     int use_variant_id;
     int counts;
     char *bcf_path;
+    duckhts_file_access_t *access;
     char **summary_paths;
     int n_summary_paths;
     int m_summary_paths;
@@ -242,8 +244,8 @@ static int score_is_missing(float f) {
 
 /* Detect whether a summary file is GWAS-VCF format by checking htslib file type.
  * Returns 1 if VCF/BCF, 0 otherwise. */
-static int score_is_vcf_summary(const char *path) {
-    htsFile *fp = hts_open(path, "r");
+static int score_is_vcf_summary(const duckhts_file_access_t *access, const char *path) {
+    htsFile *fp = duckhts_file_access_open(access, path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     int is_vcf = 0;
     if (!fp) return 0;
     if (fp->format.category == sequence_data || fp->format.category == variant_data) {
@@ -531,9 +533,10 @@ static int score_add_summary_paths_from_list_file(score_bind_t *bind, const char
         return 0;
     }
 
-    fp = hts_open(path, "r");
+    fp = duckhts_file_access_open(bind->access, path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        snprintf(err, err_sz, "bcftools_score: failed to open summaries_list_file '%s'", path);
+        snprintf(err, err_sz, "bcftools_score: failed to open summaries_list_file '%s'%s", path,
+                 duckhts_file_access_reason(bind->access, path));
         return -1;
     }
     while (hts_getline(fp, '\n', &str) >= 0) {
@@ -778,6 +781,7 @@ static void score_destroy_bind(void *data) {
     int i;
     if (!bind) return;
     if (bind->bcf_path) duckdb_free(bind->bcf_path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->summary_paths) {
         for (i = 0; i < bind->n_summary_paths; i++) {
             if (bind->summary_paths[i]) duckdb_free(bind->summary_paths[i]);
@@ -914,9 +918,10 @@ static score_summary_t *score_load_summary(const score_bind_t *bind, bcf_hdr_t *
 
     /* Use hts_open for transparent .gz/.bgz decompression (S-C3).
      * Upstream: score.c:196. */
-    fp = hts_open(summary_path, "r");
+    fp = duckhts_file_access_open(bind->access, summary_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        snprintf(err, err_sz, "bcftools_score: cannot open summary '%s': %s", summary_path, strerror(errno));
+        snprintf(err, err_sz, "bcftools_score: cannot open summary '%s': %s%s", summary_path, strerror(errno),
+                 duckhts_file_access_reason(bind->access, summary_path));
         if (mapping_owns) score_destroy_mapping(mapping, mapping_n, 1);
         return NULL;
     }
@@ -1153,9 +1158,10 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
     int read_status;
     int i;
 
-    sfp = hts_open(summary_path, "r");
+    sfp = duckhts_file_access_open(bind->access, summary_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!sfp) {
-        snprintf(err, err_sz, "bcftools_score: cannot open GWAS-VCF summary '%s'", summary_path);
+        snprintf(err, err_sz, "bcftools_score: cannot open GWAS-VCF summary '%s'%s", summary_path,
+                 duckhts_file_access_reason(bind->access, summary_path));
         return NULL;
     }
     shdr = bcf_hdr_read(sfp);
@@ -1634,7 +1640,8 @@ static int score_parse_region_line(const char *line, int is_bed, char *token, si
     return 0;
 }
 
-static char *score_regions_from_file(const char *path, char *err, size_t err_sz) {
+static char *score_regions_from_file(const duckhts_file_access_t *access, const char *path,
+                                     char *err, size_t err_sz) {
     htsFile *fp;
     kstring_t str = {0, 0, NULL};
     char *out = NULL;
@@ -1649,9 +1656,10 @@ static char *score_regions_from_file(const char *path, char *err, size_t err_sz)
     path_len = strlen(path);
     is_bed = (path_len >= 4 && strcasecmp(path + path_len - 4, ".bed") == 0) ||
              (path_len >= 7 && strcasecmp(path + path_len - 7, ".bed.gz") == 0);
-    fp = hts_open(path, "r");
+    fp = duckhts_file_access_open(access, path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        snprintf(err, err_sz, "bcftools_score: failed to open region/target file: %s", path);
+        snprintf(err, err_sz, "bcftools_score: failed to open region/target file: %s%s", path,
+                 duckhts_file_access_reason(access, path));
         return NULL;
     }
 
@@ -1734,8 +1742,9 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
     if (bind->regions_overlap >= 0) bcf_sr_set_opt(src->sr, BCF_SR_REGIONS_OVERLAP, bind->regions_overlap);
     if (bind->targets_overlap >= 0) bcf_sr_set_opt(src->sr, BCF_SR_TARGETS_OVERLAP, bind->targets_overlap);
 
-    if (!bcf_sr_add_reader(src->sr, bind->bcf_path)) {
-        snprintf(err, err_sz, "bcftools_score: failed to open BCF/VCF input: %s", bind->bcf_path);
+    if (!duckhts_file_access_sr_add_reader(bind->access, src->sr, bind->bcf_path)) {
+        snprintf(err, err_sz, "bcftools_score: failed to open BCF/VCF input: %s%s", bind->bcf_path,
+                 duckhts_file_access_reason(bind->access, bind->bcf_path));
         return -1;
     }
 
@@ -1971,6 +1980,11 @@ static void score_bind(duckdb_bind_info info) {
         score_destroy_bind(bind);
         return;
     }
+    if (!duckhts_file_access_bind(info, "bcftools_score", &bind->access)) {
+        if (summary_val) duckdb_destroy_value(&summary_val);
+        score_destroy_bind(bind);
+        return;
+    }
     {
         char err[512] = {0};
         if (score_add_summary_paths_from_value(bind, summary_val, err, sizeof(err)) != 0) {
@@ -2057,7 +2071,7 @@ static void score_bind(duckdb_bind_info info) {
     }
     if (bind->regions_file && bind->regions_file[0]) {
         char err[512] = {0};
-        char *parsed = score_regions_from_file(bind->regions_file, err, sizeof(err));
+        char *parsed = score_regions_from_file(bind->access, bind->regions_file, err, sizeof(err));
         if (!parsed) {
             duckdb_bind_set_error(info, err[0] ? err : "bcftools_score: failed to parse regions_file");
             score_destroy_bind(bind);
@@ -2067,7 +2081,7 @@ static void score_bind(duckdb_bind_info info) {
     }
     if (bind->targets_file && bind->targets_file[0]) {
         char err[512] = {0};
-        char *parsed = score_regions_from_file(bind->targets_file, err, sizeof(err));
+        char *parsed = score_regions_from_file(bind->access, bind->targets_file, err, sizeof(err));
         if (!parsed) {
             duckdb_bind_set_error(info, err[0] ? err : "bcftools_score: failed to parse targets_file");
             score_destroy_bind(bind);
@@ -2100,7 +2114,7 @@ static void score_bind(duckdb_bind_info info) {
         int si;
         int n_vcf = 0;
         for (si = 0; si < bind->n_summary_paths; si++) {
-            if (score_is_vcf_summary(bind->summary_paths[si])) n_vcf++;
+            if (score_is_vcf_summary(bind->access, bind->summary_paths[si])) n_vcf++;
         }
         if (n_vcf > 0 && n_vcf != bind->n_summary_paths) {
             duckdb_bind_set_error(info, "bcftools_score: cannot mix GWAS-VCF and TSV summary files in one call");
@@ -2120,7 +2134,8 @@ static void score_bind(duckdb_bind_info info) {
             return;
         }
         for (si = 0; si < bind->n_summary_paths; si++) {
-            htsFile *sfp = hts_open(bind->summary_paths[si], "r");
+            htsFile *sfp = duckhts_file_access_open(bind->access, bind->summary_paths[si],
+                                                    DUCKHTS_HTS_IO_PROFILE_METADATA);
             bcf_hdr_t *shdr;
             int n_file_prs;
             int pi;

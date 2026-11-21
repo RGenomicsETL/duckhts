@@ -194,3 +194,36 @@ test_bed_error_policy <- function() {
 }
 
 test_bed_error_policy()
+
+# The readers of this file through the DuckDB file system of the connection
+# (SET duckhts_file_system = 'duckdb'). htslib's own file access is the oracle:
+# the same relation must have the same row count and row hashes.
+test_intervals_duckdb_file_system <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  extdata <- function(name) {
+    dbQuoteString(con, system.file("extdata", name, package = "Rduckhts", mustWork = TRUE))
+  }
+  digest <- function(relation) {
+    dbGetQuery(con, sprintf(
+      "SELECT count(*) AS n, sum(hash(t))::VARCHAR AS row_hashes FROM (%s) t", relation))
+  }
+  relations <- c(
+    sprintf("SELECT * FROM read_bed(%s)", extdata("targets.bed")),
+    sprintf("SELECT * FROM fasta_nuc(%s, bed_path := %s)", extdata("ce.fa"), extdata("targets.bed")),
+    sprintf("SELECT * FROM fasta_nuc(%s, bin_width := 1000, region := 'CHROMOSOME_I')", extdata("ce.fa"))
+  )
+  expected <- lapply(relations, digest)
+  for (rows in expected) expect_true(rows$n > 0)
+
+  dbExecute(con, "SET duckhts_file_system = 'duckdb'")
+  for (i in seq_along(relations)) expect_equal(digest(relations[[i]]), expected[[i]])
+  missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
+  expect_error(
+    digest(sprintf("SELECT * FROM read_bed(%s)", missing)),
+    "No such file or directory",
+    fixed = TRUE
+  )
+}
+
+test_intervals_duckdb_file_system()

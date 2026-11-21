@@ -1,5 +1,7 @@
 /* Canonical scanning and decode checks without DuckDB. Each concurrent scan
- * owns its mutable state; records and decoded genotypes have explicit owners. */
+ * owns its mutable state; records and decoded genotypes have explicit owners.
+ * Every open passes a NULL file access, htslib's own, which calls no DuckDB
+ * function; the API table below only satisfies the linker. */
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -11,6 +13,8 @@
 #include "../../src/include/bcf_scan.h"
 #include "../../src/include/bcf_genotypes.h"
 #include "../../src/include/bcf_format.h"
+
+DUCKDB_EXTENSION_GLOBAL
 
 static const char *rows[] = {
     "chr1\t10\tknown\tA\tC\t60\tPASS\tDP=7\tGT\t0/1\t1/1\n",
@@ -28,7 +32,7 @@ typedef struct {
 static void scan(const scan_input_t *input, int selection) {
     duckhts_bcf_scan_t reader = {0};
     char error[512];
-    assert(duckhts_bcf_scan_open(&reader, input->path, input->index, 0,
+    assert(duckhts_bcf_scan_open(&reader, NULL, input->path, input->index, 0,
         DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
     bcf_hdr_t *hdr = reader.hdr;
     bcf1_t *record = bcf_init();
@@ -82,7 +86,7 @@ static void genotypes(const char *path, const duckhts_bcf_index_t *index) {
     for (int selection = 0; selection < 8; selection++) for (int indexed = 0; indexed < 2; indexed++) {
         duckhts_bcf_scan_t reader = {0};
         char error[512];
-        assert(duckhts_bcf_scan_open(&reader, path, index, 0,
+        assert(duckhts_bcf_scan_open(&reader, NULL, path, index, 0,
             DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
         duckhts_bcf_samples_t selected = {0};
         assert(duckhts_bcf_samples_build(&selected, reader.hdr, samples[selection], error, sizeof(error)));
@@ -195,14 +199,14 @@ static void raw_genotypes(const char *directory) {
     assert(!ferror(file) && fclose(file) == 0 && bgzf_close(bgzf) == 0);
     assert(bcf_index_build3(compressed, index_path, 14, 0) == 0);
     duckhts_bcf_index_t index = {0};
-    assert(duckhts_bcf_index_load(&index, vcf, compressed, index_path, 0) == 1);
+    assert(duckhts_bcf_index_load(&index, NULL, vcf, compressed, index_path, 0) == 1);
     const char *selectors[] = {NULL, "S2", "^S1", "S3,S1", ""};
     for (int format = 0; format < 3; format++) for (int selection = 0; selection < 5; selection++) {
         duckhts_bcf_scan_t reader = {0};
         duckhts_bcf_samples_t samples = {0};
         duckhts_bcf_gt_span_t spans[3];
         char error[512];
-        assert(duckhts_bcf_scan_open(&reader, format ? compressed : plain, &index, 0,
+        assert(duckhts_bcf_scan_open(&reader, NULL, format ? compressed : plain, &index, 0,
             DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
         assert(duckhts_bcf_samples_build(&samples, reader.hdr, selectors[selection], error, sizeof(error)));
         assert(duckhts_bcf_samples_apply(&samples, reader.hdr, error, sizeof(error)));
@@ -266,7 +270,7 @@ static void raw_genotypes(const char *directory) {
         duckhts_bcf_samples_t samples = {0};
         duckhts_bcf_gt_span_t spans[3];
         char error[512];
-        assert(duckhts_bcf_scan_open(&reader, plain, NULL, 0,
+        assert(duckhts_bcf_scan_open(&reader, NULL, plain, NULL, 0,
             DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
         assert(duckhts_bcf_samples_build(&samples, reader.hdr, NULL, error, sizeof(error)));
         reader.raw_samples = &samples;
@@ -300,14 +304,14 @@ static void raw_genotypes(const char *directory) {
             assert(bgzf_write(bgzf, buffer, bytes) == (ssize_t)bytes);
         assert(!ferror(file) && fclose(file) == 0 && bgzf_close(bgzf) == 0);
         assert(bcf_index_build3(compressed, index_path, 14, 0) == 0);
-        assert(duckhts_bcf_index_load(&index, vcf, compressed, index_path, 0) == 1);
+        assert(duckhts_bcf_index_load(&index, NULL, vcf, compressed, index_path, 0) == 1);
         for (int format = 0; format < 3; format++) {
             const char *path = format ? compressed : plain;
             duckhts_bcf_scan_t reader = {0};
             duckhts_bcf_samples_t samples = {0};
             duckhts_bcf_gt_span_t spans[3];
             char error[512];
-            assert(duckhts_bcf_scan_open(&reader, path, &index, 0,
+            assert(duckhts_bcf_scan_open(&reader, NULL, path, &index, 0,
                 DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
             assert(duckhts_bcf_samples_build(&samples, reader.hdr, NULL, error, sizeof(error)));
             reader.raw_samples = &samples;
@@ -345,7 +349,7 @@ static void raw_genotypes(const char *directory) {
     duckhts_bcf_scan_t reader = {0};
     duckhts_bcf_samples_t samples = {0};
     char error[512];
-    assert(duckhts_bcf_scan_open(&reader, "test/data/bcf_scan_contigs.bcf", NULL, 0,
+    assert(duckhts_bcf_scan_open(&reader, NULL, "test/data/bcf_scan_contigs.bcf", NULL, 0,
         DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
     reader.raw_samples = &samples;
     bcf1_t *record = bcf_init();
@@ -632,10 +636,10 @@ static void literal_contigs(void) {
     };
     for (int kind = 0; kind < 2; kind++) {
         duckhts_bcf_index_t index = {0};
-        assert(duckhts_bcf_index_load(&index, kind == 0 ? bcf : vcf, paths[kind], NULL, 0) == 1);
+        assert(duckhts_bcf_index_load(&index, NULL, kind == 0 ? bcf : vcf, paths[kind], NULL, 0) == 1);
         duckhts_bcf_scan_t reader = {0};
         char error[512];
-        assert(duckhts_bcf_scan_open(&reader, paths[kind], &index, 0,
+        assert(duckhts_bcf_scan_open(&reader, NULL, paths[kind], &index, 0,
             DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
         bcf1_t *record = bcf_init();
         assert(record);
@@ -684,7 +688,7 @@ static void decode_errors(void) {
         char path[256], error[512];
         snprintf(path, sizeof(path), "test/data/%s", paths[i]);
         duckhts_bcf_scan_t reader = {0};
-        assert(duckhts_bcf_scan_open(&reader, path, NULL, 0,
+        assert(duckhts_bcf_scan_open(&reader, NULL, path, NULL, 0,
             DUCKHTS_HTS_IO_PROFILE_METADATA, "read_bcf", error, sizeof(error)));
         bcf1_t *record = bcf_init();
         assert(record && duckhts_bcf_scan_next(&reader, record) >= 0);
@@ -707,10 +711,10 @@ static void decode_errors(void) {
     }
     duckhts_bcf_scan_t reader = {0};
     char error[512];
-    assert(!duckhts_bcf_scan_open(&reader, "test/data/no-such-bcf-file", NULL, 0,
+    assert(!duckhts_bcf_scan_open(&reader, NULL, "test/data/no-such-bcf-file", NULL, 0,
         DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
     assert(!reader.fp && !reader.hdr);
-    assert(duckhts_bcf_scan_open(&reader, "test/data/malformed_bad_pos.vcf", NULL, 0,
+    assert(duckhts_bcf_scan_open(&reader, NULL, "test/data/malformed_bad_pos.vcf", NULL, 0,
         DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
     bcf1_t *record = bcf_init();
     assert(record);
@@ -764,9 +768,9 @@ static void typed_intervals(void) {
         char error[512], index_path[512];
         snprintf(index_path, sizeof(index_path), "%s.%s", files[kind], kind ? "tbi" : "csi");
         duckhts_bcf_index_t index = {0};
-        assert(duckhts_bcf_index_load(&index, kind ? vcf : bcf, files[kind], index_path, 0) == 1);
+        assert(duckhts_bcf_index_load(&index, NULL, kind ? vcf : bcf, files[kind], index_path, 0) == 1);
         duckhts_bcf_scan_t reader = {0};
-        assert(duckhts_bcf_scan_open(&reader, files[kind], &index, 0,
+        assert(duckhts_bcf_scan_open(&reader, NULL, files[kind], &index, 0,
             DUCKHTS_HTS_IO_PROFILE_METADATA, "test", error, sizeof(error)));
         bcf1_t *record = bcf_init();
         assert(record);
@@ -834,8 +838,8 @@ int main(int argc, char **argv) {
         int min_shift = kind == 1 ? 0 : 14;
         assert(bcf_index_build3(path, index_path, min_shift, 0) == 0);
         duckhts_bcf_index_t index = {0}, shifted = {0};
-        assert(duckhts_bcf_index_load(&index, format, path, index_path, 0) == 1);
-        assert(duckhts_bcf_index_load(&shifted, format, shifted_path, shifted_index, 0) == 1);
+        assert(duckhts_bcf_index_load(&index, NULL, format, path, index_path, 0) == 1);
+        assert(duckhts_bcf_index_load(&shifted, NULL, format, shifted_path, shifted_index, 0) == 1);
         check_shifted(&index, &shifted);
         genotypes(path, &index);
         duckhts_bcf_index_destroy(&shifted);
@@ -848,7 +852,7 @@ int main(int argc, char **argv) {
         for (unsigned i = 0; i < 4; i++) assert(pthread_join(threads[i], NULL) == 0);
         duckhts_bcf_index_destroy(&index);
         assert(!index.bcf && !index.tabix);
-        assert(duckhts_bcf_index_load(&index, format, empty_path, index_path, 0) == 1);
+        assert(duckhts_bcf_index_load(&index, NULL, format, empty_path, index_path, 0) == 1);
         assert(!index.tabix || index.tabix->dict); // No lazy shared dictionary allocation.
         input.path = empty_path;
         input.empty = 1;

@@ -653,3 +653,34 @@ test_score <- function() {
 }
 
 test_score()
+
+# The readers of this file through the DuckDB file system of the connection
+# (SET duckhts_file_system = 'duckdb'). htslib's own file access is the oracle:
+# the same relation must have the same row count and row hashes.
+test_score_duckdb_file_system <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  extdata <- function(name) {
+    dbQuoteString(con, system.file("extdata", name, package = "Rduckhts", mustWork = TRUE))
+  }
+  digest <- function(relation) {
+    dbGetQuery(con, sprintf(
+      "SELECT count(*) AS n, sum(hash(t))::VARCHAR AS row_hashes FROM (%s) t", relation))
+  }
+  relations <- c(
+    sprintf("SELECT * FROM bcftools_score(%s, %s, use := 'GT', columns := 'PLINK')", extdata("score_input.vcf"), extdata("score_summary.tsv"))
+  )
+  expected <- lapply(relations, digest)
+  for (rows in expected) expect_true(rows$n > 0)
+
+  dbExecute(con, "SET duckhts_file_system = 'duckdb'")
+  for (i in seq_along(relations)) expect_equal(digest(relations[[i]]), expected[[i]])
+  missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
+  expect_error(
+    digest(sprintf("SELECT * FROM bcftools_score(%s, 'unused.tsv', use := 'GT', columns := 'PLINK')", missing)),
+    "No such file or directory",
+    fixed = TRUE
+  )
+}
+
+test_score_duckdb_file_system()

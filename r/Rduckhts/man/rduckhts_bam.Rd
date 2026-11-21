@@ -75,12 +75,14 @@ Creates a DuckDB table from SAM, BAM, or CRAM files using the DuckHTS extension.
 }
 \details{
 After \code{DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")},
-\code{read_bam} reads the file and its index through the DuckDB file system
-of the connection, so DuckDB secrets and file-access settings apply. The
-default, \code{'htslib'}, keeps htslib's own file access. "File access"
-under \code{read_bam} in the bundled reference,
+every DuckHTS reader, \code{read_bam} included, reads its inputs, their
+indexes and an explicit reference through the DuckDB file system of the
+connection, so DuckDB secrets and file-access settings apply. The default,
+\code{'htslib'}, keeps htslib's own file access. "File access" under
+\code{read_bam} in the bundled reference,
 \code{system.file("function_catalog", "reference.md", package = "Rduckhts")},
-gives the index lookup rule of that route.
+gives the index lookup rule of that route and the functions that keep
+htslib's file access.
 }
 \examples{
 library(DBI)

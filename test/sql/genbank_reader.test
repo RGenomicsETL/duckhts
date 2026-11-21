@@ -443,3 +443,30 @@ w3	90	100	+	0
 w3	1	10	+	1
 w3	20	25	+	0
 w4	100	100	+	.
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query TI
+SELECT feature, count(*)
+FROM read_genbank('__WORKING_DIRECTORY__/test/data/phix174.gb')
+GROUP BY feature
+ORDER BY feature;
+----
+CDS	14
+gene	14
+mRNA	2
+misc_feature	2
+rep_origin	1
+variation	4
+
+statement error
+SELECT * FROM read_genbank('__WORKING_DIRECTORY__/test/data/no_such_input');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

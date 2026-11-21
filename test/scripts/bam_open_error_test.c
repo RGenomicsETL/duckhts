@@ -38,7 +38,6 @@ static void set_error(duckdb_init_info info, const char *message) {
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     test_bind.file_path = argv[1];
-    test_bind.open_path = argv[1]; /* bind stores the name htslib opens beside the user's path */
     test_bind.scan_sequential = 1;
     duckdb_malloc = test_malloc;
     duckdb_free = test_free;

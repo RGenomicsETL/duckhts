@@ -16,6 +16,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/regidx.h>
 
+#include "hts_file_access.h"
 #include "liftover_nw_limit.h"
 
 #define LIFTOVER_WARNING_BUF 256
@@ -66,6 +67,17 @@ typedef struct liftover_cache_entry {
     struct liftover_cache_entry *next;
 } liftover_cache_entry_t;
 
+/*
+ * The state of one worker for one query. access is the file access of the
+ * connection that runs the query. A context read through the DuckDB file
+ * system holds files of that connection, so it lives in contexts and closes
+ * with the query; a context read by htslib stays in the thread cache.
+ */
+typedef struct {
+    duckhts_file_access_t *access;
+    liftover_cache_entry_t *contexts;
+} liftover_state_t;
+
 static void liftover_bind_destroy(void *ptr);
 
 /*
@@ -97,6 +109,27 @@ static liftover_cache_entry_t *get_liftover_cache_head(void) {
 static void set_liftover_cache_head(liftover_cache_entry_t *head) {
     pthread_once(&g_liftover_cache_key_once, init_liftover_cache_key);
     pthread_setspecific(g_liftover_cache_key, head);
+}
+
+static void destroy_liftover_state(void *ptr) {
+    liftover_state_t *state = (liftover_state_t *)ptr;
+    if (!state) return;
+    destroy_liftover_cache(state->contexts);
+    duckhts_file_access_destroy(state->access);
+    free(state);
+}
+
+static void liftover_init(duckdb_init_info info) {
+    liftover_state_t *state = (liftover_state_t *)calloc(1, sizeof(*state));
+    if (!state) {
+        duckdb_scalar_function_init_set_error(info, "bcftools_liftover: out of memory");
+        return;
+    }
+    if (!duckhts_file_access_scalar_init(info, "bcftools_liftover", &state->access)) {
+        free(state);
+        return;
+    }
+    duckdb_scalar_function_init_set_state(info, state, destroy_liftover_state);
 }
 
 static void trim_liftover_cache_head(liftover_cache_entry_t *head) {
@@ -1740,7 +1773,20 @@ static void scalar_shift_left(scalar_realign_t *ra) {
 
 /* ======================================================================== */
 
-static liftover_bind_t *load_liftover_context(const char *chain_path, const char *dst_fasta_ref,
+/* prefix ": " path, then DuckDB's reason when access reads through DuckDB. */
+static char *fmt_open_message(const char *prefix, const duckhts_file_access_t *access, const char *path) {
+    char *message = fmt_path_message(prefix, path);
+    const char *reason = duckhts_file_access_reason(access, path);
+    char *extended;
+    if (!message || !reason[0]) return message;
+    extended = (char *)realloc(message, strlen(message) + strlen(reason) + 1);
+    if (!extended) return message;
+    strcat(extended, reason);
+    return extended;
+}
+
+static liftover_bind_t *load_liftover_context(const duckhts_file_access_t *access,
+                                              const char *chain_path, const char *dst_fasta_ref,
                                               const char *src_fasta_ref, int max_snp_gap, int max_indel_inc,
                                               char **errbuf_out) {
     liftover_bind_t *bind = NULL;
@@ -1755,9 +1801,12 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
     bind->max_snp_gap = max_snp_gap;
     bind->max_indel_inc = max_indel_inc;
 
-    chain_fp = hts_open(bind->chain_path, "r");
+    chain_fp = duckhts_file_access_open(access, bind->chain_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!chain_fp) {
-        if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to open chain file", bind->chain_path);
+        if (errbuf_out) {
+            *errbuf_out = fmt_open_message("bcftools_liftover: failed to open chain file", access,
+                                           bind->chain_path);
+        }
         liftover_bind_destroy(bind);
         return NULL;
     }
@@ -1775,14 +1824,16 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
         liftover_bind_destroy(bind);
         return NULL;
     }
-    bind->dst_fai = fai_load(bind->dst_fasta_ref);
+    bind->dst_fai = duckhts_file_access_fai_load(access, bind->dst_fasta_ref, NULL, NULL, FAI_CREATE,
+                                                 FAI_FASTA, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!bind->dst_fai) {
         if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to load destination FASTA index", bind->dst_fasta_ref);
         liftover_bind_destroy(bind);
         return NULL;
     }
     if (bind->src_fasta_ref) {
-        bind->src_fai = fai_load(bind->src_fasta_ref);
+        bind->src_fai = duckhts_file_access_fai_load(access, bind->src_fasta_ref, NULL, NULL, FAI_CREATE,
+                                                     FAI_FASTA, DUCKHTS_HTS_IO_PROFILE_METADATA);
         if (!bind->src_fai) {
             if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to load source FASTA index", bind->src_fasta_ref);
             liftover_bind_destroy(bind);
@@ -1792,10 +1843,13 @@ static liftover_bind_t *load_liftover_context(const char *chain_path, const char
     return bind;
 }
 
-static liftover_bind_t *get_liftover_context(const char *chain_path, const char *dst_fasta_ref,
+static liftover_bind_t *get_liftover_context(liftover_state_t *state,
+                                             const char *chain_path, const char *dst_fasta_ref,
                                              const char *src_fasta_ref, int max_snp_gap, int max_indel_inc,
                                              char **errbuf_out) {
-    liftover_cache_entry_t *head = get_liftover_cache_head();
+    const duckhts_file_access_t *access = state ? state->access : NULL;
+    const int query_owned = duckhts_file_access_uses_duckdb(access);
+    liftover_cache_entry_t *head = query_owned ? state->contexts : get_liftover_cache_head();
     liftover_cache_entry_t *entry = NULL;
     liftover_cache_entry_t *prev = NULL;
     liftover_bind_t *loaded = NULL;
@@ -1812,13 +1866,14 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
                 prev->next = entry->next;
                 entry->next = head;
                 head = entry;
-                set_liftover_cache_head(head);
+                if (query_owned) state->contexts = head;
+                else set_liftover_cache_head(head);
             }
             return bind;
         }
     }
 
-    loaded = load_liftover_context(chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, errbuf_out);
+    loaded = load_liftover_context(access, chain_path, dst_fasta_ref, src_fasta_ref, max_snp_gap, max_indel_inc, errbuf_out);
     if (!loaded) return NULL;
 
     entry = (liftover_cache_entry_t *)calloc(1, sizeof(*entry));
@@ -1830,7 +1885,8 @@ static liftover_bind_t *get_liftover_context(const char *chain_path, const char 
     entry->next = head;
     head = entry;
     trim_liftover_cache_head(head);
-    set_liftover_cache_head(entry);
+    if (query_owned) state->contexts = entry;
+    else set_liftover_cache_head(entry);
     return loaded;
 }
 
@@ -1953,7 +2009,7 @@ static void bcftools_liftover_scalar(duckdb_function_info info, duckdb_data_chun
         chain_path_copy = dup_span(chain_path, chain_len);
         dst_fasta_ref_copy = dup_span(dst_fasta_ref, dst_fasta_len);
         if (src_fasta_ref && src_fasta_len > 0) src_fasta_ref_copy = dup_span(src_fasta_ref, src_fasta_len);
-        bind = get_liftover_context(chain_path_copy, dst_fasta_ref_copy, src_fasta_ref_copy, max_snp_gap, max_indel_inc,
+        bind = get_liftover_context((liftover_state_t *)duckdb_scalar_function_get_state(info), chain_path_copy, dst_fasta_ref_copy, src_fasta_ref_copy, max_snp_gap, max_indel_inc,
                                     &load_err);
         free(chain_path_copy);
         free(dst_fasta_ref_copy);
@@ -2365,6 +2421,7 @@ static duckdb_scalar_function build_liftover_overload(duckdb_logical_type varcha
         duckdb_scalar_function_add_parameter(fn, bool_type);  /* no_left_align */
     duckdb_scalar_function_set_return_type(fn, struct_type);
     duckdb_scalar_function_set_special_handling(fn);
+    duckdb_scalar_function_set_init(fn, liftover_init);
     duckdb_scalar_function_set_function(fn, bcftools_liftover_scalar);
     return fn;
 }

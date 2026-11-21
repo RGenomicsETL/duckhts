@@ -29,7 +29,6 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 #include <htslib/kstring.h>
 
-#include "include/hts_io_tuning.h"
 #include "include/duckdb_alloc.h"
 #include "include/duckdb_list.h"
 #include "include/region_list.h"
@@ -118,6 +117,7 @@ typedef struct {
 
 typedef struct {
     char* file_path;
+    duckhts_file_access_t *access;
     char* index_path;          // Optional explicit index path
     char* region;              // Optional region filter
     char* additional_csq_column_types;  // Optional bcftools-style override rules
@@ -265,6 +265,7 @@ static void destroy_bind_data(void* data) {
     if (!bind) return;
 
     if (bind->file_path) duckdb_free(bind->file_path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->region) duckdb_free(bind->region);
     if (bind->additional_csq_column_types) duckdb_free(bind->additional_csq_column_types);
@@ -880,12 +881,21 @@ static void bcf_read_bind(duckdb_bind_info info) {
     columns.suffix_duplicates = duplicate_names == 1;
     int decompression_threads = (int)requested_threads;
 
+    duckhts_file_access_t *access = NULL;
+    if (!duckhts_file_access_bind(info, reader_name, &access)) {
+        duckdb_free(file_path);
+        if (index_path) duckdb_free(index_path);
+        if (region) duckdb_free(region);
+        if (additional_csq_column_types) duckdb_free(additional_csq_column_types);
+        return;
+    }
     duckhts_bcf_scan_t metadata = {0};
     char open_error[512];
-    if (!duckhts_bcf_scan_open(&metadata, file_path, NULL, 0,
+    if (!duckhts_bcf_scan_open(&metadata, access, file_path, NULL, 0,
                                DUCKHTS_HTS_IO_PROFILE_METADATA, reader_name,
                                open_error, sizeof(open_error))) {
         duckdb_bind_set_error(info, open_error);
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
@@ -900,6 +910,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
     bcf_bind_data_t* bind = duckhts_alloc_array(1, sizeof(*bind));
     if (!bind) goto bind_oom;
     bind->file_path = file_path;
+    bind->access = access;
     bind->index_path = index_path;
     bind->region = region;
     bind->additional_csq_column_types = additional_csq_column_types;
@@ -1202,7 +1213,7 @@ static void bcf_read_bind(duckdb_bind_info info) {
             flags |= HTS_IDX_SAVE_REMOTE;
         }
 
-        int loaded = duckhts_bcf_index_load(&bind->index, fmt, file_path, index_path, flags);
+        int loaded = duckhts_bcf_index_load(&bind->index, bind->access, fmt, file_path, index_path, flags);
         if (loaded < 0) goto bind_oom;
         if (!loaded && bind->has_selector) {
             char err[512];
@@ -1246,6 +1257,7 @@ bind_error:
         destroy_bind_data(bind);
         bind = NULL;
     } else {
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         if (index_path) duckdb_free(index_path);
         if (region) duckdb_free(region);
@@ -1365,7 +1377,7 @@ static void bcf_read_local_init(duckdb_init_info info) {
     local->needs_next_contig = is_parallel;  // Start by requesting first contig
 
     char open_error[512];
-    if (!duckhts_bcf_scan_open(&local->scan, bind->file_path, &bind->index,
+    if (!duckhts_bcf_scan_open(&local->scan, bind->access, bind->file_path, &bind->index,
                                bind->decompression_threads,
                                is_parallel || bind->has_selector
                                    ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
