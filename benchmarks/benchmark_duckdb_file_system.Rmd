@@ -32,8 +32,10 @@ source("benchmarks/duckdb_file_system_run.R")
 knitr::kable(file_system_tuning, col.names = c("Scan", "hFILE block (MiB)", "BGZF block cache (MiB)"))
 ```
 
-The hFILE block is the size of each read htslib asks its file backend for. The tuning is
-fixed in the source; neither a setting nor a function argument changes it. htslib's libcurl
+The hFILE block is the size of each read htslib asks its file backend for.
+`SET duckhts_remote_block_size` replaces it; every section but the one that varies it
+leaves that setting at 0, the automatic size in the table. The BGZF cache size has no
+setting. htslib's libcurl
 backend has further controls that this benchmark leaves at their defaults: the retry and
 low-speed environment variables (`HTS_RETRY_MAX`, `HTS_RETRY_DELAY`, `HTS_RETRY_MAX_DELAY`,
 `HTS_LOW_SPEED_LIMIT`, `HTS_LOW_SPEED_TIME`) and its rule to read on, without a new
@@ -72,8 +74,10 @@ identity <- data.frame(
             if (length(status)) "modified" else "clean",
             unname(tools::md5sum(extension)),
             readLines("third_party/htslib/VERSION", n = 1),
-            R.version.string, as.character(packageVersion("duckdb")),
-            "installed build for this DuckDB version, default settings",
+            R.version.string,
+            sprintf("%s (DuckDB %s)", packageVersion("duckdb"), paste(unique(runs$duckdb_version), collapse = ", ")),
+            sprintf("%s, default settings except where a section varies them",
+                    paste(unique(stats::na.omit(runs$httpfs_version)), collapse = ", ")),
             cpu[[1L]], as.character(parallel::detectCores()), "2 GiB", "0 B (no spill allowed)",
             "scripts/benchmark_range_server.py on 127.0.0.1, one thread per connection",
             sprintf("%d per region workload, %d per scan workload; one fresh R process each, routes alternated",
@@ -117,7 +121,8 @@ The idle process (extension and httpfs loaded, nothing read) peaks at
 overhead plus three times the I/O state of its open handles: one hFILE block, one BGZF
 block cache and one `r file_system_read_ahead_mib` MiB read-ahead buffer per handle. A
 region query and a single-thread scan hold one handle; a scan on four threads holds four.
-The query itself keeps no rows: it aggregates as it reads.
+A run with a block size set budgets that size for the hFILE block. The query itself keeps
+no rows: it aggregates as it reads.
 
 ## Region queries
 
@@ -179,6 +184,65 @@ knitr::kable(data.frame(
   `body MiB written` = settings_summary$body_mib_written, check.names = FALSE
 ), digits = 3, format.args = list(big.mark = ","))
 ```
+
+## Block size
+
+The same two regions on one thread, on both routes, with `duckhts_remote_block_size` at
+each value below, `r params$scan_reps` runs each. `auto` is 0, which for a region query
+is 1 MiB. The environment variable `DUCKHTS_BENCH_EXTRA_R_LIBS` names further R libraries
+that each hold another version of the duckdb package; the same extension binary is
+loaded into each.
+
+```{r block-size}
+extra_libraries <- strsplit(Sys.getenv("DUCKHTS_BENCH_EXTRA_R_LIBS"), .Platform$path.sep, fixed = TRUE)[[1L]]
+block_result <- file_system_block_size_benchmark(
+  extension, bams[["1x"]], r_libraries = c(list(NULL), as.list(extra_libraries)),
+  repetitions = params$scan_reps
+)
+block_runs <- block_result$runs
+block_summary <- file_system_block_size_summary(block_runs)
+utils::write.csv(block_runs[names(block_runs) != "digest"],
+                 "benchmarks/benchmark_duckdb_file_system_block_size_runs.csv", row.names = FALSE)
+block_label <- function(bytes) ifelse(bytes == 0, "auto", sprintf("%g MiB", bytes / 2^20))
+# One row per value of `by`, one column per block size, holding `value`.
+block_pivot <- function(value, by) {
+  wide <- stats::reshape(block_summary[c(by, "block_size", value)], idvar = by,
+                         timevar = "block_size", direction = "wide")
+  sizes <- as.numeric(sub(paste0("^", value, "\\."), "", names(wide)[-seq_along(by)]))
+  names(wide) <- c(by, block_label(sizes))
+  rownames(wide) <- NULL
+  wide
+}
+by <- c("duckdb_version", "region", "latency_ms", "route")
+header <- c("DuckDB", "region", "delay ms", "route")
+engines <- unique(block_runs[c("duckdb_version", "httpfs_version")])
+knitr::kable(engines, row.names = FALSE, col.names = c("DuckDB", "httpfs"))
+```
+
+Median seconds:
+
+```{r block-size-seconds}
+seconds_wide <- block_pivot("median_seconds", by)
+knitr::kable(seconds_wide, digits = 3, col.names = c(header, names(seconds_wide)[-(1:4)]))
+```
+
+GET requests (median):
+
+```{r block-size-gets}
+gets_wide <- block_pivot("get_requests", by)
+knitr::kable(gets_wide, col.names = c(header, names(gets_wide)[-(1:4)]))
+```
+
+Body MiB the server wrote (median):
+
+```{r block-size-bytes}
+bytes_wide <- block_pivot("body_mib_written", by)
+knitr::kable(bytes_wide, digits = 1, col.names = c(header, names(bytes_wide)[-(1:4)]))
+```
+
+Peak resident memory across these runs was at most
+`r sprintf("%.0f", max(block_runs$peak_rss_mib))` MiB, at a block size of
+`r block_label(block_runs$block_size[which.max(block_runs$peak_rss_mib)])`.
 
 ## Scaling
 
@@ -260,6 +324,22 @@ setting_seconds <- function(setting, region, latency) {
   sprintf("%.2f", settings_summary$median_seconds[row])
 }
 narrow <- "chr20:10000000-10100000"
+# One sentence per DuckDB version on the 10 Mb region with 20 ms per request.
+block_findings <- vapply(unique(block_summary$duckdb_version), function(version) {
+  rows <- block_summary[block_summary$duckdb_version == version & block_summary$region == widest &
+                          block_summary$latency_ms == 20, ]
+  routed <- rows[rows$route == "duckdb", ]
+  automatic <- routed[routed$block_size == 0, ]
+  fastest <- routed[which.min(routed$median_seconds), ]
+  reference <- rows[rows$route == "htslib" & rows$block_size == 0, ]
+  stopifnot(nrow(automatic) == 1L, nrow(reference) == 1L)
+  sprintf(paste("  - DuckDB %s: the DuckDB route took %.2f s with %.0f GETs at the automatic size and",
+                "%.2f s with %.0f GETs at its fastest size, %s; the htslib route took %.2f s with",
+                "%.0f GETs at the automatic size."),
+          version, automatic$median_seconds, automatic$get_requests, fastest$median_seconds,
+          fastest$get_requests, block_label(fastest$block_size), reference$median_seconds,
+          reference$get_requests)
+}, "")
 ```
 
 - **Same rows.** All `r nrow(runs)` runs returned the samtools record count and one hash
@@ -274,8 +354,9 @@ narrow <- "chr20:10000000-10100000"
   htslib asks its backend for at most one hFILE block at a time (`refill_buffer` in
   `third_party/htslib/hfile.c`), and every scan here, the single-thread ones included,
   runs under the 1 MiB profile: a full scan of an indexed BAM is cut into pieces
-  (`src/bam_reader.c`, `is_parallel`). The block size was not varied, so its effect on the
-  request count is read from the code, not measured.
+  (`src/bam_reader.c`, `is_parallel`).
+- **Block size.** On the 10 Mb region with 20 ms per request:
+`r paste(block_findings, collapse = "\n")`
 - **httpfs settings.** `r unchanged_text` left
   the GET count of both regions equal to the defaults. `force_download` replaced the ranges
   with `r forced$get_requests` requests for the whole file: the 10 Mb region with 20 ms per
@@ -305,13 +386,12 @@ narrow <- "chr20:10000000-10100000"
 
 ## Not measured
 
-- The hFILE block size and BGZF cache size were not varied: DuckHTS fixes them in
-  `src/include/hts_io_tuning.h`. A sweep of the block size on both routes, with the scan
-  profile each handle received recorded, is the missing measurement that would say how
-  much of the DuckDB route's request count is a tuning choice.
+- The block size was varied for region queries on one thread only, not for whole-file
+  scans or several threads. The BGZF cache size was not varied.
 - httpfs settings beyond those in the table, and combinations of them. Whether the
   external file cache serves reads made through the C file API was not examined.
-- Only the DuckDB version in the table above was run.
+- The route comparison, the scans and the httpfs settings ran on the DuckDB version of the
+  first table only.
 - Real object stores, TLS, bandwidth limits, and connections that fail or stall.
 - CRAM, SAM, and any reader other than `read_bam`.
 - Writing: the DuckDB route is read-only.
