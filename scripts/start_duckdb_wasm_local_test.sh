@@ -8,9 +8,9 @@ PORT=${PORT:-8001}
 HOST=${HOST:-127.0.0.1}
 LOCAL_WASM_IMAGE=${LOCAL_WASM_IMAGE:-duckhts/duckdb-wasm-local:latest}
 LOCAL_WASM_DOCKERFILE=${LOCAL_WASM_DOCKERFILE:-scripts/docker/duckdb-wasm-local.Dockerfile}
-# duckdb-wasm 1.29.0 is based on DuckDB v1.1.1 and traps while loading our
-# current extension build; use the first 1.4.x-aligned runtime by default.
-DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.33.1-dev57.0}
+# DuckHTS is built for the DuckDB C API v1.5.6 and needs an engine >= 1.5.6.
+# 1.33.1-dev119.0 embeds DuckDB v2.0.0 and ships the base/threads bundles.
+DUCKDB_WASM_NPM_VERSION=${DUCKDB_WASM_NPM_VERSION:-1.33.1-dev119.0}
 # SERVE=1 (default) builds the site then serves it with python http.server.
 # SERVE=0 builds the site and exits, printing SITE_ROOT/PORT so an external
 # driver (e.g. Playwright's webServer) can own the HTTP server lifecycle.
@@ -98,10 +98,9 @@ RUNTIME_BASE="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@${DUCKDB_WASM_NPM
 RUNTIME_CACHE="$(duckhts_cache_subdir "runtime/duckdb-wasm/${DUCKDB_WASM_NPM_VERSION}")"
 runtime_sha256() { # filename; npm package dist assets
   case "$DUCKDB_WASM_NPM_VERSION/$1" in
-    1.33.1-dev57.0/duckdb-browser.mjs) printf '%s\n' '95ea0678ebf4a817464f81ec07c9c4188470f361967975ef6ca85fd674cfc6ec' ;;
-    1.33.1-dev57.0/duckdb-browser-eh.worker.js) printf '%s\n' 'fa889e6068c40426dea67c08cf16ce0cad7404eae94f6a2522adcabb5898eb93' ;;
-    1.33.1-dev57.0/duckdb-eh.wasm) printf '%s\n' '3abdec74989dcc54d2f2ea5621f611f3c45db1e7dff2f408476014d82beb2029' ;;
-    1.33.1-dev57.0/duckdb-browser-eh.worker.js.map) printf '%s\n' '9d4144d9a1e98d73cbf01dc59bce30aff59354b8b033c54e510eb26c03d2c806' ;;
+    1.33.1-dev119.0/duckdb-browser.mjs) printf '%s\n' '2a82ff7ecd1c83dece84f683ec2105c4430d8898c8e1f5287916925f595a27df' ;;
+    1.33.1-dev119.0/duckdb-browser-base.worker.js) printf '%s\n' '5bf2a43ed149fb46d891d0d1681697865c4ff93861b76cfdcc6683aa5ce01e71' ;;
+    1.33.1-dev119.0/duckdb-base.wasm) printf '%s\n' '1e845b7c90b947f84172d514a73ffed563550f08d8449b4145d60b133423a34d' ;;
     *) return 2 ;;
   esac
 }
@@ -143,9 +142,8 @@ fetch_runtime() { # filename [optional]
   cp -f "$cached" "$SITE_ROOT/$name"
 }
 fetch_runtime duckdb-browser.mjs
-fetch_runtime duckdb-browser-eh.worker.js
-fetch_runtime duckdb-eh.wasm
-fetch_runtime duckdb-browser-eh.worker.js.map 1
+fetch_runtime duckdb-browser-base.worker.js
+fetch_runtime duckdb-base.wasm
 printf '%s\n' '<!doctype html><title>duckhts</title>' > "${SITE_ROOT}/favicon.ico"
 
 ln -sf "${ROOT_DIR}/scripts/duckdb-wasm-local-test.html" "${SITE_ROOT}/scripts/duckdb-wasm-local-test.html"
@@ -170,8 +168,8 @@ Artifact roots:
 
 Served files:
   /duckdb-browser.mjs
-  /duckdb-browser-eh.worker.js
-  /duckdb-eh.wasm
+  /duckdb-browser-base.worker.js
+  /duckdb-base.wasm
   /duckdb-wasm/duckhts.duckdb_extension.wasm
   /extdata/r1.fq
   /extdata/header_tabix.tsv.gz

@@ -307,10 +307,10 @@ FROM read_fastq('http://127.0.0.1:8001/extdata/r1.fq');</textarea>
       logNode.textContent = "";
 
       try {
-        const worker = new Worker("/duckdb-browser-eh.worker.js");
+        const worker = new Worker("/duckdb-browser-base.worker.js");
         const logger = new duckdb.ConsoleLogger();
         const db = new duckdb.AsyncDuckDB(logger, worker);
-        await db.instantiate("/duckdb-eh.wasm");
+        await db.instantiate("/duckdb-base.wasm");
         await db.open({ allowUnsignedExtensions: true });
         conn = await db.connect();
         await runSQL("SELECT version() AS duckdb_version");

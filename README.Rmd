@@ -813,7 +813,7 @@ This setup loads `duckhts.duckdb_extension.wasm` in duckdb-wasm, runs local HTTP
 reader checks, and lets you set/clear `Module.duckhtsWasmHttpConfig` directly in
 the browser host runtime.
 
-The setup stages `duckdb-browser.mjs`, `duckdb-browser-eh.worker.js`, and `duckdb-eh.wasm` at the site root for same-origin runtime loading, while using an import map for `apache-arrow` resolution.
+The setup stages `duckdb-browser.mjs`, `duckdb-browser-base.worker.js`, and `duckdb-base.wasm` at the site root for same-origin runtime loading, while using an import map for `apache-arrow` resolution.
 
 ### S3 credentials and configuration
 

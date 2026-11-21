@@ -9,12 +9,12 @@ test("GFF named attributes match raw MAP values in a browser File", async ({ pag
   await page.goto("/scripts/duckdb-wasm-local-test.html");
   const result = await page.evaluate(async (fixture) => {
     const duckdb = await import("/duckdb-browser.mjs");
-    const worker = new Worker(new URL("/duckdb-browser-eh.worker.js", location.href));
+    const worker = new Worker(new URL("/duckdb-browser-base.worker.js", location.href));
     const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
     const url = URL.createObjectURL(new File([fixture], "attributes.gff3"));
     let conn;
     try {
-      await db.instantiate(new URL("/duckdb-eh.wasm", location.href).href);
+      await db.instantiate(new URL("/duckdb-base.wasm", location.href).href);
       await db.open({ allowUnsignedExtensions: true });
       conn = await db.connect();
       const extension = new URL("/duckdb-wasm/duckhts.duckdb_extension.wasm", location.href).href;

@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG EMSDK_VERSION=3.1.68
+ARG EMSDK_VERSION=6.0.9
 ARG VCPKG_COMMIT=84bab45d415d22042bd0b9081aea57f362da3f35
 
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \

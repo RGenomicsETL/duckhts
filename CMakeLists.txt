@@ -120,7 +120,6 @@ if (DUCKDB_WASM_EXTENSION)
 	# WASM does not export, causing an "indirect call signature mismatch" trap
 	# at extension load time.
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fwasm-exceptions")
-	target_compile_definitions(${EXTENSION_NAME} PRIVATE DUCKHTS_WASM_DUCKDB_RUNTIME=1)
 	target_compile_options(${EXTENSION_NAME} PRIVATE -include ${CMAKE_SOURCE_DIR}/src/include/wasm_socket_compat.h)
 else()
 	add_library(${EXTENSION_NAME} SHARED ${EXTENSION_SOURCES})
@@ -256,11 +255,11 @@ set(HTSLIB_EXTRA_LDFLAGS "")
 # setjmp/longjmp uses __wasm_longjmp rather than emscripten_longjmp.
 if(DUCKDB_WASM_EXTENSION)
     set(HTSLIB_EXTRA_CFLAGS "-fwasm-exceptions")
-    # Keep the shared compatibility shim wasm-only.
-    # The duckdb-wasm host exports native i64 file APIs as orig$lseek /
-    # orig$ftruncate, so mark the top-level DuckDB wasm build explicitly while
-    # leaving the webR/package wasm path on the default symbols.
-    set(HTSLIB_BUILD_CPPFLAGS "-DDUCKHTS_WASM_DUCKDB_RUNTIME=1 -include ${CMAKE_SOURCE_DIR}/src/include/wasm_socket_compat.h")
+    # Keep the shared compatibility shim wasm-only. The side module binds
+    # lseek, ftruncate, strtoll, strtoull, atoll and time by their plain names:
+    # duckdb-wasm exports them with native i64 arguments and has no orig$*
+    # variants.
+    set(HTSLIB_BUILD_CPPFLAGS "-include ${CMAKE_SOURCE_DIR}/src/include/wasm_socket_compat.h")
 endif()
 
 # ------------------------------------------------------------------

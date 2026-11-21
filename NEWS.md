@@ -2,6 +2,14 @@
 
 # duckhts (development version)
 
+- The browser test lane (`make wasm-playwright-test`, `wasm-playwright.yml`) runs on
+  duckdb-wasm `1.33.1-dev119.0` (DuckDB v2.0.0), the first lane runtime that loads the
+  v1.5.6 C API extension. Its `base` bundle replaces `eh`: the staging script pins
+  sha256 for `duckdb-browser.mjs`, `duckdb-browser-base.worker.js` and `duckdb-base.wasm`,
+  and the local build image uses Emscripten 6.0.9. The wasm side module no longer imports
+  `orig$lseek`, `orig$ftruncate`, `orig$strtoll`, `orig$strtoull`, `orig$atoll` or
+  `orig$time`, which this duckdb-wasm does not export; it binds the plain i64 symbols.
+
 - `SET duckhts_remote_block_size = N` sets the bytes htslib asks for in each read of a
   remote file in `read_bam`, on either file-access route, from 131072 to 268435456. The
   default, 0, keeps the size DuckHTS chooses by scan type. A value outside that range is a

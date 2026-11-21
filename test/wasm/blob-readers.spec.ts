@@ -49,7 +49,7 @@ for (const ignoreRange of [false, true]) {
             if (name.toLowerCase() !== 'range') setHeader.call(this, name, value);
           };
         ` : ""}
-        importScripts(${JSON.stringify(new URL("/duckdb-browser-eh.worker.js", location.href).href)});
+        importScripts(${JSON.stringify(new URL("/duckdb-browser-base.worker.js", location.href).href)});
       `], { type: "text/javascript" }));
       const worker = new Worker(wrapper.url);
       const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
@@ -66,7 +66,7 @@ for (const ignoreRange of [false, true]) {
       };
       let conn;
       try {
-        await db.instantiate(new URL("/duckdb-eh.wasm", location.href).href);
+        await db.instantiate(new URL("/duckdb-base.wasm", location.href).href);
         await db.open({ allowUnsignedExtensions: true });
         conn = await db.connect();
         const extensionPath = new URL("/duckdb-wasm/duckhts.duckdb_extension.wasm", location.href).href;
@@ -177,7 +177,7 @@ test("host allowlist blocks non-listed hosts but not local blob: files", async (
     const policy = { enforceHostAllowlist: true, allowHosts: ["example.org"] };
     const wrapper = localFileUrl(new Blob([`
       self.duckhtsWasmHttpConfig = ${JSON.stringify(policy)};
-      importScripts(${JSON.stringify(new URL("/duckdb-browser-eh.worker.js", location.href).href)});
+      importScripts(${JSON.stringify(new URL("/duckdb-browser-base.worker.js", location.href).href)});
     `], { type: "text/javascript" }));
     const worker = new Worker(wrapper.url);
     const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
@@ -185,7 +185,7 @@ test("host allowlist blocks non-listed hosts but not local blob: files", async (
     const httpFastq = new URL("/extdata/r1.fq", location.href).href;
     let conn;
     try {
-      await db.instantiate(new URL("/duckdb-eh.wasm", location.href).href);
+      await db.instantiate(new URL("/duckdb-base.wasm", location.href).href);
       await db.open({ allowUnsignedExtensions: true });
       conn = await db.connect();
       const extensionPath = new URL("/duckdb-wasm/duckhts.duckdb_extension.wasm", location.href).href;
