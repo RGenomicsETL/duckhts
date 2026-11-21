@@ -18,6 +18,7 @@
 #include "duckhts_registration.h"
 #include "duckhts_simd.h"
 #include "wasm_http_hfile.h"
+#include "duckdb_fs_hfile.h"
 
 /* Restricts a relation carrying `region` to autosomal sites. Relatedness and
    contamination are diploid autosomal statistics; the panel also carries the
@@ -215,20 +216,21 @@ DUCKDB_EXTENSION_ENTRYPOINT(duckdb_connection connection,
         .info = info,
         .access = access
     };
-    const char *version = duckdb_library_version();
-    unsigned major = 0;
-    unsigned minor = 0;
-    if (sscanf(version, "v%u.%u", &major, &minor) != 2 ||
-        major < 1 || (major == 1 && minor < 5)) {
-        char message[160];
-        snprintf(message, sizeof(message),
-                 "DuckHTS requires DuckDB 1.5.0 or newer; loaded runtime is %s", version);
-        return duckhts_registration_error(&registration, message);
-    }
 
-    /* Native functions must exist before SQL macros are bound. */
+    /* DuckDB admits this extension only when it provides the C API version in
+     * the metadata footer, so every runtime that reaches this point is
+     * DuckDB 1.5.6 or newer. Native functions must exist before SQL macros
+     * are bound. */
     register_wasm_http_hfile_backend();
     duckhts_simd_init();
+    if (!register_duckdb_fs_hfile_backend()) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register its htslib backend for the DuckDB file system");
+    }
+    if (!duckhts_register_file_system_option(connection)) {
+        return duckhts_registration_error(&registration,
+            "DuckHTS could not register the " DUCKHTS_FILE_SYSTEM_OPTION " setting");
+    }
 
     register_duckhts_htslib_functions(connection);
     register_duckhts_simd_functions(connection);

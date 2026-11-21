@@ -12,7 +12,7 @@ expect_true(file.exists(extension_file))
 
 header_version <- Rduckhts:::duckhts_capi_version(header)
 # The declared baseline. Raising it also raises the oldest DuckDB that loads the package.
-expect_identical(header_version, "v1.2.0")
+expect_identical(header_version, "v1.5.6")
 
 # Read the footer by DuckDB's layout, not through the package writer: eight
 # 32-byte fields, then a 256-byte signature. The API version is the third

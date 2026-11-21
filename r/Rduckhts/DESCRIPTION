@@ -1,6 +1,6 @@
 Package: Rduckhts
 Title: 'DuckDB' High Throughput Sequencing File Formats Reader Extension
-Version: 2.0.2.9000.0.1.1
+Version: 2.0.2.9001.0.1.1
 Authors@R: c(
     person(given = "Sounkou Mahamane", family = "Toure",
     email = "sounkoutoure@gmail.com",
@@ -38,7 +38,7 @@ Depends:
     R (>= 4.4.0)
 Imports:
     DBI,
-    duckdb (>= 1.5.0),
+    duckdb (>= 1.5.6),
     methods,
     utils
 Suggests:

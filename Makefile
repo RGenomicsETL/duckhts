@@ -33,11 +33,13 @@ USE_UNSTABLE_C_API=0
 # prevents extension-ci-tools from falling back to the current Git commit.
 EXTENSION_VERSION:=$(shell sed -n 's/^version:[[:space:]]*//p' description.yml)
 
-# The DuckDB C API version for extension metadata (stable API = v1.2.0)
-TARGET_DUCKDB_VERSION=v1.2.0
-
-# The DuckDB release to fetch headers from
-DUCKDB_HEADER_VERSION=v1.5.3
+# The stable DuckDB C API version: the extension metadata records it, the vendored
+# duckdb_capi/ headers come from this tag (`make update_duckdb_headers`), and DuckDB
+# releases before it refuse to load the extension. v1.5.6 is the last version of the v1
+# C API. Take the headers from this tag and no later one: the v2.0.0 header adds
+# duckdb_create_timestamp_tz_ns and duckdb_get_timestamp_tz_ns under its 1.5.6 guard,
+# which DuckDB 1.5.6 does not provide.
+TARGET_DUCKDB_VERSION=v1.5.6
 
 # -----------------------------------------------------------------------------
 # Platform overrides
@@ -200,6 +202,7 @@ test-duckdb-v2: release test-sql-lambda-syntax
 	.pi/duckdb-v2-venv/bin/python test/scripts/test_duckdb_v2.py
 ifneq ($(filter linux_%,$(or $(DUCKDB_PLATFORM),$(shell sed -n '1p' configure/platform.txt 2>/dev/null))),)
 test_release: test-reader-alloc test-cigar-reserve-alloc test-extension-init test-named-attribute-columns test-extension-symbols
+test_release: test-duckdb-file-system
 test_release: test-error-handling test-fasta-nuc-alloc test-bam-open-error test-score-summary-errors
 endif
 
@@ -245,6 +248,12 @@ test-extension-symbols:
 			exit 1; \
 		fi; \
 		DUCKHTS_TEST_PYTHON=$(PYTHON_VENV_BIN) bash test/scripts/htslib_binding_test.sh "$$extension"
+
+# read_bam through the DuckDB file system, against htslib's own file access.
+.PHONY: test-duckdb-file-system
+test-duckdb-file-system:
+	$(PYTHON_VENV_BIN) test/scripts/duckdb_fs_hfile_test.py \
+		--extension build/release/$(EXTENSION_NAME).duckdb_extension
 
 .PHONY: test-named-attribute-columns
 test-named-attribute-columns:
@@ -537,7 +546,7 @@ test-liftover-fuzz-debug:
 	fi
 
 test-sanitized-extension:
-	bash scripts/test_sanitized_extension.sh $${SANITIZER:-asan}
+	TARGET_DUCKDB_VERSION=$(TARGET_DUCKDB_VERSION) bash scripts/test_sanitized_extension.sh $${SANITIZER:-asan}
 
 test-sanitizers:
 	$(MAKE) test-sanitized-extension SANITIZER=asan
@@ -594,11 +603,6 @@ test-sqllogictest-release: check_configure test-sqllogictest-runner
 			--test-dir test/sql \
 			--external-extension build/release/$(EXTENSION_NAME).duckdb_extension; \
 	fi
-
-# Override header fetch to use the actual DuckDB release version, not the C API version
-update_duckdb_headers_custom:
-	$(PYTHON_VENV_BIN) -c "import urllib.request;urllib.request.urlretrieve('https://raw.githubusercontent.com/duckdb/duckdb/$(DUCKDB_HEADER_VERSION)/src/include/duckdb.h', 'duckdb_capi/duckdb.h')"
-	$(PYTHON_VENV_BIN) -c "import urllib.request;urllib.request.urlretrieve('https://raw.githubusercontent.com/duckdb/duckdb/$(DUCKDB_HEADER_VERSION)/src/include/duckdb_extension.h', 'duckdb_capi/duckdb_extension.h')"
 
 clean: clean_build clean_cmake
 clean_all: clean clean_configure

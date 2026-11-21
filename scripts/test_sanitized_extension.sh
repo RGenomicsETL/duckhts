@@ -16,6 +16,17 @@ case "$sanitizer" in
   *) echo "usage: $0 {asan|ubsan}" >&2; exit 2 ;;
 esac
 
+# The C API version comes from the Makefile's TARGET_DUCKDB_VERSION, for
+# example v1.5.6; `make test-sanitized-extension` passes it.
+target=${TARGET_DUCKDB_VERSION:?set TARGET_DUCKDB_VERSION, or run make test-sanitized-extension}
+if [[ ! $target =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+  echo "TARGET_DUCKDB_VERSION must look like v1.5.6, not '$target'" >&2
+  exit 2
+fi
+target_major=${BASH_REMATCH[1]}
+target_minor=${BASH_REMATCH[2]}
+target_patch=${BASH_REMATCH[3]}
+
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 build_dir="cmake_build/sanitizer-$sanitizer"
@@ -23,9 +34,9 @@ out_dir="build/sanitizer-$sanitizer"
 rm -rf "$build_dir" "$out_dir"
 cmake -S . -B "$build_dir" \
   -DEXTENSION_NAME=duckhts \
-  -DTARGET_DUCKDB_VERSION_MAJOR=1 \
-  -DTARGET_DUCKDB_VERSION_MINOR=2 \
-  -DTARGET_DUCKDB_VERSION_PATCH=0 \
+  -DTARGET_DUCKDB_VERSION_MAJOR="$target_major" \
+  -DTARGET_DUCKDB_VERSION_MINOR="$target_minor" \
+  -DTARGET_DUCKDB_VERSION_PATCH="$target_patch" \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_C_FLAGS="${compile_flags[*]}" \
   -DCMAKE_SHARED_LINKER_FLAGS="${link_flags[*]}"
@@ -35,7 +46,7 @@ cp "$build_dir/libduckhts.so" "$out_dir/libduckhts.so"
 ./configure/venv/bin/python3 extension-ci-tools/scripts/append_extension_metadata.py \
   -l "$out_dir/libduckhts.so" \
   -o "$out_dir/duckhts.duckdb_extension" \
-  -n duckhts -dv v1.2.0 \
+  -n duckhts -dv "$target" \
   -evf configure/extension_version.txt -pf configure/platform.txt
 
 tmp=$(mktemp -d)

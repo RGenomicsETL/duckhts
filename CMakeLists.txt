@@ -36,20 +36,32 @@ if(APPLE)
     endif()
 endif()
 
-# Avoid "manually-specified variables were not used" warnings when the
-# CI passes TARGET_DUCKDB_VERSION_* for header fetching but the stable API
-# path doesn't consume them.
-if(DEFINED TARGET_DUCKDB_VERSION_MAJOR OR DEFINED TARGET_DUCKDB_VERSION_MINOR OR DEFINED TARGET_DUCKDB_VERSION_PATCH)
-    set(_duckdb_target_release_version
-        "${TARGET_DUCKDB_VERSION_MAJOR}.${TARGET_DUCKDB_VERSION_MINOR}.${TARGET_DUCKDB_VERSION_PATCH}"
-        CACHE INTERNAL "DuckDB release version passed by CI"
-    )
+# A stable-API build declares one C API version in two places: the vendored
+# duckdb_extension.h compiles its default into the entrypoint, which requests
+# that version from DuckDB at load, and the Makefile's TARGET_DUCKDB_VERSION is
+# written to the metadata footer, which DuckDB checks before it calls the
+# entrypoint. Refuse to configure when the two differ.
+if(DEFINED TARGET_DUCKDB_VERSION_MAJOR AND NOT DEFINED DUCKDB_EXTENSION_API_VERSION_UNSTABLE)
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/duckdb_capi/duckdb_extension.h" _duckdb_header_version_lines
+        REGEX "^#define DUCKDB_EXTENSION_API_VERSION_(MAJOR|MINOR|PATCH) [0-9]+$")
+    list(LENGTH _duckdb_header_version_lines _duckdb_header_version_line_count)
+    if(NOT _duckdb_header_version_line_count EQUAL 3)
+        message(FATAL_ERROR "duckdb_capi/duckdb_extension.h must define one default C API version")
+    endif()
+    list(JOIN _duckdb_header_version_lines " " _duckdb_header_version_text)
+    string(REGEX REPLACE "[^0-9]+" ";" _duckdb_header_version "${_duckdb_header_version_text}")
+    list(FILTER _duckdb_header_version EXCLUDE REGEX "^$")
+    list(JOIN _duckdb_header_version "." _duckdb_header_version)
+    set(_duckdb_target_version
+        "${TARGET_DUCKDB_VERSION_MAJOR}.${TARGET_DUCKDB_VERSION_MINOR}.${TARGET_DUCKDB_VERSION_PATCH}")
+    if(NOT _duckdb_header_version STREQUAL _duckdb_target_version)
+        message(FATAL_ERROR
+            "TARGET_DUCKDB_VERSION is v${_duckdb_target_version}, but duckdb_capi/duckdb_extension.h "
+            "defaults to C API v${_duckdb_header_version}")
+    endif()
 endif()
 
-# Only override the C API version when building with the unstable API.
-# For stable API builds, the header's own defaults (currently v1.2.0) are correct.
-# TARGET_DUCKDB_VERSION_* is the DuckDB *release* version (for header fetching),
-# which is different from the C extension API version.
+# The unstable API takes its version from the build instead of the header default.
 if (DEFINED DUCKDB_EXTENSION_API_VERSION_UNSTABLE)
     add_definitions(-DDUCKDB_EXTENSION_API_VERSION_UNSTABLE=${DUCKDB_EXTENSION_API_VERSION_UNSTABLE})
     if (DEFINED TARGET_DUCKDB_VERSION_MAJOR)

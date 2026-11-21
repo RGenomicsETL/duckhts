@@ -46,7 +46,7 @@ def _extension(platform: str, version: str = VERSION) -> bytes:
             _field(""),
             _field("C_STRUCT"),
             _field(version),
-            _field("v1.2.0"),
+            _field("v1.5.6"),
             _field(platform),
             _field("4"),
             b"\0" * 256,

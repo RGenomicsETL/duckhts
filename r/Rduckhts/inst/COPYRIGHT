@@ -162,9 +162,8 @@ DuckDB C extension API headers
 	License: MIT
 	Reference: inst/duckhts_extension/duckdb_capi/LICENSE (text reproduced below)
 	Note: The headers are generated from DuckDB and carry no per-file copyright notice. They are
-	DuckDB C API headers refreshed to v1.5.3 with one local patch
-	(inst/patches/duckdb_capi_strict_prototypes.patch, C prototypes only). DuckDB's
-	MIT licence applies to them; its text, taken from the DuckDB v1.5.3 LICENSE file, is:
+	DuckDB C API headers taken unmodified from DuckDB v1.5.6. DuckDB's MIT licence
+	applies to them; its text, taken from the DuckDB v1.5.6 LICENSE file, is:
 
 	Copyright 2018-2025 Stichting DuckDB Foundation
 

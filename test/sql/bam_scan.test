@@ -1138,3 +1138,42 @@ SELECT
   (SELECT * FROM (SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', scan_mode := 'sequential', decompression_threads := 0) WHERE true) EXCEPT ALL SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam', index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_all_unplaced.bam.legacy.csi', region := '.', decompression_threads := 0))));
 ----
 2053	2053	0
+
+# duckhts_file_system selects who reads the file: htslib itself (the default)
+# or the DuckDB file system of the connection.
+query T
+SELECT current_setting('duckhts_file_system');
+----
+htslib
+
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query II
+SELECT count(*), count(DISTINCT RNAME)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam');
+----
+5	3
+
+query I
+SELECT count(*)
+FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram',
+              index_path := '__WORKING_DIRECTORY__/test/data/bam_scan_mixed.cram.crai');
+----
+5
+
+statement error
+SELECT * FROM read_bam('test/data/bam_open_error_missing.bam');
+----
+read_bam: failed to open SAM/BAM/CRAM file: test/data/bam_open_error_missing.bam (
+
+statement ok
+SET duckhts_file_system = 'tabix';
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam');
+----
+read_bam: duckhts_file_system must be 'htslib' or 'duckdb'
+
+statement ok
+RESET duckhts_file_system;

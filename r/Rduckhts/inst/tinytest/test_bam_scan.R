@@ -152,3 +152,35 @@ test_bam_full_scan()
 test_bam_row_estimate()
 test_bam_index_without_statistics()
 test_bam_special_region_items()
+
+# SET duckhts_file_system = 'duckdb' reads through the DuckDB file system of
+# the connection; htslib's own file access is the oracle.
+test_bam_duckdb_file_system <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  expect_identical(dbGetQuery(con, "SELECT current_setting('duckhts_file_system') AS v")$v, "htslib")
+  scan <- function(path, region = NULL) {
+    arguments <- dbQuoteString(con, path)
+    if (!is.null(region)) arguments <- paste0(arguments, ", region := ", dbQuoteString(con, region))
+    dbGetQuery(con, sprintf(
+      "SELECT QNAME, FLAG, RNAME, POS, CIGAR, SEQ, QUAL FROM read_bam(%s) ORDER BY ALL", arguments))
+  }
+  bam <- system.file("extdata", "bam_scan_mixed.bam", package = "Rduckhts")
+  cram <- system.file("extdata", "bam_scan_mixed.cram", package = "Rduckhts")
+  expect_true(nzchar(bam) && nzchar(cram))
+  expected <- list(bam = scan(bam), region = scan(bam, "chr1"), cram = scan(cram))
+  expect_equal(nrow(expected$bam), 5L)
+  expect_equal(nrow(expected$region), 2L)
+
+  dbExecute(con, "SET duckhts_file_system = 'duckdb'")
+  expect_equal(scan(bam), expected$bam)
+  expect_equal(scan(bam, "chr1"), expected$region)
+  expect_equal(scan(cram), expected$cram)
+  missing <- file.path(tempdir(), "duckhts_missing.bam")
+  expect_error(scan(missing), "No such file or directory", fixed = TRUE)
+
+  dbExecute(con, "SET duckhts_file_system = 'tabix'")
+  expect_error(scan(bam), "duckhts_file_system must be 'htslib' or 'duckdb'", fixed = TRUE)
+}
+
+test_bam_duckdb_file_system()

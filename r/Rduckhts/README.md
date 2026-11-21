@@ -36,7 +36,7 @@ install.packages("Rduckhts", repos = c("https://rgenomicsetl.r-universe.dev",
                                        "https://cloud.r-project.org"))
 ```
 
-Rduckhts needs the `duckdb` R package, version 1.5.0 or newer.
+Rduckhts needs the `duckdb` R package, version 1.5.6 or newer.
 
 With `duckdb` 1.5.x, two DuckDB bugs affect `rduckhts_roh()`,
 `rduckhts_roh_counts()`, `rduckhts_count_error_fit()` and

@@ -574,6 +574,10 @@ A CRAM scan asks htslib only for the fields its projected columns need, and ever
 
 With decompression_threads > 0, a CRAM scan that projects tag data keeps htslib's spare record buffers, which only grow: memory rises with the alignments read, toward (2 x decompression_threads + 1) slices x about 10,000 records x the largest record. A CRAM scan that decodes SEQ and QUAL with decompression_threads > 0 loads the whole reference sequence of each contig it reads. decompression_threads := 0 avoids both.
 
+### File access
+
+By default htslib opens the file, its index and the CRAM reference with its own file access. After SET duckhts_file_system = 'duckdb', read_bam reads the alignment file and its index through the DuckDB file system of the connection, so DuckDB secrets, settings such as enable_external_access, httpfs and registered file systems apply, and an open error ends with DuckDB's reason. That route is read-only and reads the CRAM reference through htslib. Without index_path it looks for the index beside the file only: .csi then .bai for BAM and SAM, each appended to the name and then in place of its extension, and .crai appended for CRAM; it does not look in the working directory or save a copy of a remote index there. Any other value of the setting is a bind error. Other readers ignore the setting.
+
 ### Examples
 
 ```sql

@@ -18,7 +18,7 @@ class ExtensionInitialization(unittest.TestCase):
             load = "LOAD '" + str(args.extension).replace("'", "''") + "'"
             if args.expect == "unsupported":
                 with self.assertRaisesRegex(
-                    duckdb.Error, "DuckHTS requires DuckDB 1.5.0 or newer"
+                    duckdb.Error, r"built for DuckDB C API version 'v1\.5\.6'"
                 ) as failure:
                     connection.execute(load)
                 self.assertNotIsInstance(failure.exception, duckdb.FatalException)
@@ -71,6 +71,8 @@ class ExtensionInitialization(unittest.TestCase):
             )
 
     def test_sql_registration_failure_preserves_cause_and_connection(self):
+        if args.expect == "unsupported":
+            self.skipTest("the failure extension needs an admitted DuckDB runtime")
         with duckdb.connect(config={"allow_unsigned_extensions": "true"}) as connection:
             load = "LOAD '" + str(args.failure_extension).replace("'", "''") + "'"
             with self.assertRaisesRegex(
