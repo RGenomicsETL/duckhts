@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">Rduckhts</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.2.9000.0.1.1</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2.0.2.9001.0.1.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -39,7 +39,9 @@
 
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="development version" id="rduckhts-development-version">Rduckhts (development version)<a class="anchor" aria-label="anchor" href="#rduckhts-development-version"></a></h2>
-<ul><li><p><code>rduckhts_functions()$returns</code> lists the fields and types for twelve STRUCT-returning scalar and aggregate functions, such as <code>duckhts_fastq_qc</code> and <code>sam_flag_bits</code>. The package tests check each scalar and aggregate return type against the loaded extension.</p></li>
+<ul><li><p><code>read_bam</code>, and so <code><a href="../reference/rduckhts_bam.html">rduckhts_bam()</a></code>, can read through the DuckDB file system: run <code>DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")</code> first. DuckDB secrets and file-access settings then apply to the alignment file and its index. The default, <code>'htslib'</code>, keeps htslib’s own file access.</p></li>
+<li><p><strong>The <code>duckdb</code> R package 1.5.6 or newer is required</strong> (<code>Imports: duckdb (&gt;= 1.5.6)</code>). The bundled extension is built for the stable DuckDB C API v1.5.6, and an older DuckDB refuses to load it. The bundled DuckDB C API headers are the unmodified v1.5.6 ones.</p></li>
+<li><p><code>rduckhts_functions()$returns</code> lists the fields and types for twelve STRUCT-returning scalar and aggregate functions, such as <code>duckhts_fastq_qc</code> and <code>sam_flag_bits</code>. The package tests check each scalar and aggregate return type against the loaded extension.</p></li>
 <li><p>The bundled function reference corrects seven entries against the extension source: <code>read_bed</code> track and browser line skipping, <code>duckhts_roh</code> ALT selection, the <code>bcf_index</code> <code>min_shift</code> default, <code>read_genbank</code> gene IDs and percent-encoding, the <code>duckhts_depth_bins</code> scale, and VariantKey codes for <code>XT</code> and <code>YT</code>.</p></li>
 <li><p><code><a href="../reference/duckdb_type_mappings.html">?duckdb_type_mappings</a></code> describes what <code>duckdb</code> returns: DATE, TIMESTAMP and TIME columns are double vectors of class <code>Date</code>, <code>POSIXct</code> and <code>difftime</code>, and a MAP column is a list with one key/value data frame per row. The returned mappings are unchanged. <code><a href="../reference/detect_complex_types.html">?detect_complex_types</a></code>, <code><a href="../reference/extract_array_element.html">?extract_array_element</a></code> and <code><a href="../reference/extract_map_data.html">?extract_map_data</a></code> use the same description. <code><a href="../reference/rduckhts_mosdepth.html">?rduckhts_mosdepth</a></code> and the bundled <code>duckhts_mosdepth</code> catalog entry state that <code>processing_threads</code> of 0 or 1 processes contigs sequentially.</p></li>
 <li><p><code>read_bed</code>, and so <code><a href="../reference/rduckhts_bed.html">rduckhts_bed()</a></code>, splits each line at its tabs once and parses integer fields in place. Rows, NULLs and errors are unchanged. Integer fields follow <code>strtoll()</code> rules for the C locale whatever the locale of the R session.</p></li>

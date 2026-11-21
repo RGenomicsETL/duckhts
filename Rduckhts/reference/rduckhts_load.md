@@ -28,8 +28,10 @@ rduckhts_load(con, extension_path = NULL)
 
 ## Details
 
-DuckDB 1.5.0 or newer is required. SQL registration errors retain the
-underlying DuckDB diagnostic in the initialization error.
+DuckDB 1.5.6 or newer is required: the extension is built for the DuckDB
+C API version 1.5.6, and an older DuckDB refuses to load it. SQL
+registration errors retain the underlying DuckDB diagnostic in the
+initialization error.
 
 The connection must permit unsigned extension loading. With current
 versions of the duckdb R package, its driver must also permit extension

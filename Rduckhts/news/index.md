@@ -2,6 +2,19 @@
 
 ## Rduckhts (development version)
 
+- `read_bam`, and so
+  [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md),
+  can read through the DuckDB file system: run
+  `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")` first.
+  DuckDB secrets and file-access settings then apply to the alignment
+  file and its index. The default, `'htslib'`, keeps htslib’s own file
+  access.
+
+- **The `duckdb` R package 1.5.6 or newer is required**
+  (`Imports: duckdb (>= 1.5.6)`). The bundled extension is built for the
+  stable DuckDB C API v1.5.6, and an older DuckDB refuses to load it.
+  The bundled DuckDB C API headers are the unmodified v1.5.6 ones.
+
 - `rduckhts_functions()$returns` lists the fields and types for twelve
   STRUCT-returning scalar and aggregate functions, such as
   `duckhts_fastq_qc` and `sam_flag_bits`. The package tests check each

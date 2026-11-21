@@ -102,6 +102,16 @@ rduckhts_bam(
 
 Invisible TRUE on success
 
+## Details
+
+After `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")`,
+`read_bam` reads the file and its index through the DuckDB file system
+of the connection, so DuckDB secrets and file-access settings apply. The
+default, `'htslib'`, keeps htslib's own file access. "File access" under
+`read_bam` in the bundled reference,
+`system.file("function_catalog", "reference.md", package = "Rduckhts")`,
+gives the index lookup rule of that route.
+
 ## Examples
 
 ``` r
