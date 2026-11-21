@@ -402,7 +402,7 @@ test_munge_duckdb_file_system <- function() {
 
   dbExecute(con, "SET duckhts_file_system = 'duckdb'")
   expect_equal(munge(fasta_ref), expected)
-  expect_error(munge(unindexed), "No such file or directory", fixed = TRUE)
+  expect_error(munge(unindexed), "Cannot open file", fixed = TRUE)
   expect_error(
     munge(file.path(directory, "absent.fa")),
     "bcftools_munge_row: failed to load FASTA index",

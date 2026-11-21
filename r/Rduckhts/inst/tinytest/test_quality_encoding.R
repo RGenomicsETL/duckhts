@@ -134,7 +134,7 @@ test_quality_encoding_duckdb_file_system <- function() {
   missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
   expect_error(
     digest(sprintf("SELECT * FROM detect_quality_encoding(%s)", missing)),
-    "No such file or directory",
+    "Cannot open file",
     fixed = TRUE
   )
 }

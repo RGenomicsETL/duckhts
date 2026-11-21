@@ -96,7 +96,7 @@ test_gff_duckdb_file_system <- function() {
   missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
   expect_error(
     digest(sprintf("SELECT * FROM read_gff(%s)", missing)),
-    "No such file or directory",
+    "Cannot open file",
     fixed = TRUE
   )
 }

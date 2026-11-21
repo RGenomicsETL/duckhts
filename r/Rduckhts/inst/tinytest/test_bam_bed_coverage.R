@@ -132,7 +132,7 @@ test_bam_bed_coverage_duckdb_file_system <- function() {
   missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
   expect_error(
     digest(sprintf("SELECT * FROM duckhts_bam_bed_coverage(%s, 'unused.bed')", missing)),
-    "No such file or directory",
+    "Cannot open file",
     fixed = TRUE
   )
 }

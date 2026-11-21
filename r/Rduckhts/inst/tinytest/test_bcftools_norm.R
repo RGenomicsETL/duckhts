@@ -602,7 +602,7 @@ test_bcftools_norm_duckdb_file_system <- function() {
   )
   expect_error(
     rduckhts_bcftools_norm(con, "norm_routes", unindexed),
-    "No such file or directory",
+    "Cannot open file",
     fixed = TRUE
   )
   expect_identical(list.files(directory), "unindexed.fa")

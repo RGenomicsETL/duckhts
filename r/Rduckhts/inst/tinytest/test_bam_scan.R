@@ -177,7 +177,7 @@ test_bam_duckdb_file_system <- function() {
   expect_equal(scan(bam, "chr1"), expected$region)
   expect_equal(scan(cram), expected$cram)
   missing <- file.path(tempdir(), "duckhts_missing.bam")
-  expect_error(scan(missing), "No such file or directory", fixed = TRUE)
+  expect_error(scan(missing), "Cannot open file", fixed = TRUE)
 
   dbExecute(con, "SET duckhts_file_system = 'tabix'")
   expect_error(scan(bam), "duckhts_file_system must be 'htslib' or 'duckdb'", fixed = TRUE)
