@@ -184,7 +184,24 @@ class DuckdbFileSystemRoute(unittest.TestCase):
                     self.assertEqual(outcome(routed, copy, options), expected)
                     (directory / name).unlink()
 
-    def test_http_secret_reaches_htslib_reads(self):
+    def test_remote_block_size_default_and_bounds(self):
+        with connect() as connection:
+            default = connection.execute("SELECT current_setting('duckhts_remote_block_size')").fetchone()[0]
+            self.assertEqual(default, 0)
+            for invalid in (-1, 1, 131071, 268435457):
+                with self.subTest(invalid=invalid):
+                    connection.execute(f"SET duckhts_remote_block_size = {invalid}")
+                    with self.assertRaisesRegex(
+                        duckdb.Error,
+                        "read_bam: duckhts_remote_block_size must be 0 or between 131072 and 268435456 bytes",
+                    ):
+                        connection.execute(ROW_DIGEST.format(options=""), [str(INDEXED)])
+            for valid in (0, 131072, 268435456):
+                with self.subTest(valid=valid):
+                    connection.execute(f"SET duckhts_remote_block_size = {valid}")
+                    self.assertIsInstance(outcome(connection, INDEXED), tuple)
+
+    def test_http_block_sizes_and_secret(self):
         with connect("duckdb") as routed:
             try:
                 routed.execute("LOAD httpfs")
@@ -203,6 +220,16 @@ class DuckdbFileSystemRoute(unittest.TestCase):
                 routed.execute("LOAD httpfs")
                 open_url = base + "/" + INDEXED.name
                 self.assertEqual((outcome(routed, open_url), outcome(routed, open_url, options)), expected)
+                # A block size changes how the bytes are fetched, never the rows.
+                for file_system in ("htslib", "duckdb"):
+                    routed.execute("SET duckhts_file_system = '" + file_system + "'")
+                    for block_size in (131072, 4194304):
+                        with self.subTest(file_system=file_system, block_size=block_size):
+                            routed.execute(f"SET duckhts_remote_block_size = {block_size}")
+                            self.assertEqual(
+                                (outcome(routed, open_url), outcome(routed, open_url, options)), expected
+                            )
+                routed.execute("RESET duckhts_remote_block_size")
                 protected = base + "/protected/" + INDEXED.name
                 with self.assertRaisesRegex(duckdb.Error, "403"):
                     routed.execute(ROW_DIGEST.format(options=""), [protected])

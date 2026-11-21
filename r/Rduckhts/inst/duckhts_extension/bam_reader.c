@@ -208,6 +208,8 @@ typedef struct {
     duckhts_fs_route_t *route;
     char *open_path;
     char *open_index_path;
+    /* duckhts_remote_block_size of the binding connection; 0 is automatic. */
+    int remote_block_size;
 
     /* Parsed from the "region" named parameter.
      * May contain comma-separated multi-region specs. */
@@ -730,7 +732,9 @@ static void bam_read_bind(duckdb_bind_info info) {
     duckhts_fs_route_t *route = NULL;
     char *open_path = NULL;
     char *open_index_path = NULL;
-    bool names_ready = duckhts_fs_route_bind(info, "read_bam", &route);
+    int remote_block_size = 0;
+    bool names_ready = duckhts_remote_block_size_bind(info, "read_bam", &remote_block_size) &&
+                       duckhts_fs_route_bind(info, "read_bam", &route);
     if (names_ready) {
         open_path = duckhts_fs_route_path(route, file_path);
         open_index_path = duckhts_fs_route_path(route, index_path);
@@ -795,6 +799,7 @@ static void bam_read_bind(duckdb_bind_info info) {
         return;
     }
     bind->route = route;
+    bind->remote_block_size = remote_block_size;
     bind->open_path = open_path;
     bind->open_index_path = open_index_path;
     bind->file_path = file_path;
@@ -1296,6 +1301,7 @@ static void bam_read_local_init(duckdb_init_info info) {
             ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
             : DUCKHTS_HTS_IO_PROFILE_STREAMING
     );
+    duckhts_apply_remote_block_size(local->fp, bind->file_path, bind->remote_block_size);
 
     if (bind->reference) {
         if (hts_set_opt(local->fp, CRAM_OPT_REFERENCE, bind->reference) < 0) {

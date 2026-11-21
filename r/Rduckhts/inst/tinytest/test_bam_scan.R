@@ -184,3 +184,21 @@ test_bam_duckdb_file_system <- function() {
 }
 
 test_bam_duckdb_file_system()
+
+# duckhts_remote_block_size is checked when read_bam binds.
+test_bam_remote_block_size <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE))
+  bam <- system.file("extdata", "bam_scan_mixed.bam", package = "Rduckhts")
+  count <- function() {
+    dbGetQuery(con, sprintf("SELECT count(*) AS n FROM read_bam(%s)", dbQuoteString(con, bam)))$n
+  }
+  expect_equal(dbGetQuery(con, "SELECT current_setting('duckhts_remote_block_size') AS v")$v, 0)
+  dbExecute(con, "SET duckhts_remote_block_size = 4194304")
+  expect_equal(count(), 5)
+  dbExecute(con, "SET duckhts_remote_block_size = 1000")
+  expect_error(count(), "duckhts_remote_block_size must be 0 or between 131072 and 268435456 bytes",
+               fixed = TRUE)
+}
+
+test_bam_remote_block_size()

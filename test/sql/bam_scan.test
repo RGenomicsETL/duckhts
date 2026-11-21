@@ -1177,3 +1177,28 @@ read_bam: duckhts_file_system must be 'htslib' or 'duckdb'
 
 statement ok
 RESET duckhts_file_system;
+
+# duckhts_remote_block_size is checked when read_bam binds; 0 is the automatic size.
+query I
+SELECT current_setting('duckhts_remote_block_size');
+----
+0
+
+statement ok
+SET duckhts_remote_block_size = 4194304;
+
+query I
+SELECT count(*) FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam');
+----
+5
+
+statement ok
+SET duckhts_remote_block_size = 1000;
+
+statement error
+SELECT * FROM read_bam('__WORKING_DIRECTORY__/test/data/bam_scan_mixed.bam');
+----
+read_bam: duckhts_remote_block_size must be 0 or between 131072 and 268435456 bytes
+
+statement ok
+RESET duckhts_remote_block_size;

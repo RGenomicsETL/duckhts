@@ -1,5 +1,8 @@
 # Rduckhts (development version)
 
+- `DBI::dbExecute(con, "SET duckhts_remote_block_size = 4194304")` sets the bytes htslib
+  asks for in each read of a remote file in `read_bam`; the default, 0, keeps the size
+  DuckHTS chooses.
 - `read_bam`, and so `rduckhts_bam()`, can read through the DuckDB file system: run
   `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")` first. DuckDB secrets and
   file-access settings then apply to the alignment file and its index. The default,

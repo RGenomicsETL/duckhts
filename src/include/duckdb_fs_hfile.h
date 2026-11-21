@@ -25,6 +25,15 @@
 #include "duckdb_extension.h"
 
 #define DUCKHTS_FILE_SYSTEM_OPTION "duckhts_file_system"
+#define DUCKHTS_REMOTE_BLOCK_SIZE_OPTION "duckhts_remote_block_size"
+
+/*
+ * Bounds of a remote block size in bytes. htslib opens every file with a
+ * 128 KiB block and cannot shrink a block that already holds data, so a
+ * smaller value would have no effect. Each open handle allocates one block.
+ */
+#define DUCKHTS_REMOTE_BLOCK_SIZE_MIN (128 * 1024)
+#define DUCKHTS_REMOTE_BLOCK_SIZE_MAX (256 * 1024 * 1024)
 
 typedef struct duckhts_fs_route duckhts_fs_route_t;
 
@@ -35,11 +44,26 @@ typedef struct duckhts_fs_route duckhts_fs_route_t;
 bool register_duckdb_fs_hfile_backend(void);
 
 /*
- * Registers the duckhts_file_system setting: 'htslib' (the default) keeps
- * htslib's own file access, 'duckdb' routes reads through the DuckDB file
- * system. Returns false when DuckDB rejects the registration.
+ * Registers the two file-access settings. Returns false when DuckDB rejects
+ * a registration.
+ *
+ * duckhts_file_system: 'htslib' (the default) keeps htslib's own file
+ * access, 'duckdb' routes reads through the DuckDB file system.
+ *
+ * duckhts_remote_block_size: the size in bytes of each read htslib asks its
+ * file backend for on a remote file. 0 (the default) keeps the size DuckHTS
+ * chooses for the scan (hts_io_tuning.h).
  */
-bool duckhts_register_file_system_option(duckdb_connection connection);
+bool duckhts_register_file_access_options(duckdb_connection connection);
+
+/*
+ * Reads the duckhts_remote_block_size setting of the binding connection into
+ * *block_size; 0 means the automatic size. On a value outside
+ * [DUCKHTS_REMOTE_BLOCK_SIZE_MIN, DUCKHTS_REMOTE_BLOCK_SIZE_MAX] other than 0
+ * it sets the bind error, prefixed with function_name, and returns false.
+ */
+bool duckhts_remote_block_size_bind(duckdb_bind_info info, const char *function_name,
+                                    int *block_size);
 
 /*
  * Reads the duckhts_file_system setting of the binding connection. Sets
