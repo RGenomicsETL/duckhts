@@ -23,10 +23,11 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kstring.h>
 #include <htslib/sam.h>
 
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 
 typedef struct {
     char *file_path;
+    duckhts_file_access_t *access;
     char *index_path;
     char *region;
     int min_mapq;
@@ -66,6 +67,7 @@ static void destroy_bam_pileup_bind(void *ptr) {
     bam_pileup_bind_data_t *bind = (bam_pileup_bind_data_t *)ptr;
     if (!bind) return;
     if (bind->file_path) duckdb_free(bind->file_path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->region) duckdb_free(bind->region);
     duckdb_free(bind);
@@ -88,6 +90,10 @@ static void bam_pileup_bind(duckdb_bind_info info) {
     bam_pileup_bind_data_t *bind = (bam_pileup_bind_data_t *)duckdb_malloc(sizeof(*bind));
     memset(bind, 0, sizeof(*bind));
     bind->flag_mask = 1796;
+    if (!duckhts_file_access_bind(info, "read_pileup", &bind->access)) {
+        destroy_bam_pileup_bind(bind);
+        return;
+    }
 
     duckdb_value file_val = duckdb_bind_get_parameter(info, 0);
     if (!file_val) {
@@ -173,9 +179,13 @@ static void bam_pileup_local_init(duckdb_init_info info) {
     local->min_mapq = bind->min_mapq;
     local->flag_mask = bind->flag_mask;
 
-    local->fp = sam_open(bind->file_path, "r");
+    local->fp = duckhts_file_access_open(bind->access, bind->file_path,
+                                         DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (!local->fp) {
-        duckdb_init_set_error(info, "read_pileup: failed to open BAM");
+        char message[640];
+        snprintf(message, sizeof(message), "read_pileup: failed to open BAM%s",
+                 duckhts_file_access_reason(bind->access, bind->file_path));
+        duckdb_init_set_error(info, message);
         destroy_bam_pileup_local(local);
         return;
     }
@@ -187,8 +197,6 @@ static void bam_pileup_local_init(duckdb_init_info info) {
         destroy_bam_pileup_local(local);
         return;
     }
-    duckhts_apply_remote_hts_tuning(local->fp, bind->file_path,
-                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     (void)hts_set_threads(local->fp, 2);
 
     local->hdr = sam_hdr_read(local->fp);
@@ -198,7 +206,7 @@ static void bam_pileup_local_init(duckdb_init_info info) {
         return;
     }
 
-    local->idx = sam_index_load3(local->fp, bind->file_path, bind->index_path,
+    local->idx = duckhts_file_access_sam_index_load(bind->access, local->fp, bind->file_path, bind->index_path,
                                  HTS_IDX_SILENT_FAIL);
     if (!local->idx) {
         duckdb_init_set_error(info,

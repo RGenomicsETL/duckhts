@@ -16,6 +16,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "htslib/faidx.h"
 
 #include "include/duckdb_map.h"
+#include "include/hts_file_access.h"
 
 // ===============================
 // Helpers
@@ -86,6 +87,7 @@ static hts_header_mode_t parse_header_mode(const char *s) {
 
 typedef struct {
     char *file_path;
+    duckhts_file_access_t *access;
     char *format_hint;
     char *index_path;
     hts_header_mode_t mode;
@@ -95,6 +97,7 @@ static void destroy_hts_meta_options(void *data) {
     hts_meta_options_t *options = data;
     if (!options) return;
     duckdb_free(options->file_path);
+    duckhts_file_access_destroy(options->access);
     duckdb_free(options->format_hint);
     duckdb_free(options->index_path);
     free(options);
@@ -111,6 +114,10 @@ static hts_meta_options_t *bind_hts_meta_options(duckdb_bind_info info, int head
     duckdb_destroy_value(&value);
     if (!options->file_path || !*options->file_path) {
         duckdb_bind_set_error(info, "HTS metadata reader requires a file path");
+        destroy_hts_meta_options(options);
+        return NULL;
+    }
+    if (!duckhts_file_access_bind(info, header ? "read_hts_header" : "read_hts_index", &options->access)) {
         destroy_hts_meta_options(options);
         return NULL;
     }
@@ -164,9 +171,9 @@ static hts_kind_t kind_from_hts_format(const htsFormat *fmt) {
     }
 }
 
-static int has_tabix_index(const char *path) {
+static int has_tabix_index(const duckhts_file_access_t *access, const char *path) {
     if (!path || !*path) return 0;
-    tbx_t *tbx = tbx_index_load(path);
+    tbx_t *tbx = duckhts_file_access_tbx_index_load(access, path, NULL, HTS_IDX_SAVE_REMOTE);
     if (!tbx) return 0;
     tbx_destroy(tbx);
     return 1;
@@ -588,9 +595,13 @@ static void read_hts_header_init(duckdb_init_info info) {
     duckdb_init_set_init_data(info, data, destroy_hts_header_data);
     duckdb_init_set_max_threads(info, 1);
 
-    htsFile *fp = hts_open(options->file_path, "r");
+    htsFile *fp = duckhts_file_access_open(options->access, options->file_path,
+                                           DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        duckdb_init_set_error(info, "Failed to open file for header reading");
+        char message[640];
+        snprintf(message, sizeof(message), "Failed to open file for header reading%s",
+                 duckhts_file_access_reason(options->access, options->file_path));
+        duckdb_init_set_error(info, message);
         return;
     }
     const htsFormat *fmt = hts_get_format(fp);
@@ -607,7 +618,7 @@ static void read_hts_header_init(duckdb_init_info info) {
     hts_kind_t kind = (hint_kind == HTS_KIND_AUTO) ? kind_from_hts_format(fmt) : hint_kind;
     if (hint_kind == HTS_KIND_AUTO &&
         (kind == HTS_KIND_UNKNOWN || kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) &&
-        has_tabix_index(options->file_path)) {
+        has_tabix_index(options->access, options->file_path)) {
         kind = HTS_KIND_TABIX;
     }
     if (kind == HTS_KIND_VCF || kind == HTS_KIND_BCF) {
@@ -880,9 +891,12 @@ static void read_hts_index_init(duckdb_init_info info) {
     duckdb_init_set_init_data(info, bind, destroy_hts_index_data);
     duckdb_init_set_max_threads(info, 1);
 
-    htsFile *fp = hts_open(file_path, "r");
+    htsFile *fp = duckhts_file_access_open(options->access, file_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        duckdb_init_set_error(info, "Failed to open file for index reading");
+        char message[640];
+        snprintf(message, sizeof(message), "Failed to open file for index reading%s",
+                 duckhts_file_access_reason(options->access, file_path));
+        duckdb_init_set_error(info, message);
         return;
     }
 
@@ -903,7 +917,7 @@ static void read_hts_index_init(duckdb_init_info info) {
         }
 
         int flags = HTS_IDX_SILENT_FAIL;
-        hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, flags);
+        hts_idx_t *idx = duckhts_file_access_sam_index_load(options->access, fp, file_path, index_path, flags);
         if (!idx) {
             sam_hdr_destroy(hdr);
             hts_close(fp);
@@ -940,11 +954,11 @@ static void read_hts_index_init(duckdb_init_info info) {
         hts_idx_t *idx = NULL;
         tbx_t *tbx = NULL;
         if (kind == HTS_KIND_VCF) {
-            tbx = tbx_index_load3(file_path, index_path, flags);
+            tbx = duckhts_file_access_tbx_index_load(options->access, file_path, index_path, flags);
             if (tbx) idx = tbx->idx;
         }
         if (!idx) {
-            idx = bcf_index_load3(file_path, index_path, flags);
+            idx = duckhts_file_access_bcf_index_load(options->access, file_path, index_path, flags);
         }
         if (!idx) {
             bcf_hdr_destroy(hdr);
@@ -978,7 +992,7 @@ static void read_hts_index_init(duckdb_init_info info) {
         bcf_hdr_destroy(hdr);
     } else if (kind == HTS_KIND_TABIX) {
         int flags = HTS_IDX_SILENT_FAIL;
-        tbx_t *tbx = tbx_index_load3(file_path, index_path, flags);
+        tbx_t *tbx = duckhts_file_access_tbx_index_load(options->access, file_path, index_path, flags);
         if (!tbx) {
             hts_close(fp);
             duckdb_init_set_error(info, "Failed to load tabix index");
@@ -997,7 +1011,8 @@ static void read_hts_index_init(duckdb_init_info info) {
         tbx_destroy(tbx);
     } else if (kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) {
         enum fai_format_options ffmt = (kind == HTS_KIND_FASTQ) ? FAI_FASTQ : FAI_FASTA;
-        faidx_t *fai = fai_load3_format(file_path, index_path, NULL, 0, ffmt);
+        faidx_t *fai = duckhts_file_access_fai_load(options->access, file_path, index_path, NULL, 0, ffmt,
+                                                    DUCKHTS_HTS_IO_PROFILE_METADATA);
         if (!fai) {
             hts_close(fp);
             duckdb_init_set_error(info, "Failed to load FASTA/FASTQ index");
@@ -1341,9 +1356,12 @@ static void read_hts_index_spans_init(duckdb_init_info info) {
     duckdb_init_set_init_data(info, bind, destroy_hts_index_spans_data);
     duckdb_init_set_max_threads(info, 1);
 
-    htsFile *fp = hts_open(file_path, "r");
+    htsFile *fp = duckhts_file_access_open(options->access, file_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        duckdb_init_set_error(info, "Failed to open file for index reading");
+        char message[640];
+        snprintf(message, sizeof(message), "Failed to open file for index reading%s",
+                 duckhts_file_access_reason(options->access, file_path));
+        duckdb_init_set_error(info, message);
         return;
     }
 
@@ -1364,7 +1382,7 @@ static void read_hts_index_spans_init(duckdb_init_info info) {
         }
 
         int flags = HTS_IDX_SILENT_FAIL;
-        hts_idx_t *idx = sam_index_load3(fp, file_path, index_path, flags);
+        hts_idx_t *idx = duckhts_file_access_sam_index_load(options->access, fp, file_path, index_path, flags);
         if (!idx) {
             sam_hdr_destroy(hdr);
             hts_close(fp);
@@ -1403,10 +1421,10 @@ static void read_hts_index_spans_init(duckdb_init_info info) {
         hts_idx_t *idx = NULL;
         tbx_t *tbx = NULL;
         if (kind == HTS_KIND_VCF) {
-            tbx = tbx_index_load3(file_path, index_path, flags);
+            tbx = duckhts_file_access_tbx_index_load(options->access, file_path, index_path, flags);
             if (tbx) idx = tbx->idx;
         }
-        if (!idx) idx = bcf_index_load3(file_path, index_path, flags);
+        if (!idx) idx = duckhts_file_access_bcf_index_load(options->access, file_path, index_path, flags);
         if (!idx) {
             bcf_hdr_destroy(hdr);
             hts_close(fp);
@@ -1452,7 +1470,7 @@ static void read_hts_index_spans_init(duckdb_init_info info) {
         bcf_hdr_destroy(hdr);
     } else if (kind == HTS_KIND_TABIX) {
         int flags = HTS_IDX_SILENT_FAIL;
-        tbx_t *tbx = tbx_index_load3(file_path, index_path, flags);
+        tbx_t *tbx = duckhts_file_access_tbx_index_load(options->access, file_path, index_path, flags);
         if (!tbx) {
             hts_close(fp);
             duckdb_init_set_error(info, "Failed to load tabix index");
@@ -1474,7 +1492,8 @@ static void read_hts_index_spans_init(duckdb_init_info info) {
         tbx_destroy(tbx);
     } else if (kind == HTS_KIND_FASTA || kind == HTS_KIND_FASTQ) {
         enum fai_format_options ffmt = (kind == HTS_KIND_FASTQ) ? FAI_FASTQ : FAI_FASTA;
-        faidx_t *fai = fai_load3_format(file_path, index_path, NULL, 0, ffmt);
+        faidx_t *fai = duckhts_file_access_fai_load(options->access, file_path, index_path, NULL, 0, ffmt,
+                                                    DUCKHTS_HTS_IO_PROFILE_METADATA);
         if (!fai) {
             hts_close(fp);
             duckdb_init_set_error(info, "Failed to load FASTA/FASTQ index");

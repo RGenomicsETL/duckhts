@@ -840,3 +840,34 @@ test_liftover <- function() {
 }
 
 test_liftover()
+
+# The readers of this file through the DuckDB file system of the connection
+# (SET duckhts_file_system = 'duckdb'). htslib's own file access is the oracle:
+# the same relation must have the same row count and row hashes.
+test_liftover_duckdb_file_system <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  extdata <- function(name) {
+    dbQuoteString(con, system.file("extdata", name, package = "Rduckhts", mustWork = TRUE))
+  }
+  digest <- function(relation) {
+    dbGetQuery(con, sprintf(
+      "SELECT count(*) AS n, sum(hash(t))::VARCHAR AS row_hashes FROM (%s) t", relation))
+  }
+  relations <- c(
+    sprintf("SELECT bcftools_liftover('chr1', 5, 'A', 'C', %s, %s, %s, 1, 250, false, NULL::BIGINT, false) AS lifted", extdata("liftover_repeat.chain"), extdata("liftover_repeat_dst.fa"), extdata("liftover_repeat_src.fa"))
+  )
+  expected <- lapply(relations, digest)
+  for (rows in expected) expect_true(rows$n > 0)
+
+  dbExecute(con, "SET duckhts_file_system = 'duckdb'")
+  for (i in seq_along(relations)) expect_equal(digest(relations[[i]]), expected[[i]])
+  missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
+  expect_error(
+    digest(sprintf("SELECT bcftools_liftover('chr1', 5, 'A', 'C', %s, 'unused.fa', NULL, 1, 250, false, NULL::BIGINT, false) AS lifted", missing)),
+    "No such file or directory",
+    fixed = TRUE
+  )
+}
+
+test_liftover_duckdb_file_system()

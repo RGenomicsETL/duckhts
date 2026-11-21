@@ -160,6 +160,7 @@ test_debug test_release: test-function-catalog
 test_debug: test-cache-paths test-simd-kernels test-genbank-core test-liftover-property test-liftover-fuzz-debug test-sqllogictest-debug test-writer-no-clobber-debug
 test_release: test-cache-paths test-simd-kernels test-genbank-core test-genbank-oracle test-somalier-native test-bam-site-counts test-bam-partition test-liftover-property test-liftover-fuzz test-bcftools-filter-recovery test-sqllogictest-release test-bcf-info-oom test-hts-region-ownership test-writer-no-clobber-release test-macro-catalog test-database-lifetime
 test_release: test-reference-cache test-sql-lambda-syntax test-count-mixture-model test-bed-line
+test_release: test-file-access-guard
 
 .PHONY: test-bed-line
 test-bed-line:
@@ -194,6 +195,11 @@ test-database-lifetime:
 
 test-sql-lambda-syntax:
 	python3 test/scripts/check_sql_lambdas.py
+
+# No source outside src/hts_file_access.c opens an input with htslib directly.
+.PHONY: test-file-access-guard
+test-file-access-guard:
+	python3 test/scripts/check_file_access.py
 
 test-duckdb-v2: release test-sql-lambda-syntax
 	rm -rf .pi/duckdb-v2-venv
@@ -249,7 +255,7 @@ test-extension-symbols:
 		fi; \
 		DUCKHTS_TEST_PYTHON=$(PYTHON_VENV_BIN) bash test/scripts/htslib_binding_test.sh "$$extension"
 
-# read_bam through the DuckDB file system, against htslib's own file access.
+# Every reader through the DuckDB file system, against htslib's own file access.
 .PHONY: test-duckdb-file-system
 test-duckdb-file-system:
 	$(PYTHON_VENV_BIN) test/scripts/duckdb_fs_hfile_test.py \
@@ -410,7 +416,7 @@ test-somalier-statistical:
 test-bcf-scan:
 	@set -e; tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
 		$(CC) -std=c11 -O1 -g -UNDEBUG -Wall -Wextra -Werror \
-			-Ithird_party/htslib test/scripts/bcf_scan_test.c \
+			-Iduckdb_capi -Ithird_party/htslib test/scripts/bcf_scan_test.c \
 			-Lbuild/release -Wl,-rpath,$(PROJ_DIR)build/release -lduckhts -pthread \
 			-o "$$tmp/bcf_scan_test"; "$$tmp/bcf_scan_test" "$$tmp"
 

@@ -23,7 +23,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 
 #include "include/bed_line.h"
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 
 #define DUCKHTS_BEDCOV_DEFAULT_EXCLUDE_FLAGS 1796
 #define DUCKHTS_BEDCOV_DEFAULT_MAX_DEPTH 1000000
@@ -94,6 +94,7 @@ typedef struct {
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     char *bed_path;
     char *reference;
     char *index_path;
@@ -263,6 +264,7 @@ static void destroy_bam_bed_cov_bind(void *data) {
     size_t i;
     if (!bind) return;
     if (bind->path) duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->bed_path) duckdb_free(bind->bed_path);
     if (bind->reference) duckdb_free(bind->reference);
     if (bind->index_path) duckdb_free(bind->index_path);
@@ -277,7 +279,8 @@ static void destroy_bam_bed_cov_bind(void *data) {
     duckdb_free(bind);
 }
 
-static int load_bed_regions(const char *path, bedcov_region_t **out_regions, size_t *out_count,
+static int load_bed_regions(const duckhts_file_access_t *access, const char *path,
+                            bedcov_region_t **out_regions, size_t *out_count,
                             char *err, size_t errlen) {
     htsFile *fp = NULL;
     kstring_t line = {0, 0, NULL};
@@ -287,9 +290,10 @@ static int load_bed_regions(const char *path, bedcov_region_t **out_regions, siz
     bedcov_region_t *regions = NULL;
 
     if (!path || !out_regions || !out_count) return -1;
-    fp = hts_open(path, "r");
+    fp = duckhts_file_access_open(access, path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to open BED file '%s'", path);
+        snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to open BED file '%s'%s", path,
+                 duckhts_file_access_reason(access, path));
         return -1;
     }
 
@@ -550,9 +554,10 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
     bam1_t *rec = NULL;
     size_t i;
 
-    fp = sam_open(bind->path, "r");
+    fp = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (!fp) {
-        snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to open alignment file '%s'", bind->path);
+        snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to open alignment file '%s'%s", bind->path,
+                 duckhts_file_access_reason(bind->access, bind->path));
         return -1;
     }
     /* QUAL feeds base-quality filtering. SEQ and AUX preserve CG long-CIGAR
@@ -563,15 +568,13 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
         sam_close(fp);
         return -1;
     }
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
-                                    DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (bind->decompression_threads > 0 &&
         hts_set_threads(fp, (int)bind->decompression_threads) < 0) {
         snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to configure decompression threads");
         sam_close(fp);
         return -1;
     }
-    if (bind->reference && hts_set_fai_filename(fp, bind->reference) != 0) {
+    if (bind->reference && duckhts_file_access_set_fai_filename(bind->access, fp, bind->reference) != 0) {
         snprintf(err, errlen, "duckhts_bam_bed_coverage: failed to set CRAM reference");
         sam_close(fp);
         return -1;
@@ -588,7 +591,7 @@ static int run_bam_bed_coverage(bam_bed_cov_bind_t *bind, char *err, size_t errl
         return -1;
     }
 
-    idx = sam_index_load3(fp, bind->path, bind->index_path,
+    idx = duckhts_file_access_sam_index_load(bind->access, fp, bind->path, bind->index_path,
                           duckhts_index_save_remote_flag(bind->path, bind->index_path));
     if (!idx) {
         snprintf(err, errlen,
@@ -752,6 +755,10 @@ static void bam_bed_cov_bind(duckdb_bind_info info) {
         duckdb_bind_set_error(info, "duckhts_bam_bed_coverage requires a non-empty bed_path");
         return;
     }
+    if (!duckhts_file_access_bind(info, "duckhts_bam_bed_coverage", &bind->access)) {
+        destroy_bam_bed_cov_bind(bind);
+        return;
+    }
 
     val = duckdb_bind_get_named_parameter(info, "reference");
     if (val && !duckdb_is_null_value(val)) bind->reference = duckdb_get_varchar(val);
@@ -852,7 +859,7 @@ static void bam_bed_cov_init(duckdb_init_info info) {
     duckdb_init_set_max_threads(info, 1);
 
     memset(err, 0, sizeof(err));
-    if (load_bed_regions(run->bed_path, &run->regions, &run->n_regions, err, sizeof(err)) != 0 ||
+    if (load_bed_regions(run->access, run->bed_path, &run->regions, &run->n_regions, err, sizeof(err)) != 0 ||
         run_bam_bed_coverage(run, err, sizeof(err)) != 0) {
         duckdb_init_set_error(info, err[0] ? err : "duckhts_bam_bed_coverage: coverage failed");
     }

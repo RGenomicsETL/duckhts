@@ -473,3 +473,33 @@ statement error
 SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam', NULL);
 ----
 requires an alignment path and a reference FASTA path
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query IIII
+SELECT base_quality, mate, sum(bases)::INTEGER, sum(CASE WHEN reference_base != read_base THEN bases ELSE 0 END)::INTEGER
+FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/bam_mismatch.bam',
+  '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa',
+  mask := '__WORKING_DIRECTORY__/test/data/bam_mismatch.mask.vcf.gz')
+GROUP BY ALL ORDER BY base_quality NULLS LAST, mate;
+----
+10	0	2	0
+20	0	10	1
+25	0	12	0
+30	0	3	1
+35	2	20	1
+40	0	20	1
+40	1	20	0
+NULL	0	12	0
+
+statement error
+SELECT * FROM duckhts_bam_mismatch_counts('__WORKING_DIRECTORY__/test/data/no_such_input', '__WORKING_DIRECTORY__/test/data/bam_mismatch.fa');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

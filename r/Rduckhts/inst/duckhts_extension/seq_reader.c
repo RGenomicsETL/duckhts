@@ -39,7 +39,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/kseq.h>
 #include <htslib/kstring.h>
 
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "include/duckhts_errors.h"
 #include "include/duckdb_alloc.h"
 #include "include/region_list.h"
@@ -66,6 +66,7 @@ enum {
 
 typedef struct {
     char *file_path;
+    duckhts_file_access_t *access;
     char *mate_path;
     char *index_path;
     char *gzi_path;
@@ -150,6 +151,7 @@ static void destroy_seq_bind(void *data) {
     seq_bind_data_t *b = (seq_bind_data_t *)data;
     if (!b) return;
     if (b->file_path) duckdb_free(b->file_path);
+    duckhts_file_access_destroy(b->access);
     if (b->mate_path) duckdb_free(b->mate_path);
     if (b->index_path) duckdb_free(b->index_path);
     if (b->gzi_path) duckdb_free(b->gzi_path);
@@ -440,10 +442,17 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     }
 
     /* Verify the file opens and is the expected format */
-    samFile *fp = sam_open(file_path, "r");
+    duckhts_file_access_t *access = NULL;
+    if (!duckhts_file_access_bind(info, is_fastq ? "read_fastq" : "read_fasta", &access)) {
+        duckdb_free(file_path);
+        return;
+    }
+    samFile *fp = duckhts_file_access_open(access, file_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        duckhts_bind_errorf(info, "%s: Failed to open file: %s",
-                            is_fastq ? "read_fastq" : "read_fasta", file_path);
+        duckhts_bind_errorf(info, "%s: Failed to open file: %s%s",
+                            is_fastq ? "read_fastq" : "read_fasta", file_path,
+                            duckhts_file_access_reason(access, file_path));
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         return;
     }
@@ -454,10 +463,12 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
     seq_bind_data_t *bind = duckhts_alloc_array(1, sizeof(*bind));
     if (!bind) {
         duckdb_bind_set_error(info, "FASTA/FASTQ: out of memory allocating bind state");
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         return;
     }
     bind->file_path = file_path;
+    bind->access = access;
     bind->is_fastq = is_fastq;
     bind->direct_fastq = is_fastq && fmt != sam && fmt != bam && fmt != cram;
     bind->direct_fasta = !is_fastq && fmt != sam && fmt != bam && fmt != cram;
@@ -595,7 +606,7 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
         if (bind->input_quality_encoding == DUCKHTS_QUALITY_ENCODING_AUTO) {
             duckhts_quality_detect_result detect;
             char err[512];
-            if (duckhts_detect_fastq_quality_encoding(bind->file_path, 10000, &detect, err, sizeof(err)) != 0) {
+            if (duckhts_detect_fastq_quality_encoding(bind->access, bind->file_path, 10000, &detect, err, sizeof(err)) != 0) {
                 duckdb_bind_set_error(info, err);
                 destroy_seq_bind(bind);
                 return;
@@ -609,7 +620,7 @@ static void seq_read_bind(duckdb_bind_info info, int is_fastq) {
             bind->input_quality_encoding = detect.guessed_encoding;
             if (bind->paired) {
                 duckhts_quality_detect_result mate_detect;
-                if (duckhts_detect_fastq_quality_encoding(bind->mate_path, 10000, &mate_detect, err, sizeof(err)) != 0) {
+                if (duckhts_detect_fastq_quality_encoding(bind->access, bind->mate_path, 10000, &mate_detect, err, sizeof(err)) != 0) {
                     duckdb_bind_set_error(info, err);
                     destroy_seq_bind(bind);
                     return;
@@ -675,8 +686,8 @@ static void fastq_read_bind(duckdb_bind_info info) { seq_read_bind(info, 1); }
 
 static void seq_init_path_error(duckdb_init_info info, const seq_bind_data_t *bind,
                                 const char *detail, const char *path) {
-    duckhts_init_errorf(info, "%s: %s: %s", bind->is_fastq ? "read_fastq" : "read_fasta", detail,
-                        path);
+    duckhts_init_errorf(info, "%s: %s: %s%s", bind->is_fastq ? "read_fastq" : "read_fasta", detail,
+                        path, duckhts_file_access_reason(bind->access, path));
 }
 
 static void seq_read_init(duckdb_init_info info) {
@@ -735,7 +746,8 @@ static void seq_read_init(duckdb_init_info info) {
 
     if (init->column_count == 0 && bind->n_regions == 0) {
         if (bind->is_fastq && !bind->paired && !bind->interleaved && !bind->scan_sequential) {
-            faidx_t *fqi = fai_load3_format(bind->file_path, NULL, NULL, 0, FAI_FASTQ);
+            faidx_t *fqi = duckhts_file_access_fai_load(bind->access, bind->file_path, NULL, NULL, 0, FAI_FASTQ,
+                                                        DUCKHTS_HTS_IO_PROFILE_METADATA);
             if (fqi) {
                 init->count_only = 1;
                 init->count_remaining = (uint64_t)faidx_nseq(fqi);
@@ -748,8 +760,9 @@ static void seq_read_init(duckdb_init_info info) {
         } else if (!bind->is_fastq) {
             faidx_t *fai_count = bind->scan_sequential
                 ? NULL
-                : fai_load3_format(bind->file_path, bind->index_path,
-                                   bind->gzi_path, 0, FAI_FASTA);
+                : duckhts_file_access_fai_load(bind->access, bind->file_path, bind->index_path,
+                                               bind->gzi_path, 0, FAI_FASTA,
+                                               DUCKHTS_HTS_IO_PROFILE_METADATA);
             if (fai_count) {
                 init->count_only = 1;
                 init->count_remaining = (uint64_t)faidx_nseq(fai_count);
@@ -760,14 +773,13 @@ static void seq_read_init(duckdb_init_info info) {
                 return;
             }
             init->fasta_count_only = 1;
-            init->count_fp = hts_open(bind->file_path, "r");
+            init->count_fp = duckhts_file_access_open(bind->access, bind->file_path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
             if (!init->count_fp) {
-                duckdb_init_set_error(info, "Failed to open FASTA file");
+                duckhts_init_errorf(info, "Failed to open FASTA file%s",
+                                duckhts_file_access_reason(bind->access, bind->file_path));
                 destroy_seq_init(init);
                 return;
             }
-            duckhts_apply_remote_hts_tuning(init->count_fp, bind->file_path,
-                                            DUCKHTS_HTS_IO_PROFILE_STREAMING);
             init->done = 0;
             duckdb_init_set_max_threads(info, 1);
             duckdb_init_set_init_data(info, init, destroy_seq_init);
@@ -776,23 +788,20 @@ static void seq_read_init(duckdb_init_info info) {
     }
 
     if (bind->direct_fastq || init->direct_fasta) {
-        init->count_fp = hts_open(bind->file_path, "r");
+        init->count_fp = duckhts_file_access_open(bind->access, bind->file_path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
         if (!init->count_fp) {
-            duckdb_init_set_error(info, "Failed to open sequence file");
+            duckhts_init_errorf(info, "Failed to open sequence file%s",
+                                duckhts_file_access_reason(bind->access, bind->file_path));
             destroy_seq_init(init);
             return;
         }
-        duckhts_apply_remote_hts_tuning(init->count_fp, bind->file_path,
-                                        DUCKHTS_HTS_IO_PROFILE_STREAMING);
         if (bind->paired) {
-            init->count_fp_mate = hts_open(bind->mate_path, "r");
+            init->count_fp_mate = duckhts_file_access_open(bind->access, bind->mate_path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
             if (!init->count_fp_mate) {
                 seq_init_path_error(info, bind, "Failed to open mate FASTQ file", bind->mate_path);
                 destroy_seq_init(init);
                 return;
             }
-            duckhts_apply_remote_hts_tuning(init->count_fp_mate, bind->mate_path,
-                                            DUCKHTS_HTS_IO_PROFILE_STREAMING);
         }
         init->done = 0;
         duckdb_init_set_max_threads(info, 1);
@@ -801,29 +810,27 @@ static void seq_read_init(duckdb_init_info info) {
     }
 
     if (!bind->is_fastq && bind->n_regions > 0) {
-        init->fai = fai_load3_format(bind->file_path, bind->index_path,
-                                     bind->gzi_path, 0, FAI_FASTA);
+        init->fai = duckhts_file_access_fai_load(bind->access, bind->file_path, bind->index_path,
+                                                 bind->gzi_path, 0, FAI_FASTA,
+                                                 DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
         if (!init->fai) {
             duckdb_init_set_error(info, "read_fasta: region query requires a FASTA index (.fai); run fasta_index(path) first");
             destroy_seq_init(init);
             return;
         }
-        duckhts_apply_remote_faidx_tuning(init->fai, bind->file_path,
-                                          DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
         duckdb_init_set_max_threads(info, 1);
         duckdb_init_set_init_data(info, init, destroy_seq_init);
         return;
     }
 
     /* sam_open handles .gz / .bgzf transparently */
-    init->fp = sam_open(bind->file_path, "r");
+    init->fp = duckhts_file_access_open(bind->access, bind->file_path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!init->fp) {
-        duckdb_init_set_error(info, "Failed to open sequence file");
+        duckhts_init_errorf(info, "Failed to open sequence file%s",
+                                duckhts_file_access_reason(bind->access, bind->file_path));
         destroy_seq_init(init);
         return;
     }
-    duckhts_apply_remote_hts_tuning(init->fp, bind->file_path,
-                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
 
     /* sam_hdr_read for FASTA/FASTQ returns a valid (possibly empty) header */
     init->hdr = sam_hdr_read(init->fp);
@@ -842,14 +849,12 @@ static void seq_read_init(duckdb_init_info info) {
     }
 
     if (bind->paired) {
-        init->fp_mate = sam_open(bind->mate_path, "r");
+        init->fp_mate = duckhts_file_access_open(bind->access, bind->mate_path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
         if (!init->fp_mate) {
             seq_init_path_error(info, bind, "Failed to open mate FASTQ file", bind->mate_path);
             destroy_seq_init(init);
             return;
         }
-        duckhts_apply_remote_hts_tuning(init->fp_mate, bind->mate_path,
-                                        DUCKHTS_HTS_IO_PROFILE_STREAMING);
         init->hdr_mate = sam_hdr_read(init->fp_mate);
         if (!init->hdr_mate) {
             seq_init_path_error(info, bind, "Failed to read mate FASTQ header", bind->mate_path);

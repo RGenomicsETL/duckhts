@@ -19,6 +19,7 @@
 #include "duckhts_simd.h"
 #include "wasm_http_hfile.h"
 #include "duckdb_fs_hfile.h"
+#include "hts_file_access.h"
 
 /* Restricts a relation carrying `region` to autosomal sites. Relatedness and
    contamination are diploid autosomal statistics; the panel also carries the

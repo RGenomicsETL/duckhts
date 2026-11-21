@@ -267,9 +267,9 @@ static hFILE *duckdbfs_open(const char *name, const char *mode) {
 }
 
 /*
- * htslib looks for the index of a remote file by opening candidate names and
- * for the index of a local file with stat(). Only the first works for a
- * routed name, whatever storage the path names.
+ * htslib treats a name that is not remote as a local path: it stat()s it and
+ * its index, and builds a missing .fai beside a CRAM reference. None of that
+ * holds for a routed name, whatever storage the path names.
  */
 static int duckdbfs_is_remote(const char *name) {
     (void)name;
@@ -292,106 +292,11 @@ bool register_duckdb_fs_hfile_backend(void) {
     return true;
 }
 
-/*
- * Registers one session setting unless the database already has it, which is
- * the case when another connection loaded the extension first. Takes
- * ownership of default_value.
- */
-static bool register_option(duckdb_connection connection, const char *name, duckdb_type type,
-                            duckdb_value default_value, const char *description) {
-    duckdb_client_context context = NULL;
-    duckdb_connection_get_client_context(connection, &context);
-    duckdb_value existing = context ? duckdb_client_context_get_config_option(context, name, NULL) : NULL;
-    duckdb_config_option option = duckdb_create_config_option();
-    duckdb_logical_type logical_type = duckdb_create_logical_type(type);
-    bool registered = existing != NULL;
-    if (!registered && context && option && logical_type && default_value) {
-        duckdb_config_option_set_name(option, name);
-        duckdb_config_option_set_type(option, logical_type);
-        duckdb_config_option_set_default_value(option, default_value);
-        duckdb_config_option_set_default_scope(option, DUCKDB_CONFIG_OPTION_SCOPE_SESSION);
-        duckdb_config_option_set_description(option, description);
-        registered = duckdb_register_config_option(connection, option) == DuckDBSuccess;
-    }
-    duckdb_destroy_value(&existing);
-    duckdb_destroy_value(&default_value);
-    duckdb_destroy_logical_type(&logical_type);
-    duckdb_destroy_config_option(&option);
-    if (context) {
-        duckdb_destroy_client_context(&context);
-    }
-    return registered;
-}
-
-bool duckhts_register_file_access_options(duckdb_connection connection) {
-    return register_option(connection, DUCKHTS_FILE_SYSTEM_OPTION, DUCKDB_TYPE_VARCHAR,
-                           duckdb_create_varchar("htslib"),
-                           "File access for DuckHTS readers: 'htslib' (htslib's own I/O) or 'duckdb' "
-                           "(the DuckDB file system of the connection, with its secrets and settings)") &&
-           register_option(connection, DUCKHTS_REMOTE_BLOCK_SIZE_OPTION, DUCKDB_TYPE_BIGINT,
-                           duckdb_create_int64(0),
-                           "Bytes htslib asks for in each read of a remote file; 0 lets DuckHTS choose "
-                           "by scan type");
-}
-
-static void bind_error(duckdb_bind_info info, const char *function_name, const char *problem) {
-    char message[256];
-    snprintf(message, sizeof(message), "%s: %s", function_name, problem);
-    duckdb_bind_set_error(info, message);
-}
-
-bool duckhts_remote_block_size_bind(duckdb_bind_info info, const char *function_name, int *block_size) {
-    *block_size = 0;
-    duckdb_client_context context = NULL;
-    duckdb_table_function_get_client_context(info, &context);
-    if (!context) {
-        bind_error(info, function_name, "DuckDB provided no client context");
-        return false;
-    }
-    duckdb_value setting = duckdb_client_context_get_config_option(context, DUCKHTS_REMOTE_BLOCK_SIZE_OPTION, NULL);
-    duckdb_destroy_client_context(&context);
-    const bool is_set = setting && !duckdb_is_null_value(setting);
-    const int64_t bytes = is_set ? duckdb_get_int64(setting) : -1;
-    duckdb_destroy_value(&setting);
-    if (bytes != 0 && (bytes < DUCKHTS_REMOTE_BLOCK_SIZE_MIN || bytes > DUCKHTS_REMOTE_BLOCK_SIZE_MAX)) {
-        char problem[160];
-        snprintf(problem, sizeof(problem), DUCKHTS_REMOTE_BLOCK_SIZE_OPTION " must be 0 or between %d and %d bytes",
-                 DUCKHTS_REMOTE_BLOCK_SIZE_MIN, DUCKHTS_REMOTE_BLOCK_SIZE_MAX);
-        bind_error(info, function_name, problem);
-        return false;
-    }
-    *block_size = (int)bytes;
-    return true;
-}
-
-bool duckhts_fs_route_bind(duckdb_bind_info info, const char *function_name, duckhts_fs_route_t **route) {
-    *route = NULL;
-    duckdb_client_context context = NULL;
-    duckdb_table_function_get_client_context(info, &context);
-    if (!context) {
-        bind_error(info, function_name, "DuckDB provided no client context");
-        return false;
-    }
-
-    duckdb_value setting = duckdb_client_context_get_config_option(context, DUCKHTS_FILE_SYSTEM_OPTION, NULL);
-    char *choice = setting ? duckdb_get_varchar(setting) : NULL;
-    duckdb_destroy_value(&setting);
-    const bool use_htslib = choice && strcmp(choice, "htslib") == 0;
-    const bool use_duckdb = choice && strcmp(choice, "duckdb") == 0;
-    duckdb_free(choice);
-    if (!use_duckdb) {
-        duckdb_destroy_client_context(&context);
-        if (!use_htslib) {
-            bind_error(info, function_name, DUCKHTS_FILE_SYSTEM_OPTION " must be 'htslib' or 'duckdb'");
-        }
-        return use_htslib;
-    }
-
+duckhts_fs_route_t *duckhts_fs_route_create(duckdb_client_context context) {
     duckhts_fs_route_t *created = duckdb_malloc(sizeof(*created));
     if (!created) {
         duckdb_destroy_client_context(&context);
-        bind_error(info, function_name, "out of memory routing reads through the DuckDB file system");
-        return false;
+        return NULL;
     }
     memset(created, 0, sizeof(*created));
     created->context = context;
@@ -400,8 +305,7 @@ bool duckhts_fs_route_bind(duckdb_bind_info info, const char *function_name, duc
     created->next = routes;
     routes = created;
     pthread_mutex_unlock(&routes_lock);
-    *route = created;
-    return true;
+    return created;
 }
 
 void duckhts_fs_route_destroy(duckhts_fs_route_t *route) {

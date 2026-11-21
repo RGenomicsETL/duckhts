@@ -71,3 +71,28 @@ FROM read_fastq(
 LIMIT 1;
 ----
 [40, 40, 40, 40]
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query TIITT
+SELECT
+  guessed_encoding,
+  observed_ascii_min,
+  observed_ascii_max,
+  CAST(is_ambiguous AS VARCHAR),
+  compatible_encodings
+FROM detect_quality_encoding('__WORKING_DIRECTORY__/test/data/legacy_phred64.fq');
+----
+phred64	104	104	true	phred33,phred64,solexa64
+
+statement error
+SELECT * FROM detect_quality_encoding('__WORKING_DIRECTORY__/test/data/no_such_input');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

@@ -134,6 +134,39 @@ run_sql "genetic map positions must be strictly ascending" \
 run_sql "" \
   "SELECT CASE WHEN count(*)=2053 AND count(*) FILTER (WHERE VEP_SYMBOL=['GENE1'] AND VEP_DISTANCE=[12])=2053 THEN true ELSE error('tidy CSQ record lifetime') END FROM read_bcf('test/data/tidy_chunk_boundary.vcf',tidy_format:=true); SELECT POS,SAMPLE_ID,VEP_SYMBOL,INFO_DP,FORMAT_GT,FORMAT_AD,FORMAT_ST FROM read_bcf('test/data/bcf_cache_lifecycle.vcf',tidy_format:=true);"
 
+# Each relation through the DuckDB file system of the connection must equal the
+# one htslib's own file access gives in the same session; a failed open must
+# carry DuckDB's reason. This runs the routed opens, index lookups, reference
+# loads and per-query liftover contexts under the sanitizer.
+while IFS= read -r relation; do
+  run_sql "" \
+    "SET threads=4; CREATE TEMP TABLE expected AS SELECT count(*) AS n, sum(hash(t)) AS row_hashes FROM ($relation) t; SET duckhts_file_system='duckdb'; SELECT CASE WHEN (SELECT n FROM expected) > 0 AND (SELECT (count(*), sum(hash(t))) FROM ($relation) t) = (SELECT (n, row_hashes) FROM expected) THEN true ELSE error('DuckDB file system route differs from htslib') END;"
+done <<'RELATIONS'
+SELECT * FROM read_bam('test/data/bam_scan_mixed.bam', region := 'chr1')
+SELECT * FROM read_bam('test/data/range.cram', reference := 'test/data/ce.fa')
+SELECT * FROM bam_bin_counts('test/data/fixture_mixed.cram', 100, reference := 'test/data/fixture_ref.fa')
+SELECT * FROM duckhts_bam_mismatch_counts('test/data/bam_mismatch.cram', 'test/data/bam_mismatch.fa', mask := 'test/data/bam_mismatch.mask.vcf.gz')
+SELECT * FROM read_bcf('test/data/formatcols.vcf.gz', region := '1')
+SELECT * FROM read_geno('test/data/geno_sites.bcf', region := 'chr1')
+SELECT * FROM read_gff('test/data/gff_file.gff.gz', region := 'X:2934816-2935190')
+SELECT * FROM read_fasta('test/data/ce.fa', region := 'CHROMOSOME_I:1-200')
+SELECT * FROM fasta_nuc('test/data/ce.fa', bed_path := 'test/data/targets.bed')
+SELECT * FROM read_hts_index('test/data/range.bam')
+SELECT * FROM read_genbank('test/data/phix174.gb')
+SELECT * FROM read_bigwig('third_party/libBigWig/test/test.bw')
+SELECT * FROM bcftools_score('test/data/score_input.vcf', 'test/data/score_summary.tsv', use := 'GT', columns := 'PLINK')
+SELECT bcftools_liftover('chrF', position, 'C', 'T', 'test/data/liftover.chain', 'test/data/liftover_dst.fa', 'test/data/liftover_src.fa', 1, 250, false, NULL::BIGINT, false) FROM range(1, 4000) positions(position)
+RELATIONS
+while IFS= read -r relation; do
+  run_sql "No such file or directory" "SET duckhts_file_system='duckdb'; $relation;"
+done <<'RELATIONS'
+SELECT * FROM read_bam('test/data/no_such_input')
+SELECT * FROM read_bcf('test/data/no_such_input')
+SELECT * FROM read_fasta('test/data/no_such_input')
+SELECT * FROM read_bigwig('test/data/no_such_input')
+SELECT bcftools_liftover('chrF', 2, 'C', 'T', 'test/data/no_such_input', 'test/data/liftover_dst.fa', 'test/data/liftover_src.fa', 1, 250, false, NULL::BIGINT, false)
+RELATIONS
+
 ${CC:-cc} -std=c11 -Wall -Wextra -Werror "${compile_flags[@]}" \
   -Isrc/include -Ithird_party/htslib test/scripts/bcftools_filter_recovery_probe.c \
   -L"$out_dir" -Wl,-rpath,"$root/$out_dir" -lduckhts "${link_flags[@]}" \

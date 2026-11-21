@@ -2,7 +2,6 @@
 #define DUCKHTS_BCF_SCAN_H
 
 #include "bcf_index_snapshot.h"
-#include "hts_io_tuning.h"
 #include "region_list.h"
 
 typedef struct duckhts_bcf_samples duckhts_bcf_samples_t;
@@ -34,8 +33,10 @@ typedef struct {
     int typed_tabix; // Iterator came from duckhts_bcf_scan_intervals on a tabix index.
 } duckhts_bcf_scan_t;
 
-int duckhts_bcf_scan_open(duckhts_bcf_scan_t *scan, const char *path,
-                         const duckhts_bcf_index_t *index, int decompression_threads,
+/* Opens path through access (hts_file_access.h; NULL is htslib's own file
+ * access) and reads its header. Returns 1, or 0 with error set. */
+int duckhts_bcf_scan_open(duckhts_bcf_scan_t *scan, const duckhts_file_access_t *access,
+                         const char *path, const duckhts_bcf_index_t *index, int decompression_threads,
                          duckhts_hts_io_profile_t profile, const char *reader_name,
                          char *error, size_t error_size);
 void duckhts_bcf_scan_close(duckhts_bcf_scan_t *scan);

@@ -137,7 +137,8 @@ static void finalize_quality_detection(duckhts_quality_detect_result *out) {
     }
 }
 
-int duckhts_detect_fastq_quality_encoding(const char *path, int64_t max_records,
+int duckhts_detect_fastq_quality_encoding(const duckhts_file_access_t *access,
+                                          const char *path, int64_t max_records,
                                           duckhts_quality_detect_result *out,
                                           char *errbuf, size_t errbuf_len) {
     htsFile *fp = NULL;
@@ -151,10 +152,11 @@ int duckhts_detect_fastq_quality_encoding(const char *path, int64_t max_records,
     out->observed_ascii_min = 999;
     if (errbuf && errbuf_len > 0) errbuf[0] = '\0';
 
-    fp = hts_open(path, "r");
+    fp = duckhts_file_access_open(access, path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
         if (errbuf && errbuf_len > 0) {
-            snprintf(errbuf, errbuf_len, "detect_quality_encoding: failed to open %s", path);
+            snprintf(errbuf, errbuf_len, "detect_quality_encoding: failed to open %s%s", path,
+                     duckhts_file_access_reason(access, path));
         }
         return -1;
     }

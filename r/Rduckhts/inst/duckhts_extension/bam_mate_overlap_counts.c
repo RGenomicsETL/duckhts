@@ -24,7 +24,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/sam.h>
 
 #include "include/bam_site_counts.h"
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "include/region_list.h"
 
 enum {
@@ -50,6 +50,7 @@ _Static_assert(MATE_QNAME_BYTES > BAM_MAX_QNAME_LEN, "a BAM name and its NUL fit
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     char *region;
     char *index_path;
     char *reference;
@@ -567,9 +568,10 @@ static int count_alignments(const mate_bind_t *bind, uint64_t *cells, char *erro
     memset(&reference, 0, sizeof(reference));
     reference.tid = -1;
 
-    file = sam_open(bind->path, "r");
+    file = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!file) {
-        snprintf(error, error_size, "duckhts_bam_mate_overlap_counts: cannot open %s", bind->path);
+        snprintf(error, error_size, "duckhts_bam_mate_overlap_counts: cannot open %s%s", bind->path,
+                 duckhts_file_access_reason(bind->access, bind->path));
         goto cleanup;
     }
     if (bind->reference) {
@@ -580,7 +582,7 @@ static int count_alignments(const mate_bind_t *bind, uint64_t *cells, char *erro
             snprintf(error, error_size, "duckhts_bam_mate_overlap_counts: out of memory");
             goto cleanup;
         }
-        if (hts_set_fai_filename(file, reference_locator) != 0) {
+        if (duckhts_file_access_set_fai_filename(bind->access, file, reference_locator) != 0) {
             snprintf(error, error_size, "duckhts_bam_mate_overlap_counts: cannot use reference %s", bind->reference);
             goto cleanup;
         }
@@ -595,7 +597,9 @@ static int count_alignments(const mate_bind_t *bind, uint64_t *cells, char *erro
         goto cleanup;
     }
     if (bind->reference) {
-        reference.fai = fai_load3(bind->reference, bind->reference_index_path, NULL, 0);
+        reference.fai = duckhts_file_access_fai_load(bind->access, bind->reference,
+                                                     bind->reference_index_path, NULL, 0, FAI_FASTA,
+                                                     DUCKHTS_HTS_IO_PROFILE_METADATA);
         if (!reference.fai) {
             snprintf(error, error_size,
                      "duckhts_bam_mate_overlap_counts: cannot load the FASTA index of %s; build it with fasta_index()",
@@ -616,7 +620,8 @@ static int count_alignments(const mate_bind_t *bind, uint64_t *cells, char *erro
                 goto cleanup;
             }
         }
-        index = sam_index_load3(file, bind->path, bind->index_path, HTS_IDX_SILENT_FAIL);
+        index = duckhts_file_access_sam_index_load(bind->access, file, bind->path, bind->index_path,
+                                                   HTS_IDX_SILENT_FAIL);
         if (!index) {
             snprintf(error, error_size, "duckhts_bam_mate_overlap_counts: region needs an index for %s", bind->path);
             goto cleanup;
@@ -749,6 +754,7 @@ static void destroy_mate_bind(void *data) {
     mate_bind_t *bind = (mate_bind_t *)data;
     if (!bind) return;
     if (bind->path) duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->region) duckdb_free(bind->region);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->reference) duckdb_free(bind->reference);
@@ -798,6 +804,10 @@ static void mate_overlap_counts_bind(duckdb_bind_info info) {
     duckdb_destroy_value(&path_value);
     if (!bind) {
         duckdb_bind_set_error(info, "duckhts_bam_mate_overlap_counts: out of memory");
+        return;
+    }
+    if (!duckhts_file_access_bind(info, "duckhts_bam_mate_overlap_counts", &bind->access)) {
+        destroy_mate_bind(bind);
         return;
     }
     if (!bind->path || bind->path[0] == '\0') {

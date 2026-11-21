@@ -25,7 +25,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "include/duckhts_output_file.h"
 
 #ifndef SAM_RNAME
@@ -34,6 +34,7 @@ DUCKDB_EXTENSION_EXTERN
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     char *output_path;
     char *index_path;
     int threads;
@@ -152,7 +153,8 @@ static int slow_idxstats_to_file(samFile *fp, sam_hdr_t *header, FILE *out, int 
     return 0;
 }
 
-static int fast_idxstats_to_file(samFile *fp, sam_hdr_t *header, const char *path,
+static int fast_idxstats_to_file(const duckhts_file_access_t *access, samFile *fp, sam_hdr_t *header,
+                                 const char *path,
                                  const char *index_path, FILE *out, int *used_fast,
                                  char *err, size_t errlen) {
     hts_idx_t *idx = NULL;
@@ -165,7 +167,8 @@ static int fast_idxstats_to_file(samFile *fp, sam_hdr_t *header, const char *pat
     }
 
     *used_fast = 0;
-    idx = sam_index_load3(fp, path, index_path, duckhts_index_save_remote_flag(path, index_path));
+    idx = duckhts_file_access_sam_index_load(access, fp, path, index_path,
+                                             duckhts_index_save_remote_flag(path, index_path));
     if (!idx) return 1;
 
     for (int i = 0; i < sam_hdr_nref(header); ++i) {
@@ -210,13 +213,12 @@ static int run_samtools_idxstats(const samtools_idxstats_bind_t *bind, int *used
         return -1;
     }
 
-    fp = sam_open(bind->path, "r");
+    fp = duckhts_file_access_open(bind->access, bind->path, DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!fp) {
-        snprintf(err, errlen, "duckhts_samtools_idxstats: failed to open alignment file '%s'", bind->path);
+        snprintf(err, errlen, "duckhts_samtools_idxstats: failed to open alignment file '%s'%s", bind->path,
+                 duckhts_file_access_reason(bind->access, bind->path));
         return -1;
     }
-    duckhts_apply_remote_hts_tuning(fp, bind->path,
-                                    DUCKHTS_HTS_IO_PROFILE_STREAMING);
 
     header = sam_hdr_read(fp);
     if (!header) {
@@ -243,7 +245,7 @@ static int run_samtools_idxstats(const samtools_idxstats_bind_t *bind, int *used
     }
 
     if (hts_get_format(fp)->format == bam) {
-        int fast_rc = fast_idxstats_to_file(fp, header, bind->path, bind->index_path, out,
+        int fast_rc = fast_idxstats_to_file(bind->access, fp, header, bind->path, bind->index_path, out,
                                             used_index_fast_path, err, errlen);
         if (fast_rc == 0) {
             rc = 0;
@@ -294,6 +296,7 @@ static void destroy_samtools_idxstats_bind(void *data) {
     samtools_idxstats_bind_t *bind = (samtools_idxstats_bind_t *)data;
     if (!bind) return;
     if (bind->path) duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->output_path) duckdb_free(bind->output_path);
     if (bind->index_path) duckdb_free(bind->index_path);
     duckdb_free(bind);
@@ -323,6 +326,10 @@ static void samtools_idxstats_bind(duckdb_bind_info info) {
     }
     memset(bind, 0, sizeof(*bind));
     bind->path = path;
+    if (!duckhts_file_access_bind(info, "duckhts_samtools_idxstats", &bind->access)) {
+        destroy_samtools_idxstats_bind(bind);
+        return;
+    }
     bind->threads = 0;
     bind->overwrite = 0;
 

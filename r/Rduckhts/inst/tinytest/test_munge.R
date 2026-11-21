@@ -361,3 +361,66 @@ test_munge <- function() {
 }
 
 test_munge()
+
+# rduckhts_munge() through the DuckDB file system of the connection
+# (SET duckhts_file_system = 'duckdb'). htslib's own file access is the oracle:
+# the same summary statistics must give the same rows. That route reads the
+# .fai beside the FASTA and builds none.
+test_munge_duckdb_file_system <- function() {
+  con <- rduckhts_connect()
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  directory <- tempfile("duckhts_munge_file_system_")
+  dir.create(directory)
+  on.exit(unlink(directory, recursive = TRUE), add = TRUE)
+
+  fasta_ref <- file.path(directory, "munge.fa")
+  writeLines(c(">chrF", "ACGTACGTAA"), fasta_ref)
+  expect_true(rduckhts_fasta_index(con, fasta_ref, index_path = paste0(fasta_ref, ".fai"))$success[1])
+  unindexed <- file.path(directory, "unindexed.fa")
+  file.copy(fasta_ref, unindexed)
+  listing <- sort(list.files(directory))
+
+  munge <- function(path) {
+    rduckhts_munge(
+      con,
+      query = paste(
+        "SELECT * FROM (VALUES",
+        "('chrF', 2, 'A', 'C', 'rs1', 0.1, 1000),",
+        "('chrF', 2, 'C', 'A', 'rs2', 0.1, 1000),",
+        "('chrF', 2, 'G', 'T', 'rs3', 0.1, 1000),",
+        "('chrMissing', 2, 'A', 'C', 'rs4', 0.1, 1000)",
+        ") AS t(CHR, BP, A1, A2, SNP, FRQ, N)"
+      ),
+      fasta_ref = path,
+      column_map = c(CHR = "CHR", BP = "BP", A1 = "A1", A2 = "A2", SNP = "SNP", FRQ = "FRQ", N = "N")
+    )
+  }
+  expected <- munge(fasta_ref)
+  expect_equal(nrow(expected), 4)
+  expect_true(any(expected$alleles_swapped))
+  expect_true(any(!expected$alleles_swapped))
+
+  dbExecute(con, "SET duckhts_file_system = 'duckdb'")
+  expect_equal(munge(fasta_ref), expected)
+  expect_error(munge(unindexed), "No such file or directory", fixed = TRUE)
+  expect_error(
+    munge(file.path(directory, "absent.fa")),
+    "bcftools_munge_row: failed to load FASTA index",
+    fixed = TRUE
+  )
+  expect_identical(sort(list.files(directory)), listing)
+
+  dbExecute(con, "SET duckhts_file_system = 'tabix'")
+  expect_error(
+    munge(fasta_ref),
+    "bcftools_munge_row: duckhts_file_system must be 'htslib' or 'duckdb'",
+    fixed = TRUE
+  )
+
+  # htslib's file access builds the index the DuckDB route refused to build.
+  dbExecute(con, "SET duckhts_file_system = 'htslib'")
+  expect_equal(munge(unindexed), expected)
+  expect_true(file.exists(paste0(unindexed, ".fai")))
+}
+
+test_munge_duckdb_file_system()

@@ -31,6 +31,7 @@ DUCKDB_EXTENSION_EXTERN
 #include "duckdb_alloc.h"
 #include "duckdb_map.h"
 #include "genbank_core.h"
+#include "hts_file_access.h"
 #include "include/named_attribute_columns.h"
 
 #include <errno.h>
@@ -96,6 +97,7 @@ static gb_span_t gb_contig(const gb_parser_t *p) {
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     bool include_attr_map;
     duckhts_attribute_columns named_attributes;
 } gb_bind_t;
@@ -105,6 +107,7 @@ static void gb_bind_destroy(void *data) {
     if (!bd) return;
     duckhts_attribute_columns_destroy(&bd->named_attributes);
     duckdb_free(bd->path);
+    duckhts_file_access_destroy(bd->access);
     duckdb_free(bd);
 }
 
@@ -125,6 +128,10 @@ static void read_genbank_bind(duckdb_bind_info info) {
     }
     memset(bd, 0, sizeof(*bd));
     bd->path = path;
+    if (!duckhts_file_access_bind(info, "read_genbank", &bd->access)) {
+        gb_bind_destroy(bd);
+        return;
+    }
 
     val = duckdb_bind_get_named_parameter(info, "attributes_map");
     if (val && !duckdb_is_null_value(val)) bd->include_attr_map = duckdb_get_bool(val);
@@ -223,10 +230,11 @@ static void read_genbank_init(duckdb_init_info info) {
     st->attr_feature = SIZE_MAX;
     st->projected_feature = SIZE_MAX;
 
-    st->fp = hts_open(bd->path, "r");
+    st->fp = duckhts_file_access_open(bd->access, bd->path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!st->fp) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "read_genbank: cannot open file: %s", bd->path);
+        char msg[1024];
+        snprintf(msg, sizeof(msg), "read_genbank: cannot open file: %s%s", bd->path,
+                 duckhts_file_access_reason(bd->access, bd->path));
         duckdb_init_set_error(info, msg);
         gb_init_destroy(st);
         return;
@@ -470,6 +478,7 @@ void register_read_genbank_function(duckdb_connection connection) {
 
 typedef struct {
     char *input;
+    duckhts_file_access_t *access; /* reads input; output is written by this process */
     char *output;
     int64_t line_width;
     bool overwrite;
@@ -479,6 +488,7 @@ static void gb2fa_bind_destroy(void *data) {
     gb2fa_bind_t *bd = (gb2fa_bind_t *)data;
     if (!bd) return;
     duckdb_free(bd->input);
+    duckhts_file_access_destroy(bd->access);
     duckdb_free(bd->output);
     duckdb_free(bd);
 }
@@ -501,6 +511,10 @@ static void genbank_to_fasta_bind(duckdb_bind_info info) {
     memset(bd, 0, sizeof(*bd));
     bd->input = input;
     bd->line_width = 70;
+    if (!duckhts_file_access_bind(info, "genbank_to_fasta", &bd->access)) {
+        gb2fa_bind_destroy(bd);
+        return;
+    }
 
     val = duckdb_bind_get_named_parameter(info, "output_path");
     if (val && !duckdb_is_null_value(val)) {
@@ -645,9 +659,10 @@ static void genbank_to_fasta_init(duckdb_init_info info) {
         return;
     }
 
-    st->fp = hts_open(bd->input, "r");
+    st->fp = duckhts_file_access_open(bd->access, bd->input, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!st->fp) {
-        snprintf(msg, sizeof(msg), "genbank_to_fasta: cannot open input %s", bd->input);
+        snprintf(msg, sizeof(msg), "genbank_to_fasta: cannot open input %s%s", bd->input,
+                 duckhts_file_access_reason(bd->access, bd->input));
         duckdb_init_set_error(info, msg);
         gb2fa_init_destroy(st);
         return;

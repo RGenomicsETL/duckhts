@@ -23,6 +23,7 @@ src/liftover_udf.c|liftover_udf.c
 src/bcftools_norm_udf.c|bcftools_norm_udf.c
 src/munge_udf.c|munge_udf.c
 src/reference_cache.c|reference_cache.c
+src/reference_access.c|reference_access.c
 src/seq_reader.c|seq_reader.c
 src/fastq_qc.c|fastq_qc.c
 src/somalier.c|somalier.c
@@ -81,3 +82,4 @@ third_party/libBigWig/bwValues.c|libBigWig/bwValues.c
 src/bcftools_filter.c|bcftools_filter.c
 src/wasm_http_hfile.c|wasm_http_hfile.c
 src/duckdb_fs_hfile.c|duckdb_fs_hfile.c
+src/hts_file_access.c|hts_file_access.c

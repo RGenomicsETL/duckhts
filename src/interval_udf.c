@@ -35,7 +35,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/tbx.h>
 
 #include "include/bed_line.h"
-#include "include/hts_io_tuning.h"
+#include "include/hts_file_access.h"
 #include "include/duckhts_errors.h"
 
 
@@ -91,6 +91,7 @@ enum {
 
 typedef struct {
     char *file_path;
+    duckhts_file_access_t *access;
     char *index_path;
     char *region;
     int scan_sequential;
@@ -136,6 +137,7 @@ typedef enum {
 
 typedef struct {
     char *fasta_path;
+    duckhts_file_access_t *access;
     char *index_path;
     char *gzi_path;
     char *bed_path;
@@ -218,6 +220,7 @@ static void destroy_bed_bind(void *data) {
     bed_bind_data_t *bind = (bed_bind_data_t *)data;
     if (!bind) return;
     if (bind->file_path) duckdb_free(bind->file_path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->region) duckdb_free(bind->region);
     duckdb_free(bind);
@@ -338,11 +341,20 @@ static void read_bed_bind(duckdb_bind_info info) {
         return;
     }
 
-    htsFile *fp = hts_open(file_path, "r");
+    duckhts_file_access_t *access = NULL;
+    if (!duckhts_file_access_bind(info, "read_bed", &access)) {
+        duckdb_free(file_path);
+        if (region) duckdb_free(region);
+        if (index_path) duckdb_free(index_path);
+        return;
+    }
+    htsFile *fp = duckhts_file_access_open(access, file_path, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!fp) {
-        char err[512];
-        snprintf(err, sizeof(err), "read_bed: failed to open file: %s", file_path);
+        char err[1024];
+        snprintf(err, sizeof(err), "read_bed: failed to open file: %s%s", file_path,
+                 duckhts_file_access_reason(access, file_path));
         duckdb_bind_set_error(info, err);
+        duckhts_file_access_destroy(access);
         duckdb_free(file_path);
         if (region) duckdb_free(region);
         if (index_path) duckdb_free(index_path);
@@ -351,9 +363,10 @@ static void read_bed_bind(duckdb_bind_info info) {
     hts_close(fp);
 
     if (region) {
-        tbx_t *tbx = tbx_index_load3(file_path, index_path, HTS_IDX_SILENT_FAIL);
+        tbx_t *tbx = duckhts_file_access_tbx_index_load(access, file_path, index_path, HTS_IDX_SILENT_FAIL);
         if (!tbx) {
             duckdb_bind_set_error(info, "read_bed: region queries require a tabix index");
+            duckhts_file_access_destroy(access);
             duckdb_free(file_path);
             duckdb_free(region);
             if (index_path) duckdb_free(index_path);
@@ -367,12 +380,14 @@ static void read_bed_bind(duckdb_bind_info info) {
     bed_bind_data_t *bind = (bed_bind_data_t *)duckdb_malloc(sizeof(bed_bind_data_t));
     memset(bind, 0, sizeof(*bind));
     bind->file_path = file_path;
+    bind->access = access;
     bind->index_path = index_path;
     bind->region = region;
     bind->scan_sequential = scan_sequential;
     bind->error_policy = error_policy;
     if (!region && !bind->scan_sequential && error_policy == BED_ERROR_POLICY_ERROR) {
-        tbx_t *tbx_stats = tbx_index_load3(file_path, index_path, HTS_IDX_SILENT_FAIL);
+        tbx_t *tbx_stats =
+            duckhts_file_access_tbx_index_load(access, file_path, index_path, HTS_IDX_SILENT_FAIL);
         if (tbx_stats) {
             bind->index_row_count_valid =
                 bed_try_get_index_row_count(tbx_stats, &bind->index_row_count);
@@ -417,19 +432,21 @@ static void read_bed_init(duckdb_init_info info) {
         return;
     }
 
-    init->fp = hts_open(bind->file_path, "r");
+    init->fp = duckhts_file_access_open(bind->access, bind->file_path,
+                                        bind->region ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+                                                     : DUCKHTS_HTS_IO_PROFILE_STREAMING);
     if (!init->fp) {
-        duckdb_init_set_error(info, "read_bed: failed to open file during init");
+        char err[640];
+        snprintf(err, sizeof(err), "read_bed: failed to open file during init%s",
+                 duckhts_file_access_reason(bind->access, bind->file_path));
+        duckdb_init_set_error(info, err);
         destroy_bed_init(init);
         return;
     }
-    duckhts_apply_remote_hts_tuning(init->fp, bind->file_path,
-                                    bind->region
-                                        ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
-                                        : DUCKHTS_HTS_IO_PROFILE_STREAMING);
 
     if (bind->region) {
-        init->tbx = tbx_index_load3(bind->file_path, bind->index_path, HTS_IDX_SILENT_FAIL);
+        init->tbx = duckhts_file_access_tbx_index_load(bind->access, bind->file_path, bind->index_path,
+                                                       HTS_IDX_SILENT_FAIL);
         if (!init->tbx) {
             duckdb_init_set_error(info, "read_bed: failed to load tabix index");
             destroy_bed_init(init);
@@ -610,6 +627,7 @@ static void destroy_fasta_nuc_bind(void *data) {
     fasta_nuc_bind_data_t *bind = (fasta_nuc_bind_data_t *)data;
     if (!bind) return;
     if (bind->fasta_path) duckdb_free(bind->fasta_path);
+    duckhts_file_access_destroy(bind->access);
     if (bind->index_path) duckdb_free(bind->index_path);
     if (bind->gzi_path) duckdb_free(bind->gzi_path);
     if (bind->bed_path) duckdb_free(bind->bed_path);
@@ -716,9 +734,15 @@ static void fasta_nuc_bind(duckdb_bind_info info) {
     if (include_seq_val && !duckdb_is_null_value(include_seq_val)) include_seq = duckdb_get_bool(include_seq_val);
     if (include_seq_val) duckdb_destroy_value(&include_seq_val);
 
-    faidx_t *fai = fai_load3_format(fasta_path, index_path, gzi_path, 0, FAI_FASTA);
+    duckhts_file_access_t *access = NULL;
+    faidx_t *fai = NULL;
+    if (duckhts_file_access_bind(info, "fasta_nuc", &access)) {
+        fai = duckhts_file_access_fai_load(access, fasta_path, index_path, gzi_path, 0, FAI_FASTA,
+                                           DUCKHTS_HTS_IO_PROFILE_METADATA);
+        if (!fai) duckdb_bind_set_error(info, "fasta_nuc: failed to open FASTA index");
+    }
     if (!fai) {
-        duckdb_bind_set_error(info, "fasta_nuc: failed to open FASTA index");
+        duckhts_file_access_destroy(access);
         duckdb_free(fasta_path);
         if (bed_path) duckdb_free(bed_path);
         if (region) duckdb_free(region);
@@ -733,6 +757,7 @@ static void fasta_nuc_bind(duckdb_bind_info info) {
 
     fasta_nuc_bind_data_t *bind = (fasta_nuc_bind_data_t *)duckdb_malloc(sizeof(fasta_nuc_bind_data_t));
     bind->fasta_path = fasta_path;
+    bind->access = access;
     bind->index_path = index_path;
     bind->gzi_path = gzi_path;
     bind->bed_path = bed_path;
@@ -764,15 +789,14 @@ static void fasta_nuc_init(duckdb_init_info info) {
     fasta_nuc_init_data_t *init = (fasta_nuc_init_data_t *)duckdb_malloc(sizeof(fasta_nuc_init_data_t));
     memset(init, 0, sizeof(*init));
     init->bind = bind;
-    init->fai = fai_load3_format(bind->fasta_path, bind->index_path,
-                                 bind->gzi_path, 0, FAI_FASTA);
+    init->fai = duckhts_file_access_fai_load(bind->access, bind->fasta_path, bind->index_path,
+                                             bind->gzi_path, 0, FAI_FASTA,
+                                             DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (!init->fai) {
         duckdb_init_set_error(info, "fasta_nuc: failed to load FASTA index");
         destroy_fasta_nuc_init(init);
         return;
     }
-    duckhts_apply_remote_faidx_tuning(init->fai, bind->fasta_path,
-                                      DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION);
     if (!init_fasta_region(init, bind->region)) {
         duckdb_init_set_error(info, "fasta_nuc: invalid FASTA region");
         destroy_fasta_nuc_init(init);
@@ -780,18 +804,20 @@ static void fasta_nuc_init(duckdb_init_info info) {
     }
 
     if (bind->mode == FASTA_NUC_MODE_BED) {
-        init->bed_fp = hts_open(bind->bed_path, "r");
+        init->bed_fp = duckhts_file_access_open(bind->access, bind->bed_path,
+                                                bind->region ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
+                                                             : DUCKHTS_HTS_IO_PROFILE_STREAMING);
         if (!init->bed_fp) {
-            duckdb_init_set_error(info, "fasta_nuc: failed to open BED file");
+            char err[640];
+            snprintf(err, sizeof(err), "fasta_nuc: failed to open BED file%s",
+                     duckhts_file_access_reason(bind->access, bind->bed_path));
+            duckdb_init_set_error(info, err);
             destroy_fasta_nuc_init(init);
             return;
         }
-        duckhts_apply_remote_hts_tuning(init->bed_fp, bind->bed_path,
-                                        bind->region
-                                            ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION
-                                            : DUCKHTS_HTS_IO_PROFILE_STREAMING);
         if (bind->region) {
-            init->bed_tbx = tbx_index_load3(bind->bed_path, bind->bed_index_path, HTS_IDX_SILENT_FAIL);
+            init->bed_tbx = duckhts_file_access_tbx_index_load(bind->access, bind->bed_path,
+                                                               bind->bed_index_path, HTS_IDX_SILENT_FAIL);
             if (init->bed_tbx) {
                 init->bed_itr = tbx_itr_querys(init->bed_tbx, bind->region);
                 if (!init->bed_itr) {

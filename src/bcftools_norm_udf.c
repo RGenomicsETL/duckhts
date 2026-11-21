@@ -11,7 +11,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/hts.h>
 #include <htslib/kstring.h>
 
-#include "reference_cache.h"
+#include "reference_access.h"
 
 #define NORM_ALN_WIN 100
 enum {
@@ -132,15 +132,20 @@ static int is_gvcf_symbolic_alt(const char *alt) {
     return alt && (strcmp(alt, "<NON_REF>") == 0 || strcmp(alt, "<*>") == 0);
 }
 
-static duckhts_reference_entry_t *get_norm_cache_entry(const char *fasta_path,
-    const char *fai_path, const char *gzi_path, char **err) {
+static void bcftools_norm_row_init(duckdb_init_info info) {
+    duckhts_reference_access_scalar_init(info, "bcftools_norm_row");
+}
+
+static duckhts_reference_entry_t *get_norm_cache_entry(duckhts_reference_access_t *references,
+    const char *fasta_path, const char *fai_path, const char *gzi_path, char **err) {
     const char *cause = NULL;
-    duckhts_reference_entry_t *entry =
-        duckhts_reference_cache_get(fasta_path, fai_path, gzi_path, 1, &cause);
+    const char *reason = "";
+    duckhts_reference_entry_t *entry = duckhts_reference_access_get(
+        references, fasta_path, fai_path, gzi_path, 1, &cause, &reason);
     if (!entry) {
-        size_t message_size = sizeof("bcftools_norm_row: ") + strlen(cause);
+        size_t message_size = sizeof("bcftools_norm_row: ") + strlen(cause) + strlen(reason);
         *err = malloc(message_size);
-        if (*err) snprintf(*err, message_size, "bcftools_norm_row: %s", cause);
+        if (*err) snprintf(*err, message_size, "bcftools_norm_row: %s%s", cause, reason);
     }
     return entry;
 }
@@ -868,6 +873,7 @@ static void bcftools_norm_row_scalar(duckdb_function_info info,
     char *cached_fai_path = NULL;
     char *cached_gzi_path = NULL;
     duckhts_reference_entry_t *cached_entry = NULL;
+    duckhts_reference_access_t *references = duckdb_scalar_function_get_state(info);
 
     for (int i = 0; i < NORM_OUT_COUNT; i++) child_vecs[i] = duckdb_struct_vector_get_child(output, (idx_t)i);
     duckdb_list_vector_set_size(child_vecs[NORM_OUT_ALT], 0);
@@ -973,7 +979,7 @@ static void bcftools_norm_row_scalar(duckdb_function_info info,
                 }
             }
 
-            cached_entry = get_norm_cache_entry(fasta_key, fai_key, gzi_key, &err);
+            cached_entry = get_norm_cache_entry(references, fasta_key, fai_key, gzi_key, &err);
             if (!cached_entry) {
                 duckdb_scalar_function_set_error(info, err ? err : "bcftools_norm_row: failed to load FASTA index");
                 free(err);
@@ -1098,6 +1104,7 @@ static void add_bcftools_norm_scalar(
     duckdb_scalar_function_set_return_type(fn, struct_type);
     duckdb_scalar_function_set_special_handling(fn);
     duckdb_scalar_function_set_function(fn, bcftools_norm_row_scalar);
+    duckdb_scalar_function_set_init(fn, bcftools_norm_row_init);
     duckdb_add_scalar_function_to_set(set, fn);
     duckdb_destroy_scalar_function(&fn);
 

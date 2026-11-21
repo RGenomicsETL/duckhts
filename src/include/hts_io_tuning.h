@@ -12,7 +12,8 @@
  * public header.  Give direct hFILE consumers a normal file-scope prototype. */
 extern int hfile_set_blksize(hFILE *fp, size_t bufsiz);
 
-/* Remote-I/O tuning policy.
+/* Remote-I/O tuning policy. hts_file_access.c applies it to every file it
+ * opens; the reference cache applies the FASTA part to the handles it keeps.
  *
  * Principle:
  *   - only tune paths that htslib classifies as remote
@@ -144,50 +145,6 @@ static inline int duckhts_remote_hfile_block_size_bytes(duckhts_hts_io_profile_t
             return 0;
     }
 #endif
-}
-
-static inline void duckhts_apply_remote_hts_tuning(htsFile *fp,
-                                                    const char *path,
-                                                    duckhts_hts_io_profile_t profile) {
-    int block_size;
-    int cache_size;
-
-    if (!fp || !duckhts_is_remote_path(path) || profile == DUCKHTS_HTS_IO_PROFILE_METADATA) {
-        return;
-    }
-
-    block_size = duckhts_remote_block_size_bytes(profile);
-    cache_size = duckhts_remote_cache_size_bytes(profile);
-
-    if (block_size > 0) {
-        (void)hts_set_opt(fp, HTS_OPT_BLOCK_SIZE, block_size);
-    }
-    if (cache_size > 0) {
-        (void)hts_set_opt(fp, HTS_OPT_CACHE_SIZE, cache_size);
-    }
-}
-
-/* Replaces the hFILE block size that duckhts_apply_remote_hts_tuning chose for
- * a remote file. block_size 0 keeps that choice. */
-static inline void duckhts_apply_remote_block_size(htsFile *fp, const char *path, int block_size) {
-    if (fp && block_size > 0 && duckhts_is_remote_path(path)) {
-        (void)hts_set_opt(fp, HTS_OPT_BLOCK_SIZE, block_size);
-    }
-}
-
-static inline void duckhts_apply_remote_hfile_tuning(hFILE *fp,
-                                                      const char *path,
-                                                      duckhts_hts_io_profile_t profile) {
-    int block_size;
-
-    if (!fp || !duckhts_is_remote_path(path) || profile == DUCKHTS_HTS_IO_PROFILE_METADATA) {
-        return;
-    }
-
-    block_size = duckhts_remote_hfile_block_size_bytes(profile);
-    if (block_size > 0) {
-        (void)hfile_set_blksize(fp, (size_t)block_size);
-    }
 }
 
 static inline void duckhts_apply_remote_faidx_tuning(faidx_t *fai,

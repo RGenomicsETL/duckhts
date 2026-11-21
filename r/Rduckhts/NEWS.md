@@ -1,12 +1,18 @@
 # Rduckhts (development version)
 
 - `DBI::dbExecute(con, "SET duckhts_remote_block_size = 4194304")` sets the bytes htslib
-  asks for in each read of a remote file in `read_bam`; the default, 0, keeps the size
+  asks for in each read of a remote file, in every reader; the default, 0, keeps the size
   DuckHTS chooses.
-- `read_bam`, and so `rduckhts_bam()`, can read through the DuckDB file system: run
-  `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")` first. DuckDB secrets and
-  file-access settings then apply to the alignment file and its index. The default,
-  `'htslib'`, keeps htslib's own file access.
+- Every reader, and so every `rduckhts_*()` wrapper that reads a file, can read through
+  the DuckDB file system: run `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")`
+  first. DuckDB secrets and file-access settings then apply to the input, its index, a
+  FASTA with its `.fai`, and the reference given to an alignment reader. That route is
+  read-only and does not build a missing index, so `rduckhts_bcftools_norm()`,
+  `rduckhts_munge()` and `rduckhts_liftover()` need the `.fai` beside their FASTA there.
+  Writers and index builders keep htslib's own file access, as does the default,
+  `'htslib'`. "File access" under `read_bam` in
+  `system.file("function_catalog", "reference.md", package = "Rduckhts")` states the
+  contract.
 - **The `duckdb` R package 1.5.6 or newer is required** (`Imports: duckdb (>= 1.5.6)`).
   The bundled extension is built for the stable DuckDB C API v1.5.6, and an older DuckDB
   refuses to load it. The bundled DuckDB C API headers are the unmodified v1.5.6 ones.

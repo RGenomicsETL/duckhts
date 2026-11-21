@@ -34,6 +34,7 @@ typedef struct {
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     char *index_path;
     char **regions;
     unsigned int region_count;
@@ -72,6 +73,7 @@ typedef struct {
 static void geno_bind_destroy(void *data) {
     geno_bind_t *bind = data;
     duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     duckdb_free(bind->index_path);
     free(bind->regions);
     duckhts_interval_plan_destroy(&bind->plan);
@@ -230,6 +232,10 @@ static void geno_bind(duckdb_bind_info info, int catalog) {
     char *selector = NULL, *region = NULL, *mode = NULL, *policy = NULL;
     char error[512] = "read_geno: out of memory allocating bind state";
     if (!bind) goto fail;
+    if (!duckhts_file_access_bind(info, catalog ? "read_bcf_samples" : "read_geno", &bind->access)) {
+        geno_bind_destroy(bind);
+        return;
+    }
     bind->catalog = catalog;
     duckdb_value value = duckdb_bind_get_parameter(info, 0);
     int path_null = !value || duckdb_is_null_value(value);
@@ -289,7 +295,7 @@ static void geno_bind(duckdb_bind_info info, int catalog) {
         bind->include_filter = value && !duckdb_is_null_value(value) && duckdb_get_bool(value);
         if (value) duckdb_destroy_value(&value);
     }
-    if (!duckhts_bcf_scan_open(&metadata, bind->path, NULL, 0, DUCKHTS_HTS_IO_PROFILE_METADATA,
+    if (!duckhts_bcf_scan_open(&metadata, bind->access, bind->path, NULL, 0, DUCKHTS_HTS_IO_PROFILE_METADATA,
             catalog ? "read_bcf_samples" : "read_geno", error, sizeof(error)) ||
         !duckhts_bcf_samples_build(&bind->samples, metadata.hdr, selector, error, sizeof(error))) goto fail;
     if (bind->raw_gt && hts_get_format(metadata.fp)->format != vcf) {
@@ -301,7 +307,7 @@ static void geno_bind(duckdb_bind_info info, int catalog) {
     /* A full scan always follows the input stream, independent of index
      * availability. Only explicit regions need an immutable index snapshot. */
     if (bind->selector) {
-        int loaded = duckhts_bcf_index_load(&bind->index, hts_get_format(metadata.fp)->format,
+        int loaded = duckhts_bcf_index_load(&bind->index, bind->access, hts_get_format(metadata.fp)->format,
                                             bind->path, bind->index_path, HTS_IDX_SILENT_FAIL);
         if (loaded <= 0) {
             snprintf(error, sizeof(error), "read_geno: %s", loaded < 0
@@ -377,7 +383,7 @@ static void geno_local_init(duckdb_init_info info) {
             if (!local->formats) goto fail;
             local->format_count = bind->field_count;
         }
-        if (!duckhts_bcf_scan_open(&local->scan, bind->path, &bind->index, bind->decompression_threads,
+        if (!duckhts_bcf_scan_open(&local->scan, bind->access, bind->path, &bind->index, bind->decompression_threads,
                 bind->selector ? DUCKHTS_HTS_IO_PROFILE_INDEXED_REGION : DUCKHTS_HTS_IO_PROFILE_STREAMING,
                 "read_geno", error, sizeof(error)) ||
             !duckhts_bcf_samples_apply(&bind->samples, local->scan.hdr, error, sizeof(error))) goto fail;

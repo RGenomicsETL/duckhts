@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "hts_file_access.h"
+
 typedef enum {
     DUCKHTS_QUALITY_ENCODING_AUTO = 0,
     DUCKHTS_QUALITY_ENCODING_PHRED33,
@@ -35,7 +37,9 @@ int duckhts_parse_quality_representation(const char *text,
                                          duckhts_quality_representation *out);
 uint8_t duckhts_normalize_fastq_quality(uint8_t stored_qual,
                                         duckhts_quality_encoding enc);
-int duckhts_detect_fastq_quality_encoding(const char *path, int64_t max_records,
+/* Reads path through access (hts_file_access.h). */
+int duckhts_detect_fastq_quality_encoding(const duckhts_file_access_t *access,
+                                          const char *path, int64_t max_records,
                                           duckhts_quality_detect_result *out,
                                           char *errbuf, size_t errbuf_len);
 

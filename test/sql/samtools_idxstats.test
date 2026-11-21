@@ -77,3 +77,27 @@ SELECT * FROM duckhts_samtools_idxstats(
 );
 ----
 output already exists
+
+# The statements below repeat ones asserted above with htslib's own file access,
+# now through the DuckDB file system of the connection: the rows must not change,
+# and a failed open ends with DuckDB's reason.
+statement ok
+SET duckhts_file_system = 'duckdb';
+
+query I
+SELECT output_path = '__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt'
+FROM duckhts_samtools_idxstats(
+  '__WORKING_DIRECTORY__/test/data/fixture_mixed.cram',
+  output := '__WORKING_DIRECTORY__/fixture_mixed.cram.idxstats.txt',
+  overwrite := TRUE
+);
+----
+1
+
+statement error
+SELECT * FROM duckhts_samtools_idxstats('__WORKING_DIRECTORY__/test/data/no_such_input', output := '__WORKING_DIRECTORY__/no_such_input.idxstats.txt');
+----
+No such file or directory
+
+statement ok
+RESET duckhts_file_system;

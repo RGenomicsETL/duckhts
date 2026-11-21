@@ -8,6 +8,7 @@ DUCKDB_EXTENSION_EXTERN
 
 typedef struct {
     char *path;
+    duckhts_file_access_t *access;
     int64_t max_records;
 } quality_detect_bind_t;
 
@@ -32,6 +33,7 @@ static void destroy_quality_detect_bind(void *data) {
     quality_detect_bind_t *bind = (quality_detect_bind_t *)data;
     if (!bind) return;
     if (bind->path) duckdb_free(bind->path);
+    duckhts_file_access_destroy(bind->access);
     duckdb_free(bind);
 }
 
@@ -86,6 +88,10 @@ static void detect_quality_encoding_bind(duckdb_bind_info info) {
     memset(bind, 0, sizeof(*bind));
     bind->path = path;
     bind->max_records = max_records;
+    if (!duckhts_file_access_bind(info, "detect_quality_encoding", &bind->access)) {
+        destroy_quality_detect_bind(bind);
+        return;
+    }
 
     varchar_type = duckdb_create_logical_type(DUCKDB_TYPE_VARCHAR);
     bigint_type = duckdb_create_logical_type(DUCKDB_TYPE_BIGINT);
@@ -110,7 +116,7 @@ static void detect_quality_encoding_init(duckdb_init_info info) {
     char compat[128];
     char err[512];
     memset(init, 0, sizeof(*init));
-    if (duckhts_detect_fastq_quality_encoding(bind->path, bind->max_records, &init->detect, err, sizeof(err)) != 0) {
+    if (duckhts_detect_fastq_quality_encoding(bind->access, bind->path, bind->max_records, &init->detect, err, sizeof(err)) != 0) {
         duckdb_init_set_error(info, err);
         duckdb_free(init);
         return;
