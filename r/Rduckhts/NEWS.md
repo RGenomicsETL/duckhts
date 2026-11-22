@@ -12,7 +12,8 @@
   the DuckDB file system: run `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")`
   first. DuckDB secrets and file-access settings then apply to the input, its index, a
   FASTA with its `.fai`, the reference given to an alignment reader, and a `@file` sample
-  list in the `include` or `exclude` of `rduckhts_score()`. That route is
+  list in the `include` or `exclude` of `rduckhts_score()`; the panel of
+  `rduckhts_somalier_bam_counts()` is read under the same file-access settings. That route is
   read-only and does not build a missing index, so `rduckhts_bcftools_norm()`,
   `rduckhts_munge()` and `rduckhts_liftover()` need the `.fai` beside their FASTA there.
   Writers and index builders keep htslib's own file access, as does the default,

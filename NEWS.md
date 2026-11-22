@@ -33,8 +33,10 @@
   an alignment reader, CRAM included. DuckDB secrets, `enable_external_access`, httpfs and
   registered file systems then apply. The include and exclude expressions of
   `bcftools_score` read a `@file` sample list the same way. An error opening a data file
-  ends with DuckDB's reason; `fasta_nuc` with `bin_width`, `duckhts_somalier_bam_counts`, a
-  CRAM reference and an unreadable `index_path` report their own text. The route is
+  ends with DuckDB's reason; `duckhts_somalier_bam_counts`, a CRAM reference and an
+  unreadable `index_path` report their own text. The `panel_parquet` of
+  `duckhts_somalier_bam_counts` is read under the connection's `enable_external_access`,
+  `allowed_directories` and `allowed_paths`. The route is
   read-only: it looks for an index beside the file only, before the query string of a URL,
   never reads or writes the working directory while it does, and does not build a missing
   index, so `bcftools_liftover`,

@@ -28,8 +28,10 @@ MODULE = {"src/hts_file_access.c", "src/duckdb_fs_hfile.c"}
 # hts_readlist and hts_readlines open their argument when it names a file,
 # regidx_init and bcf_sr_regions_init when given a file name, and
 # bcf_sr_set_regions, bcf_sr_set_targets and bcf_sr_set_samples when told the
-# argument is a file. These are the htslib functions in third_party/htslib
-# whose declarations take a file name to open.
+# argument is a file. bam_index_load and bam_index_build are sam.h macros over
+# the sam_index functions; the guard sees the macro name in source, so it lists
+# both. The list covers the functions found in the htslib and libBigWig headers
+# that open a file by name; a new one needs adding here.
 NAME_OPEN_FUNCTIONS = (
     "hts_open", "hts_open_format", "hts_hopen", "sam_open", "sam_open_format",
     "bcf_open", "vcf_open", "cram_open", "bgzf_open", "bgzf_hopen", "hopen",
@@ -47,7 +49,8 @@ NAME_OPEN_FUNCTIONS = (
     "bcf_sr_set_regions", "bcf_sr_set_targets", "bcf_sr_set_samples",
     "hts_readlist", "hts_readlines", "regidx_init", "bcf_sr_regions_init",
     "bcf_hdr_set", "hts_file_type", "bgzf_is_bgzf", "knet_open",
-    "bwOpen", "bbOpen",
+    "bcf_sweep_init", "bam_index_load", "bam_index_build",
+    "bwOpen", "bbOpen", "bwIsBigWig", "bbIsBigBed",
 )
 # hts_set_opt(fp, CRAM_OPT_REFERENCE, path) opens the reference by name.
 NAME_OPEN_OPTIONS = ("CRAM_OPT_REFERENCE",)

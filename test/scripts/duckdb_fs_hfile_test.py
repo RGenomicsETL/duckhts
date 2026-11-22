@@ -854,9 +854,16 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             "bed": str(DATA / "fixture_mixed_regions.bed"),
             "vcf": str(DATA / "score_input.vcf"),
             "chain": str(DATA / "liftover.chain"),
-            "panel": str(DATA / "no-such-panel.parquet"),
         }
         scratch = Path(self.scratch.name)
+        # A real panel, so duckhts_somalier_bam_counts reaches the alignment open.
+        panel = scratch / "missing_input_panel.parquet"
+        self.oracle.execute(
+            "COPY (SELECT * FROM (VALUES ('WBcel235', 0, 'CHROMOSOME_I', 1, 'A', 'G'))"
+            " panel(assembly, site_index, region, position, allele_a, allele_b)) TO "
+            + quoted(panel) + " (FORMAT parquet)"
+        )
+        present["panel"] = str(panel)
         # Each relation names the missing file once; the message must carry DuckDB's reason for it.
         with_reason = {
             "read_bam": ("SELECT * FROM read_bam(?)", [missing]),
@@ -890,6 +897,9 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             "read_fastq mate": ("SELECT * FROM read_fastq(?, mate_path := ?)", [str(DATA / "r1.fq"), missing]),
             "detect_quality_encoding": ("SELECT * FROM detect_quality_encoding(?)", [missing]),
             "fasta_nuc bed": ("SELECT * FROM fasta_nuc(?, bed_path := ?)", [present["fasta"], missing]),
+            "fasta_nuc": ("SELECT * FROM fasta_nuc(?, bin_width := 50)", [missing]),
+            "fasta_nuc bed missing fasta": (
+                "SELECT * FROM fasta_nuc(?, bed_path := ?)", [missing, present["bed"]]),
             "read_genbank": ("SELECT * FROM read_genbank(?)", [missing]),
             "genbank_to_fasta": (
                 "SELECT * FROM genbank_to_fasta(?, output_path := ?)", [missing, str(scratch / "none.fa")]),
@@ -907,7 +917,6 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
         }
         # These report the failure without a slot for the reason.
         class_only = {
-            "fasta_nuc": ("SELECT * FROM fasta_nuc(?, bin_width := 50)", [missing]),
             "duckhts_somalier_bam_counts": (
                 "SELECT * FROM duckhts_somalier_bam_counts(?, NULL, 'sample-1', ?, panel_parquet := ?)",
                 [missing, str(DATA / "ce.fa"), present["panel"]]),
@@ -957,6 +966,53 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
                 with self.subTest(reader=reader, access="disabled"):
                     with self.assertRaises(duckdb.Error):
                         connection.execute(relation, parameters).fetchall()
+
+    def test_duckdb_access_policy_applies_to_a_somalier_panel(self):
+        """panel_parquet is read inside allowed_directories or allowed_paths only."""
+        with tempfile.TemporaryDirectory() as root:
+            inside, outside = Path(root, "in'side"), Path(root, "outside")
+            inside.mkdir()
+            outside.mkdir()
+            for name in ("range.bam", "range.bam.bai", "ce.fa", "ce.fa.fai"):
+                shutil.copy(DATA / name, inside / name)
+            for directory in (inside, outside):
+                self.oracle.execute(
+                    "COPY (SELECT * FROM (VALUES ('WBcel235', 0, 'CHROMOSOME_I', 1, 'A', 'G'),"
+                    " ('WBcel235', 1, 'CHROMOSOME_I', 914, 'A', 'C'))"
+                    " panel(assembly, site_index, region, position, allele_a, allele_b)) TO "
+                    + quoted(directory / "panel.parquet") + " (FORMAT parquet)"
+                )
+            relation = (
+                "SELECT * FROM duckhts_somalier_bam_counts(?, NULL, 's', ?, panel_parquet := ?) ORDER BY ALL"
+            )
+
+            def counts(file_system, panel, restricted, allowed_paths=()):
+                with connect(file_system) as connection:
+                    if restricted:
+                        connection.execute("SET allowed_directories = [" + quoted(str(inside) + "/") + "]")
+                        if allowed_paths:
+                            connection.execute(
+                                "SET allowed_paths = [" + ", ".join(quoted(path) for path in allowed_paths) + "]")
+                        connection.execute("SET enable_external_access = false")
+                    parameters = [str(inside / "range.bam"), str(inside / "ce.fa"), str(panel)]
+                    return connection.execute(relation, parameters).fetchall()
+
+            expected = counts("htslib", inside / "panel.parquet", restricted=False)
+            self.assertEqual(len(expected), 2)
+            for panel in (inside / "panel.parquet", outside / "panel.parquet"):
+                with self.subTest(route="htslib", panel=panel.parent.name):
+                    self.assertEqual(counts("htslib", panel, restricted=True), expected)
+            with self.subTest(route="duckdb", panel="inside"):
+                self.assertEqual(counts("duckdb", inside / "panel.parquet", restricted=True), expected)
+            with self.subTest(route="duckdb", panel="outside"):
+                with self.assertRaisesRegex(
+                        duckdb.Error, 'Permission Error: Cannot access file "' + re.escape(str(outside / "panel.parquet"))):
+                    counts("duckdb", outside / "panel.parquet", restricted=True)
+            with self.subTest(route="duckdb", panel="outside, in allowed_paths"):
+                self.assertEqual(
+                    counts("duckdb", outside / "panel.parquet", restricted=True,
+                           allowed_paths=[outside / "panel.parquet"]),
+                    expected)
 
     def test_duckdb_access_policy_applies_to_a_score_sample_list(self):
         """A @file sample list in include is read like the inputs: inside allowed_directories only."""

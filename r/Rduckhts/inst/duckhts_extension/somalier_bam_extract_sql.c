@@ -15,6 +15,7 @@ DUCKDB_EXTENSION_EXTERN
 #include <htslib/faidx.h>
 #include <htslib/hfile.h>
 #include <htslib/hts.h>
+#include <htslib/kstring.h>
 #include <htslib/sam.h>
 
 #include "include/bam_site_counts.h"
@@ -576,8 +577,11 @@ static void add_result_column(duckdb_bind_info info, const char *name,
 }
 
 static bool load_panel_rows_private(const bam_extract_bind_t *bind,
+                                    const char *access_policy_sql,
                                     bam_extract_panel_t *panel,
                                     char *error, size_t error_size);
+static char *panel_access_policy_sql(duckdb_bind_info info, const bam_extract_bind_t *bind,
+                                     char *error, size_t error_size);
 
 static void bam_extract_bind(duckdb_bind_info info) {
     bam_extract_bind_t *bind = duckdb_malloc(sizeof(*bind));
@@ -698,7 +702,14 @@ static void bam_extract_bind(duckdb_bind_info info) {
     }
 
     /* Bind runs on the client thread; see load_panel_rows_private. */
-    if (!load_panel_rows_private(bind, &bind->panel, error, sizeof(error))) {
+    char *access_policy_sql = panel_access_policy_sql(info, bind, error, sizeof(error));
+    if (error[0] != '\0') {
+        goto fail;
+    }
+    const bool panel_loaded = load_panel_rows_private(bind, access_policy_sql, &bind->panel,
+                                                      error, sizeof(error));
+    free(access_policy_sql);
+    if (!panel_loaded) {
         goto fail;
     }
 
@@ -927,7 +938,72 @@ cleanup:
    builds of DuckDB destroy that object on freed memory when a worker thread
    exits (winpthreads runs key destructors in creation order, so emutls frees
    the storage before libstdc++ runs the destructor). */
+/* Appends a setting's list of paths as a SQL list literal. */
+static bool append_path_list(kstring_t *sql, duckdb_value list) {
+    if (kputc('[', sql) < 0) return false;
+    const idx_t size = list && !duckdb_is_null_value(list) ? duckdb_get_list_size(list) : 0;
+    for (idx_t i = 0; i < size; i++) {
+        duckdb_value child = duckdb_get_list_child(list, i);
+        char *path = child ? duckdb_get_varchar(child) : NULL;
+        bool ok = path != NULL && (i == 0 || kputs(", ", sql) >= 0) && kputc('\'', sql) >= 0;
+        for (const char *c = path; ok && *c; c++) {
+            ok = (*c != '\'' || kputc('\'', sql) >= 0) && kputc(*c, sql) >= 0;
+        }
+        ok = ok && kputc('\'', sql) >= 0;
+        duckdb_free(path);
+        if (child) duckdb_destroy_value(&child);
+        if (!ok) return false;
+    }
+    return kputc(']', sql) >= 0;
+}
+
+/*
+ * With duckhts_file_system = 'duckdb', the caller's enable_external_access,
+ * allowed_directories and allowed_paths as SET statements for the private
+ * panel reader, so the panel is read under the same file-access policy as
+ * every other input. NULL when there is nothing to apply: with 'htslib', and
+ * when external access is enabled. On failure writes error and returns NULL.
+ */
+static char *panel_access_policy_sql(duckdb_bind_info info, const bam_extract_bind_t *bind,
+                                     char *error, size_t error_size) {
+    if (!duckhts_file_access_uses_duckdb(bind->access)) {
+        return NULL;
+    }
+    duckdb_client_context context = NULL;
+    duckdb_table_function_get_client_context(info, &context);
+    if (!context) {
+        copy_error(error, error_size,
+            "duckhts_somalier_bam_counts: DuckDB provided no client context");
+        return NULL;
+    }
+    duckdb_value external = duckdb_client_context_get_config_option(context, "enable_external_access", NULL);
+    const bool restricted = external && !duckdb_is_null_value(external) && !duckdb_get_bool(external);
+    if (external) duckdb_destroy_value(&external);
+    kstring_t sql = KS_INITIALIZE;
+    bool ok = true;
+    if (restricted) {
+        duckdb_value directories =
+            duckdb_client_context_get_config_option(context, "allowed_directories", NULL);
+        duckdb_value paths = duckdb_client_context_get_config_option(context, "allowed_paths", NULL);
+        /* The lists must be set while external access is still enabled. */
+        ok = kputs("SET allowed_directories = ", &sql) >= 0 && append_path_list(&sql, directories) &&
+             kputs("; SET allowed_paths = ", &sql) >= 0 && append_path_list(&sql, paths) &&
+             kputs("; SET enable_external_access = false", &sql) >= 0;
+        if (directories) duckdb_destroy_value(&directories);
+        if (paths) duckdb_destroy_value(&paths);
+    }
+    duckdb_destroy_client_context(&context);
+    if (!ok) {
+        free(sql.s);
+        copy_error(error, error_size,
+            "duckhts_somalier_bam_counts: out of memory applying the file-access policy to the panel");
+        return NULL;
+    }
+    return ks_release(&sql);
+}
+
 static bool load_panel_rows_private(const bam_extract_bind_t *bind,
+                                    const char *access_policy_sql,
                                     bam_extract_panel_t *panel,
                                     char *error, size_t error_size) {
     duckdb_config config = NULL;
@@ -954,6 +1030,10 @@ static bool load_panel_rows_private(const bam_extract_bind_t *bind,
             "duckhts_somalier_bam_counts: could not connect the panel reader");
         goto cleanup;
     }
+    if (access_policy_sql && !execute_query(connection, access_policy_sql, &result, error, error_size)) {
+        goto cleanup;
+    }
+    duckdb_destroy_result(&result);
     macro_sql = duckhts_somalier_panel_sha256_macro_sql();
     if (!macro_sql) {
         copy_error(error, error_size,

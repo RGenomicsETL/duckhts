@@ -739,7 +739,24 @@ static void fasta_nuc_bind(duckdb_bind_info info) {
     if (duckhts_file_access_bind(info, "fasta_nuc", &access)) {
         fai = duckhts_file_access_fai_load(access, fasta_path, index_path, gzi_path, 0, FAI_FASTA,
                                            DUCKHTS_HTS_IO_PROFILE_METADATA);
-        if (!fai) duckdb_bind_set_error(info, "fasta_nuc: failed to open FASTA index");
+        if (!fai) {
+            /* htslib opens the .fai before the FASTA, so DuckDB's reason may
+             * concern either; the reason text names the file it concerns. */
+            char reason[512];
+            snprintf(reason, sizeof(reason), "%s", duckhts_file_access_reason(access, fasta_path));
+            if (!reason[0]) {
+                kstring_t fai_default = KS_INITIALIZE;
+                const char *fai_path = index_path;
+                if (!fai_path && ksprintf(&fai_default, "%s.fai", fasta_path) >= 0) fai_path = fai_default.s;
+                if (fai_path) {
+                    snprintf(reason, sizeof(reason), "%s", duckhts_file_access_reason(access, fai_path));
+                }
+                free(fai_default.s);
+            }
+            char err[1024];
+            snprintf(err, sizeof(err), "fasta_nuc: failed to open FASTA index%s", reason);
+            duckdb_bind_set_error(info, err);
+        }
     }
     if (!fai) {
         duckhts_file_access_destroy(access);
