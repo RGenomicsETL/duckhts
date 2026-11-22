@@ -29,6 +29,7 @@ duckhts_bigwig_open(const duckhts_file_access_t *access, const char *path)
     bigWigFile_t *file;
 
     open_access = access;
+    /* duckhts-file-access: allow libBigWig opens the file through urlOpen(), which this adapter routes */
     file = bwOpen(path, NULL, "r");
     open_access = NULL;
     return file;

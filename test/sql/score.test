@@ -906,5 +906,34 @@ SELECT * FROM bcftools_score('__WORKING_DIRECTORY__/test/data/no_such_input', '_
 ----
 No such file or directory
 
+# A @file sample list in include is read through the same file access.
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'GT[@__WORKING_DIRECTORY__/test/data/score_samples_S2.txt]="alt"'
+)
+ORDER BY SAMPLE
+----
+S1	-0.2
+S2	0.1
+
 statement ok
 RESET duckhts_file_system;
+
+query TT
+SELECT SAMPLE, round(score_summary, 3)
+FROM bcftools_score(
+  '__WORKING_DIRECTORY__/test/data/score_input.vcf',
+  '__WORKING_DIRECTORY__/test/data/score_summary.tsv',
+  use := 'GT',
+  columns := 'PLINK',
+  include := 'GT[@__WORKING_DIRECTORY__/test/data/score_samples_S2.txt]="alt"'
+)
+ORDER BY SAMPLE
+----
+S1	-0.2
+S2	0.1

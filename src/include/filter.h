@@ -92,6 +92,20 @@ const int *filter_ext_types(filter_t *filter, int *n_ext);
   */
 filter_t *filter_parse(bcf_hdr_t *hdr, const char *str);
 
+/**
+  *  DuckHTS: reads the sample list of a `@file` term in an expression. Same
+  *  contract as hts_readlist(path, 1, n): the non-empty lines of the file, or
+  *  NULL when it cannot be read; the caller frees each string and the array.
+  */
+typedef char **(*filter_readlist_fn)(void *data, const char *path, int *n);
+
+/**
+  *  DuckHTS: filter_parse() whose `@file` sample lists are read by reader
+  *  with reader_data. filter_parse() reads them with hts_readlist().
+  */
+filter_t *filter_parse_with_reader(bcf_hdr_t *hdr, const char *str,
+                                   filter_readlist_fn reader, void *reader_data);
+
 #define FILTER_OK 0
 #define FILTER_ERR_UNKN_TAGS 1
 #define FILTER_ERR_OTHER 2

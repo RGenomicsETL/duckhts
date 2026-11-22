@@ -633,8 +633,7 @@ test_bcf_duckdb_file_system <- function() {
   missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
   expect_error(
     digest(sprintf("SELECT * FROM read_bcf(%s)", missing)),
-    "Cannot open file",
-    fixed = TRUE
+    'Cannot open file "[^"]*duckhts_no_such_input"'
   )
 }
 

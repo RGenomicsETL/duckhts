@@ -31,9 +31,13 @@
   their inputs through the file system of the connection, by an htslib file backend built on the DuckDB 1.5.6 C API. That covers
   the data file, its index, a FASTA with its `.fai` and `.gzi`, and the reference given to
   an alignment reader, CRAM included. DuckDB secrets, `enable_external_access`, httpfs and
-  registered file systems then apply, and an open error ends with DuckDB's reason. The
-  route is read-only: it looks for an index beside the file only, never reads or writes
-  the working directory, and does not build a missing index, so `bcftools_liftover`,
+  registered file systems then apply. The include and exclude expressions of
+  `bcftools_score` read a `@file` sample list the same way. An error opening a data file
+  ends with DuckDB's reason; `fasta_nuc` with `bin_width`, `duckhts_somalier_bam_counts`, a
+  CRAM reference and an unreadable `index_path` report their own text. The route is
+  read-only: it looks for an index beside the file only, before the query string of a URL,
+  never reads or writes the working directory while it does, and does not build a missing
+  index, so `bcftools_liftover`,
   `bcftools_norm_row` and `bcftools_munge_row` fail on a FASTA without a `.fai` where
   htslib's file access builds one. A FASTA those three open through the DuckDB file system
   is closed when the query ends; with htslib's file access it stays open for later

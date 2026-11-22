@@ -1767,7 +1767,8 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
         if (!include_expr) {
             src->include_filt = NULL;
         } else {
-        src->include_filt = filter_parse(hdr0, include_expr);
+        src->include_filt = filter_parse_with_reader(hdr0, include_expr, duckhts_file_access_readlist,
+                                                     (void *)bind->access);
         free(include_expr);
         if (!src->include_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to evaluate include expression");
@@ -1799,7 +1800,8 @@ static int score_init_source(const score_bind_t *bind, score_scan_source_t *src,
         if (!exclude_expr) {
             src->exclude_filt = NULL;
         } else {
-        src->exclude_filt = filter_parse(hdr0, exclude_expr);
+        src->exclude_filt = filter_parse_with_reader(hdr0, exclude_expr, duckhts_file_access_readlist,
+                                                     (void *)bind->access);
         free(exclude_expr);
         if (!src->exclude_filt) {
             snprintf(err, err_sz, "bcftools_score: failed to evaluate exclude expression");

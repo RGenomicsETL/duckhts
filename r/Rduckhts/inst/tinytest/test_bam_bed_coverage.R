@@ -131,9 +131,8 @@ test_bam_bed_coverage_duckdb_file_system <- function() {
   for (i in seq_along(relations)) expect_equal(digest(relations[[i]]), expected[[i]])
   missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
   expect_error(
-    digest(sprintf("SELECT * FROM duckhts_bam_bed_coverage(%s, 'unused.bed')", missing)),
-    "Cannot open file",
-    fixed = TRUE
+    digest(sprintf("SELECT * FROM duckhts_bam_bed_coverage(%s, %s)", missing, extdata("fixture_mixed_regions.bed"))),
+    'Cannot open file "[^"]*duckhts_no_such_input"'
   )
 }
 

@@ -169,6 +169,7 @@ duckhts_reference_entry_t *duckhts_reference_cache_get(
         cache->count--;
     }
     pthread_mutex_lock(&reference_index_mutex);
+    /* duckhts-file-access: allow the thread cache of the 'htslib' route, which builds a missing index */
     entry->fai = fai_load3_format(fasta_path, fai_path, gzi_path, FAI_CREATE, FAI_FASTA);
     pthread_mutex_unlock(&reference_index_mutex);
     if (!entry->fai) {

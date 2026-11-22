@@ -243,7 +243,12 @@ def load_reference_cases(connections, directory, cases_by_fasta):
 
 
 class RangeHandler(BaseHTTPRequestHandler):
-    """Serves DATA with byte ranges; paths under /protected/ need 'Bearer sesame'."""
+    """Serves DATA with byte ranges.
+
+    Paths under /protected/ need 'Bearer sesame'. Paths under /signed/ stand for
+    presigned URLs: each needs the query string '?sig=ok' and is refused with 403
+    without it.
+    """
 
     protocol_version = "HTTP/1.1"
 
@@ -270,6 +275,11 @@ class RangeHandler(BaseHTTPRequestHandler):
                 self.reply(403)
                 return
             name = name[len("/protected") :]
+        if name.startswith("/signed/"):
+            name, _, query = name[len("/signed") :].partition("?")
+            if query != "sig=ok":
+                self.reply(403)
+                return
         target = DATA / name.lstrip("/")
         if "/" in name.lstrip("/") or not target.is_file():
             self.reply(404)
@@ -433,6 +443,42 @@ class DuckdbFileSystemRoute(unittest.TestCase):
                     "CREATE SECRET (TYPE http, BEARER_TOKEN 'sesame', SCOPE '" + base + "/protected')"
                 )
                 self.assertEqual((outcome(routed, protected), outcome(routed, protected, options)), expected)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_index_of_a_url_with_a_query_string(self):
+        """Through the DuckDB route a presigned URL finds its index with the suffix before the query.
+
+        The oracle is htslib reading the local file. htslib's own route is not
+        compared: it fetches the .csi with the query string and then asks for it
+        again without one, so a region query of a presigned URL fails there.
+        """
+        with connect("duckdb") as routed:
+            try:
+                routed.execute("LOAD httpfs")
+            except duckdb.Error as failure:
+                self.skipTest("httpfs is not installed for this DuckDB: " + str(failure).splitlines()[0])
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RangeHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = "http://127.0.0.1:" + str(server.server_address[1])
+            signed = base + "/signed/" + INDEXED.name + "?sig=ok"
+            with connect("htslib") as oracle:
+                contig = contigs(oracle, INDEXED)[0]
+                options = ", region := '" + contig + "'"
+                expected = outcome(oracle, INDEXED, options)
+            self.assertIsInstance(expected, tuple)
+            with connect("duckdb") as connection:
+                connection.execute("LOAD httpfs")
+                RangeHandler.requested_paths.clear()
+                self.assertEqual(outcome(connection, signed, options), expected)
+                index_requests = [path for path in RangeHandler.requested_paths
+                                  if path.startswith("/signed/" + INDEXED.name + ".")]
+                # htslib's order puts .csi first; the fixture has one.
+                self.assertEqual(index_requests, ["/signed/" + INDEXED.name + ".csi?sig=ok"])
         finally:
             server.shutdown()
             server.server_close()
@@ -746,6 +792,26 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             [str(DATA / "score_input.vcf"), str(DATA / "score_gwas_summary.vcf")],
             "GWAS-VCF summary",
         )
+        # include and exclude read a @file sample list through the file access.
+        samples = Path(self.scratch.name) / "score_samples.txt"
+        samples.write_text("S2\n")
+        compressed = Path(self.scratch.name) / "score_samples.txt.gz"
+        with gzip.open(compressed, "wt") as handle:
+            handle.write("S1\n\nS2\n")
+        for option, sample_list in (("include", samples), ("exclude", samples), ("include", compressed)):
+            expression = "GT[@" + str(sample_list) + ']="alt"'
+            self.compare(
+                "bcftools_score",
+                score.format(options=", " + option + " := " + quoted(expression)),
+                inputs,
+                option + " with a @file sample list " + sample_list.name,
+            )
+        self.compare(
+            "bcftools_score",
+            score.format(options=", include := " + quoted('GT[@' + str(samples) + '.missing]="alt"')),
+            inputs,
+            "a missing @file sample list",
+        )
         for chain in fixtures("*.chain"):
             destination = chain.with_name(chain.stem + "_dst.fa")
             source = chain.with_name(chain.stem + "_src.fa")
@@ -777,7 +843,7 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
         self.assertEqual(converted["duckdb"], converted["htslib"])
         self.compared[("genbank_to_fasta", "rows")] += 2
         self.assert_readers_compared(
-            {"read_genbank": 10, "read_bigwig": 1, "read_bigwig region": 1, "bcftools_score": 4, "bcftools_liftover": 5}
+            {"read_genbank": 10, "read_bigwig": 1, "read_bigwig region": 1, "bcftools_score": 7, "bcftools_liftover": 5}
         )
 
     def test_a_missing_input_fails_through_both_file_systems_with_duckdbs_reason(self):
@@ -891,6 +957,43 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
                 with self.subTest(reader=reader, access="disabled"):
                     with self.assertRaises(duckdb.Error):
                         connection.execute(relation, parameters).fetchall()
+
+    def test_duckdb_access_policy_applies_to_a_score_sample_list(self):
+        """A @file sample list in include is read like the inputs: inside allowed_directories only."""
+        with tempfile.TemporaryDirectory() as root:
+            inside, outside = Path(root, "inside"), Path(root, "outside")
+            inside.mkdir()
+            outside.mkdir()
+            for name in ("score_input.vcf", "score_summary.tsv"):
+                shutil.copy(DATA / name, inside / name)
+            for directory in (inside, outside):
+                (directory / "samples.txt").write_text("S2\n")
+            relation = (
+                "SELECT * FROM bcftools_score(?, ?, use := 'GT', columns := 'PLINK', include := ?) ORDER BY ALL"
+            )
+
+            def score(file_system, sample_list, restricted):
+                with connect(file_system) as connection:
+                    if restricted:
+                        connection.execute("SET allowed_directories = [" + quoted(str(inside) + "/") + "]")
+                        connection.execute("SET enable_external_access = false")
+                    expression = "GT[@" + str(sample_list) + ']="alt"'
+                    parameters = [str(inside / "score_input.vcf"), str(inside / "score_summary.tsv"), expression]
+                    return connection.execute(relation, parameters).fetchall()
+
+            expected = score("htslib", inside / "samples.txt", restricted=False)
+            self.assertEqual(len(expected), 2)
+            # The sample list must change the result, or reading it would prove nothing.
+            (inside / "everyone.txt").write_text("S1\nS2\n")
+            self.assertNotEqual(score("htslib", inside / "everyone.txt", restricted=False), expected)
+            for sample_list in (inside / "samples.txt", outside / "samples.txt"):
+                with self.subTest(route="htslib", sample_list=sample_list.parent.name):
+                    self.assertEqual(score("htslib", sample_list, restricted=True), expected)
+            with self.subTest(route="duckdb", sample_list="inside"):
+                self.assertEqual(score("duckdb", inside / "samples.txt", restricted=True), expected)
+            with self.subTest(route="duckdb", sample_list="outside"):
+                with self.assertRaisesRegex(duckdb.Error, "Could not read: " + re.escape(str(outside / "samples.txt"))):
+                    score("duckdb", outside / "samples.txt", restricted=True)
 
     def test_variant_and_tabix_index_forms(self):
         """An index beside the file under each name htslib looks for, an explicit one, and none."""

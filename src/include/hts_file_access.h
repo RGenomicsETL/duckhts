@@ -106,6 +106,14 @@ hFILE *duckhts_file_access_hopen(const duckhts_file_access_t *access, const char
                                  duckhts_hts_io_profile_t profile);
 
 /*
+ * hts_readlist(path, 1, n): the non-empty lines of a plain or BGZF-compressed
+ * text file, or NULL when it cannot be read. The caller frees each string and
+ * the array with free(). With 'duckdb' the file is read through the route.
+ * The signature matches filter_readlist_fn, with access as its data.
+ */
+char **duckhts_file_access_readlist(void *access, const char *path, int *n);
+
+/*
  * sam_index_load3, bcf_index_load3 and tbx_index_load3. With 'duckdb' and no
  * index_path the candidates are, in htslib's order, .csi then .bai (BAM, SAM)
  * or .tbi (tabix), each appended to the path and then in place of its

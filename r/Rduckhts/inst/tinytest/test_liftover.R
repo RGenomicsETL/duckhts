@@ -865,8 +865,7 @@ test_liftover_duckdb_file_system <- function() {
   missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
   expect_error(
     digest(sprintf("SELECT bcftools_liftover('chr1', 5, 'A', 'C', %s, 'unused.fa', NULL, 1, 250, false, NULL::BIGINT, false) AS lifted", missing)),
-    "Cannot open file",
-    fixed = TRUE
+    'Cannot open file "[^"]*duckhts_no_such_input"'
   )
 }
 

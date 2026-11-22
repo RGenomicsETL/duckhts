@@ -892,6 +892,7 @@ static int read_chains(htsFile *fp, int max_snp_gap, lo_chain_t **chains, lo_blo
 KHASH_MAP_INIT_INT(lo_chaindedup, char)
 static regidx_t *regidx_init_chains(const lo_chain_t *chains, int n_chains, const lo_block_t *blocks) {
     khash_t(lo_chaindedup) *h = kh_init(lo_chaindedup);
+    /* duckhts-file-access: allow no file: an empty index filled from chains already read */
     regidx_t *idx = regidx_init(NULL, NULL, NULL, sizeof(uint64_t), NULL);
     if (!idx) { kh_destroy(lo_chaindedup, h); return NULL; }
     for (int i = 0; i < n_chains; i++) {

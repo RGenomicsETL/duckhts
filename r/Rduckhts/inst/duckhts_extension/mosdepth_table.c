@@ -1055,6 +1055,7 @@ static int build_bed_csi(const char *path, const char *csi, int overwrite, duckh
     if (fd < 0) goto failure;
     duckhts_output_close_fd(fd);
     fd = -1;
+    /* duckhts-file-access: allow indexes a BED file this function wrote */
     if (tbx_index_build3(path, stage, MOSDEPTH_CSI_MIN_SHIFT, 1, &tbx_conf_bed) != 0) {
         snprintf(err, errlen, "duckhts_mosdepth: failed to build CSI index for '%s'", path);
         goto cleanup;

@@ -165,14 +165,17 @@ static int run_index_build(const index_build_bind_t *bind, char *err, size_t err
             snprintf(err, errlen, "%s: failed to open %s", name, bind->path);
             return -1;
         }
+        /* duckhts-file-access: allow an index builder writes beside its input */
         ret = sam_index_build4(fp, bind->path, bind->requested_index_path, bind->min_shift,
                                bind->threads);
         hts_close(fp);
     } else if (bind->kind == INDEX_BUILD_BCF) {
+        /* duckhts-file-access: allow an index builder writes beside its input */
         ret = bcf_index_build3(bind->path, bind->requested_index_path, bind->min_shift,
                                bind->threads);
     } else {
         tbx_conf_t conf = bind->tbx_conf;
+        /* duckhts-file-access: allow an index builder writes beside its input */
         ret = tbx_index_build3(bind->path, bind->requested_index_path, bind->min_shift,
                                bind->threads, &conf);
     }

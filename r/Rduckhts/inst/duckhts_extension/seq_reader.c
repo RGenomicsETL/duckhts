@@ -1646,6 +1646,7 @@ static void fasta_index_init(duckdb_init_info info) {
     state->emitted = 0;
     duckdb_init_set_init_data(info, state, duckdb_free);
     duckdb_init_set_max_threads(info, 1);
+    /* duckhts-file-access: allow fasta_index writes its index beside the input */
     if (fai_build3(bind->path, bind->requested_index_path, NULL) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "fasta_index: failed to build index for %s", bind->path);

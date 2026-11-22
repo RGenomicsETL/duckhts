@@ -147,7 +147,17 @@ struct _filter_t
     int n_ext;      // number of external values to fill via filter_test_ext()
     int *ext;       // types of external values to fill via filter_test_ext()
     char last_error[1024];
+    filter_readlist_fn readlist;    // DuckHTS: reads @file sample lists; NULL is hts_readlist
+    void *readlist_data;
 };
+
+/* DuckHTS: the sample list of a @file term, through the caller's reader. */
+static char **filter_readlist(filter_t *filter, const char *path, int *n)
+{
+    if ( filter && filter->readlist ) return filter->readlist(filter->readlist_data, path, n);
+    /* duckhts-file-access: allow filter_parse() and filter_init() callers that pass no reader */
+    return hts_readlist(path, 1, n);
+}
 
 #if defined(_MSC_VER)
 #define DUCKHTS_FILTER_THREAD_LOCAL __declspec(thread)
@@ -3161,7 +3171,7 @@ static int parse_idxs(char *tag_idx, int **idxs, int *nidxs, int *idx)
     goto fail; \
 } while (0)
 
-static int parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, token_t *tok,
+static int parse_tag_idx(filter_t *filter, bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, token_t *tok,
                          char *err, size_t err_sz)   // tag_idx points just after "TAG["
 {
     int i, len = strlen(tag_idx);
@@ -3190,7 +3200,7 @@ static int parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, t
         if ( strlen(fname) > 2 && fname[1] == ':' ) // Deal with Windows paths, such as 'C:\..'
             colon = strrchr(fname+2, ':');
 #endif
-        list = hts_readlist(fname, 1, &nsmpl);
+        list = filter_readlist(filter, fname, &nsmpl);
         if ( !list && colon )
         {
             char *fname_colon;
@@ -3204,7 +3214,7 @@ static int parse_tag_idx(bcf_hdr_t *hdr, int is_fmt, char *tag, char *tag_idx, t
             fname_colon = strrchr(fname, ':');
             if ( !fname_colon ) PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
             *fname_colon = 0;
-            list = hts_readlist(fname, 1, &nsmpl);
+            list = filter_readlist(filter, fname, &nsmpl);
         }
         if ( !list ) PARSE_TAG_FAIL("Could not read: %s\n", fname);
         has_subfield = colon != NULL;
@@ -3405,7 +3415,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
         int i, n;
         char **list;
         if ( !fname ) error("Could not allocate memory\n");
-        list = hts_readlist(fname, 1, &n);
+        list = filter_readlist(filter, fname, &n);
         if ( !list )
         {
             char read_error[512];
@@ -3576,7 +3586,7 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
     if ( is_array )
     {
         char parse_err[512];
-        if ( parse_tag_idx(filter->hdr, is_fmt, tmp.s, tmp.s+is_array, tok,
+        if ( parse_tag_idx(filter, filter->hdr, is_fmt, tmp.s, tmp.s+is_array, tok,
                            parse_err, sizeof(parse_err)) != 0 )
             FILTER_INIT_FAIL("%s", parse_err);
         if ( tok->idx==-3 && bcf_hdr_id2length(filter->hdr,BCF_HL_FMT,tok->hdr_id)!=BCF_VL_R )
@@ -3972,7 +3982,8 @@ err:
 } while (0)
 
 // Parse filter expression and convert to reverse polish notation. Dijkstra's shunting-yard algorithm
-static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error)
+static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error,
+                              filter_readlist_fn readlist, void *readlist_data)
 {
     filter_t *filter = (filter_t *) calloc(1,sizeof(filter_t));
     volatile int nops = 0, mops = 0;    // operators stack
@@ -3983,6 +3994,8 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
     char **volatile arg_list = NULL;
     volatile int arg_count = 0;
     if ( !filter ) return NULL;
+    filter->readlist = readlist;
+    filter->readlist_data = readlist_data;
     filter->str = strdup(str);
     filter->hdr = hdr;
     filter->max_unpack |= BCF_UN_STR;
@@ -4458,11 +4471,16 @@ static filter_t *filter_init_(bcf_hdr_t *hdr, const char *str, int exit_on_error
 
 filter_t *filter_parse(bcf_hdr_t *hdr, const char *str)
 {
-    return filter_init_(hdr, str, 0);
+    return filter_init_(hdr, str, 0, NULL, NULL);
+}
+filter_t *filter_parse_with_reader(bcf_hdr_t *hdr, const char *str,
+                                   filter_readlist_fn reader, void *reader_data)
+{
+    return filter_init_(hdr, str, 0, reader, reader_data);
 }
 filter_t *filter_init(bcf_hdr_t *hdr, const char *str)
 {
-    return filter_init_(hdr, str, 1);
+    return filter_init_(hdr, str, 1, NULL, NULL);
 }
 
 void filter_destroy(filter_t *filter)

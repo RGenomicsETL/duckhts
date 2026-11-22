@@ -4,10 +4,14 @@
  */
 #include "hts_file_access.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include <htslib/bgzf.h>
+#include <htslib/kstring.h>
 #include <htslib/sam.h>
 #include <htslib/vcf.h>
 
@@ -328,6 +332,68 @@ hFILE *duckhts_file_access_hopen(const duckhts_file_access_t *access, const char
     return fp;
 }
 
+char **duckhts_file_access_readlist(void *access, const char *path, int *n) {
+    const duckhts_file_access_t *file_access = access;
+    if (!route_of(file_access)) {
+        return hts_readlist(path, 1, n);
+    }
+    hFILE *hfile = duckhts_file_access_hopen(file_access, path, DUCKHTS_HTS_IO_PROFILE_METADATA);
+    BGZF *fp = hfile ? bgzf_hopen(hfile, "r") : NULL;
+    if (!fp) {
+        if (hfile) {
+            hclose_abruptly(hfile);
+        }
+        return NULL;
+    }
+
+    char **lines = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+    kstring_t line = KS_INITIALIZE;
+    int status;
+    bool failed = false;
+    while ((status = bgzf_getline(fp, '\n', &line)) >= 0) {
+        if (line.l == 0) {
+            continue;
+        }
+        if (count == capacity) {
+            const size_t grown = capacity ? capacity * 2 : 16;
+            char **larger = grown <= INT_MAX ? realloc(lines, grown * sizeof(*lines)) : NULL;
+            if (!larger) {
+                failed = true;
+                break;
+            }
+            lines = larger;
+            capacity = grown;
+        }
+        lines[count] = strdup(line.s);
+        if (!lines[count]) {
+            failed = true;
+            break;
+        }
+        count++;
+    }
+    failed = failed || status < -1;
+    failed = bgzf_close(fp) != 0 || failed;
+    free(line.s);
+    if (failed) {
+        for (size_t i = 0; i < count; i++) {
+            free(lines[i]);
+        }
+        free(lines);
+        return NULL;
+    }
+    if (!lines) {
+        /* An empty list is a valid result; hts_readlist returns a non-NULL array for it. */
+        lines = malloc(sizeof(*lines));
+        if (!lines) {
+            return NULL;
+        }
+    }
+    *n = (int)count;
+    return lines;
+}
+
 /* ================================================================
  * Indexes
  * ================================================================ */
@@ -345,6 +411,9 @@ typedef enum {
  * The index beside a routed file, as a routed name, or NULL when none opens.
  * Candidates follow the order of htslib's hts_idx_check_local: each suffix
  * appended to the path, then in place of the extension of its last component.
+ * For a URL, as in htslib's haddextension, the suffix goes before a query or
+ * fragment, so a presigned https://host/a.bam?sig=... looks for
+ * https://host/a.bam.bai?sig=...; s3 URLs keep a '#' in the key.
  */
 static char *find_routed_index(const duckhts_fs_route_t *route, const char *path,
                                index_family_t family) {
@@ -365,9 +434,24 @@ static char *find_routed_index(const duckhts_fs_route_t *route, const char *path
     }
 
     const size_t path_length = strlen(path);
-    const char *slash = strrchr(path, '/');
-    const char *dot = strrchr(slash ? slash : path, '.');
-    const size_t stem_length = dot ? (size_t)(dot - path) : path_length;
+    /* path_end is where a suffix goes: the end of the path, or for a URL the
+     * start of its query or fragment. */
+    size_t path_end = path_length;
+    if (strstr(path, "://")) {
+        const bool s3 = strncmp(path, "s3://", 5) == 0 || strncmp(path, "s3+http://", 10) == 0 ||
+                        strncmp(path, "s3+https://", 11) == 0;
+        path_end = strcspn(path, s3 ? "?" : "?#");
+    }
+    size_t stem_length = path_end;
+    for (size_t i = path_end; i > 0; i--) {
+        if (path[i - 1] == '.') {
+            stem_length = i - 1;
+            break;
+        }
+        if (path[i - 1] == '/') {
+            break;
+        }
+    }
     if (path_length > SIZE_MAX - INDEX_SUFFIX_CAPACITY) {
         return NULL;
     }
@@ -378,11 +462,13 @@ static char *find_routed_index(const duckhts_fs_route_t *route, const char *path
 
     char *found = NULL;
     for (size_t s = 0; s < n_suffixes && !found; s++) {
-        const size_t bases[] = {path_length, stem_length};
-        const size_t n_bases = stem_length == path_length ? 1 : 2;
+        const size_t bases[] = {path_end, stem_length};
+        const size_t n_bases = stem_length == path_end ? 1 : 2;
+        const size_t suffix_length = strlen(suffixes[s]);
         for (size_t b = 0; b < n_bases && !found; b++) {
             memcpy(candidate, path, bases[b]);
-            strcpy(candidate + bases[b], suffixes[s]);
+            memcpy(candidate + bases[b], suffixes[s], suffix_length);
+            strcpy(candidate + bases[b] + suffix_length, path + path_end);
             char *name = duckhts_fs_route_path(route, candidate);
             hFILE *probe = name ? hopen(name, "r") : NULL;
             if (probe && hclose(probe) == 0) {

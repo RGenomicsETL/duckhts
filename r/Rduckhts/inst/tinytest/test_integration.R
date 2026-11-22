@@ -594,8 +594,7 @@ test_tabix_and_metadata_duckdb_file_system <- function() {
   missing <- dbQuoteString(con, file.path(tempdir(), "duckhts_no_such_input"))
   expect_error(
     digest(sprintf("SELECT * FROM read_tabix(%s)", missing)),
-    "Cannot open file",
-    fixed = TRUE
+    'Cannot open file "[^"]*duckhts_no_such_input"'
   )
 }
 
