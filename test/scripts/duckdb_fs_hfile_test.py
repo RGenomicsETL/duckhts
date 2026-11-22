@@ -992,7 +992,10 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             with self.subTest(route="duckdb", sample_list="inside"):
                 self.assertEqual(score("duckdb", inside / "samples.txt", restricted=True), expected)
             with self.subTest(route="duckdb", sample_list="outside"):
-                with self.assertRaisesRegex(duckdb.Error, "Could not read: " + re.escape(str(outside / "samples.txt"))):
+                # The error names the list and carries DuckDB's reason for refusing it.
+                refused = re.escape(str(outside / "samples.txt"))
+                with self.assertRaisesRegex(duckdb.Error,
+                                            "Could not read: " + refused + r' \(Cannot access file "' + refused):
                     score("duckdb", outside / "samples.txt", restricted=True)
 
     def test_variant_and_tabix_index_forms(self):

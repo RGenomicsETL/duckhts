@@ -147,16 +147,20 @@ struct _filter_t
     int n_ext;      // number of external values to fill via filter_test_ext()
     int *ext;       // types of external values to fill via filter_test_ext()
     char last_error[1024];
-    filter_readlist_fn readlist;    // DuckHTS: reads @file sample lists; NULL is hts_readlist
+    filter_readlist_fn readlist;    // DuckHTS: reads @file sample lists; NULL reads none
     void *readlist_data;
 };
 
-/* DuckHTS: the sample list of a @file term, through the caller's reader. */
-static char **filter_readlist(filter_t *filter, const char *path, int *n)
+/* DuckHTS: the sample list of a @file term, read by the caller's reader. A
+ * filter without one reads no file. reason receives the cause of a failure. */
+static char **filter_readlist(filter_t *filter, const char *path, int *n,
+                              char *reason, size_t reason_size)
 {
-    if ( filter && filter->readlist ) return filter->readlist(filter->readlist_data, path, n);
-    /* duckhts-file-access: allow filter_parse() and filter_init() callers that pass no reader */
-    return hts_readlist(path, 1, n);
+    reason[0] = 0;
+    if ( filter && filter->readlist )
+        return filter->readlist(filter->readlist_data, path, n, reason, reason_size);
+    snprintf(reason, reason_size, " (this caller reads no sample-list file)");
+    return NULL;
 }
 
 #if defined(_MSC_VER)
@@ -3177,6 +3181,7 @@ static int parse_tag_idx(filter_t *filter, bcf_hdr_t *hdr, int is_fmt, char *tag
     int i, len = strlen(tag_idx);
     char *ori = NULL, *fname = NULL;
     char **list = NULL;
+    char read_reason[512] = "";
     int nsmpl = 0;
     int *idxs1 = NULL, nidxs1 = 0, idx1 = 0;
     int *idxs2 = NULL, nidxs2 = 0, idx2 = 0;
@@ -3200,7 +3205,7 @@ static int parse_tag_idx(filter_t *filter, bcf_hdr_t *hdr, int is_fmt, char *tag
         if ( strlen(fname) > 2 && fname[1] == ':' ) // Deal with Windows paths, such as 'C:\..'
             colon = strrchr(fname+2, ':');
 #endif
-        list = filter_readlist(filter, fname, &nsmpl);
+        list = filter_readlist(filter, fname, &nsmpl, read_reason, sizeof(read_reason));
         if ( !list && colon )
         {
             char *fname_colon;
@@ -3214,9 +3219,9 @@ static int parse_tag_idx(filter_t *filter, bcf_hdr_t *hdr, int is_fmt, char *tag
             fname_colon = strrchr(fname, ':');
             if ( !fname_colon ) PARSE_TAG_FAIL("Could not parse the index: %s\n", ori);
             *fname_colon = 0;
-            list = filter_readlist(filter, fname, &nsmpl);
+            list = filter_readlist(filter, fname, &nsmpl, read_reason, sizeof(read_reason));
         }
-        if ( !list ) PARSE_TAG_FAIL("Could not read: %s\n", fname);
+        if ( !list ) PARSE_TAG_FAIL("Could not read: %s%s\n", fname, read_reason);
         has_subfield = colon != NULL;
         free(fname);
         fname = NULL;
@@ -3415,11 +3420,12 @@ static int filters_init1(filter_t *filter, char *str, int len, token_t *tok)
         int i, n;
         char **list;
         if ( !fname ) error("Could not allocate memory\n");
-        list = filter_readlist(filter, fname, &n);
+        char read_reason[512];
+        list = filter_readlist(filter, fname, &n, read_reason, sizeof(read_reason));
         if ( !list )
         {
-            char read_error[512];
-            snprintf(read_error, sizeof(read_error), "Could not read: %s\n", fname);
+            char read_error[1024];
+            snprintf(read_error, sizeof(read_error), "Could not read: %s%s\n", fname, read_reason);
             free(fname);
             error("%s", read_error);
         }

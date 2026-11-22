@@ -108,10 +108,13 @@ hFILE *duckhts_file_access_hopen(const duckhts_file_access_t *access, const char
 /*
  * hts_readlist(path, 1, n): the non-empty lines of a plain or BGZF-compressed
  * text file, or NULL when it cannot be read. The caller frees each string and
- * the array with free(). With 'duckdb' the file is read through the route.
- * The signature matches filter_readlist_fn, with access as its data.
+ * the array with free(). With 'duckdb' the file is read through the route, and
+ * a failure writes DuckDB's reason into reason as " (<reason>)"; reason is
+ * empty otherwise. The signature matches filter_readlist_fn, with access as
+ * its data.
  */
-char **duckhts_file_access_readlist(void *access, const char *path, int *n);
+char **duckhts_file_access_readlist(void *access, const char *path, int *n,
+                                    char *reason, size_t reason_size);
 
 /*
  * sam_index_load3, bcf_index_load3 and tbx_index_load3. With 'duckdb' and no

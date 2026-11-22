@@ -332,8 +332,12 @@ hFILE *duckhts_file_access_hopen(const duckhts_file_access_t *access, const char
     return fp;
 }
 
-char **duckhts_file_access_readlist(void *access, const char *path, int *n) {
+char **duckhts_file_access_readlist(void *access, const char *path, int *n,
+                                    char *reason, size_t reason_size) {
     const duckhts_file_access_t *file_access = access;
+    if (reason_size > 0) {
+        reason[0] = '\0';
+    }
     if (!route_of(file_access)) {
         return hts_readlist(path, 1, n);
     }
@@ -342,6 +346,9 @@ char **duckhts_file_access_readlist(void *access, const char *path, int *n) {
     if (!fp) {
         if (hfile) {
             hclose_abruptly(hfile);
+        }
+        if (reason_size > 0) {
+            snprintf(reason, reason_size, "%s", duckhts_file_access_reason(file_access, path));
         }
         return NULL;
     }
@@ -381,6 +388,9 @@ char **duckhts_file_access_readlist(void *access, const char *path, int *n) {
             free(lines[i]);
         }
         free(lines);
+        if (reason_size > 0) {
+            snprintf(reason, reason_size, "%s", duckhts_file_access_reason(file_access, path));
+        }
         return NULL;
     }
     if (!lines) {
