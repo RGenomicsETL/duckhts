@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Reject htslib calls that open a file by name outside the file-access module.
+"""Reject uses of open-by-name functions outside the file-access module.
 
 Every reader opens its inputs and their indexes through
 src/hts_file_access.c, which is what lets `SET duckhts_file_system = 'duckdb'`
-apply to all of them. A source file that calls one of the htslib functions
-below opens that file with htslib's own file access whatever the setting says.
+apply to all of them. A source file that calls one of the htslib, libBigWig or
+C library functions below opens that file with the process's own file access
+whatever the setting says.
 
-A call that does so on purpose carries a marker comment on the line of the
-call or on the line directly above it:
+The guard matches each listed name followed by "(", so a definition of a listed
+name is matched as well as a call. Each match outside the module needs a marker
+comment on its line or on the line directly above it:
 
     /* duckhts-file-access: allow <reason> */
 
-The guard fails on a listed call without a marker, and on a marker with no
-listed call on its line or the next one, so a marker cannot outlive its call.
+The guard fails on a match without a marker, and on a marker with no match on
+its line or the next one, so a marker cannot outlive the code it allows.
 """
 
 from pathlib import Path
@@ -117,11 +119,11 @@ def main():
         print("%s: allow marker without a listed call on its line or the next; remove it" % entry)
     if violations or stale:
         sys.exit(
-            "file access guard: %d call(s) outside src/hts_file_access.c without an allow marker, "
+            "file access guard: %d use(s) outside src/hts_file_access.c without an allow marker, "
             "%d stale marker(s).\n"
             "Open inputs with the duckhts_file_access_* functions (src/include/hts_file_access.h)."
             % (len(violations), len(stale)))
-    print("file access guard: %d sources, %d marked htslib-only call sites: passed"
+    print("file access guard: %d sources, %d marked uses outside the module: passed"
           % (len(sources), allowed))
 
 
