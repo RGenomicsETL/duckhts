@@ -146,12 +146,14 @@ threads.</p></dd>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>After <code>DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")</code>,
-<code>read_bam</code> reads the file and its index through the DuckDB file system
-of the connection, so DuckDB secrets and file-access settings apply. The
-default, <code>'htslib'</code>, keeps htslib's own file access. "File access"
-under <code>read_bam</code> in the bundled reference,
+every DuckHTS reader, <code>read_bam</code> included, reads its inputs, their
+indexes and an explicit reference through the DuckDB file system of the
+connection, so DuckDB secrets and file-access settings apply. The default,
+<code>'htslib'</code>, keeps htslib's own file access. "File access" under
+<code>read_bam</code> in the bundled reference,
 <code>system.file("function_catalog", "reference.md", package = "Rduckhts")</code>,
-gives the index lookup rule of that route.</p>
+gives the index lookup rule of that route and the functions that keep
+htslib's file access.</p>
     </div>
 
     <div class="section level2">

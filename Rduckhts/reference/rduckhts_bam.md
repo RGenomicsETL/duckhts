@@ -104,13 +104,15 @@ Invisible TRUE on success
 
 ## Details
 
-After `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")`,
-`read_bam` reads the file and its index through the DuckDB file system
-of the connection, so DuckDB secrets and file-access settings apply. The
-default, `'htslib'`, keeps htslib's own file access. "File access" under
+After `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")`, every
+DuckHTS reader, `read_bam` included, reads its inputs, their indexes and
+an explicit reference through the DuckDB file system of the connection,
+so DuckDB secrets and file-access settings apply. The default,
+`'htslib'`, keeps htslib's own file access. "File access" under
 `read_bam` in the bundled reference,
 `system.file("function_catalog", "reference.md", package = "Rduckhts")`,
-gives the index lookup rule of that route.
+gives the index lookup rule of that route and the functions that keep
+htslib's file access.
 
 ## Examples
 

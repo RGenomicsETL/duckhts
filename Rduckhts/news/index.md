@@ -2,17 +2,42 @@
 
 ## Rduckhts (development version)
 
-- `DBI::dbExecute(con, "SET duckhts_remote_block_size = 4194304")` sets
-  the bytes htslib asks for in each read of a remote file in `read_bam`;
-  the default, 0, keeps the size DuckHTS chooses.
+- `bcftools_munge_row` and `bcftools_liftover` read no file and build no
+  `.fai` while DuckDB plans a query (`PREPARE`, `EXPLAIN`). SQL that
+  repeats one of these calls to read several fields runs the function
+  once for each written call; call it once in a subquery.
+  [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_liftover.md)
+  and
+  [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_munge.md)
+  go through table macros that call it once for each row.
 
-- `read_bam`, and so
-  [`rduckhts_bam()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bam.md),
+- `DBI::dbExecute(con, "SET duckhts_remote_block_size = 4194304")` sets
+  the bytes htslib asks for in each read of a remote file, in every
+  reader; the default, 0, keeps the size DuckHTS chooses.
+
+- Every reader, and so every `rduckhts_*()` wrapper that reads a file,
   can read through the DuckDB file system: run
   `DBI::dbExecute(con, "SET duckhts_file_system = 'duckdb'")` first.
-  DuckDB secrets and file-access settings then apply to the alignment
-  file and its index. The default, `'htslib'`, keeps htslib’s own file
-  access.
+  DuckDB secrets and file-access settings then apply to the input, its
+  index, a FASTA with its `.fai`, the reference given to an alignment
+  reader, and a `@file` sample list in the `include` or `exclude` of
+  [`rduckhts_score()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_score.md).
+  The panel of
+  [`rduckhts_somalier_bam_counts()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_somalier_bam_counts.md)
+  is read under `enable_external_access`, `allowed_directories` and
+  `allowed_paths` only. That route is read-only and does not build a
+  missing index, so
+  [`rduckhts_bcftools_norm()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bcftools_norm.md),
+  [`rduckhts_munge()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_munge.md)
+  and
+  [`rduckhts_liftover()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_liftover.md)
+  need the `.fai` beside their FASTA there. Writers and index builders
+  keep htslib’s own file access, and
+  [`rduckhts_bgzip()`](https://rgenomicsetl.github.io/duckhts/Rduckhts/reference/rduckhts_bgzip.md)
+  reads local files with the C library, under either setting; the
+  default, `'htslib'`, is unchanged. “File access” under `read_bam` in
+  `system.file("function_catalog", "reference.md", package = "Rduckhts")`
+  states the contract.
 
 - **The `duckdb` R package 1.5.6 or newer is required**
   (`Imports: duckdb (>= 1.5.6)`). The bundled extension is built for the
