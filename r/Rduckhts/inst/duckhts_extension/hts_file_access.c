@@ -648,18 +648,25 @@ const char *duckhts_file_access_reason(const duckhts_file_access_t *access, cons
 }
 
 const char *duckhts_file_access_fasta_reason(const duckhts_file_access_t *access, const char *fasta_path,
-                                             const char *fai_path) {
+                                             const char *fai_path, const char *gzi_path) {
     const char *reason = duckhts_file_access_reason(access, fasta_path);
     if (reason[0] || !fasta_path) {
         return reason;
     }
-    if (fai_path) {
-        return duckhts_file_access_reason(access, fai_path);
+    static const char *const suffixes[] = {".fai", ".gzi"};
+    const char *const explicit_paths[] = {fai_path, gzi_path};
+    kstring_t beside = KS_INITIALIZE;
+    for (size_t i = 0; i < 2 && !reason[0]; i++) {
+        const char *path = explicit_paths[i];
+        if (!path) {
+            beside.l = 0;
+            if (ksprintf(&beside, "%s%s", fasta_path, suffixes[i]) < 0) {
+                break;
+            }
+            path = beside.s;
+        }
+        reason = duckhts_file_access_reason(access, path);
     }
-    kstring_t fai_default = KS_INITIALIZE;
-    if (ksprintf(&fai_default, "%s.fai", fasta_path) >= 0) {
-        reason = duckhts_file_access_reason(access, fai_default.s);
-    }
-    free(fai_default.s);
+    free(beside.s);
     return reason;
 }

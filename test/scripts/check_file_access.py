@@ -74,10 +74,15 @@ def line_of(text, offset):
     return text.count("\n", 0, offset) + 1
 
 
-# A function definition: the name starts a line and its parameter list ends
-# before an opening brace. src/libbigwig_hfile_io.c defines urlOpen to route
-# libBigWig's opens; a definition is not a call.
-DEFINITION = re.compile(r"^(\w+)\s*\([^;{}]*\)\s*\{", re.M)
+# A function definition in the style of src/libbigwig_hfile_io.c, which defines
+# urlOpen to route libBigWig's opens: a line holding only the return type, then
+# the name at the start of the next line, then a parameter list closed before an
+# opening brace. A definition is not a call. A call wrapped onto a line of its
+# own follows an expression or operator, never a bare type line, so it does not
+# match and the guard still reports it.
+DEFINITION = re.compile(
+    r"^[ \t]*(?:static[ \t]+)?(?:const[ \t]+)?(?:struct[ \t]+)?\w+(?:[ \t]*\*+)?[ \t]*\n"
+    r"(\w+)\s*\([^;{}]*\)\s*\{", re.M)
 
 
 def name_opens(source):

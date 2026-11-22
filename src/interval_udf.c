@@ -742,7 +742,7 @@ static void fasta_nuc_bind(duckdb_bind_info info) {
         if (!fai) {
             char err[1024];
             snprintf(err, sizeof(err), "fasta_nuc: failed to open FASTA index%s",
-                     duckhts_file_access_fasta_reason(access, fasta_path, index_path));
+                     duckhts_file_access_fasta_reason(access, fasta_path, index_path, gzi_path));
             duckdb_bind_set_error(info, err);
         }
     }

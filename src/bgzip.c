@@ -287,7 +287,7 @@ static void bgzip_init(duckdb_init_info info) {
         if (stat_file_size(input_path, &bytes_in) != 0) bytes_in = 0;
     } else {
         char mode[8];
-        /* duckhts-file-access: allow bgzip compresses a local input it writes beside */
+        /* duckhts-file-access: allow bgzip reads a local file to compress with the C library */
         plain_fp = fopen(input_path, "rb");
         if (!plain_fp) {
             char err[512];

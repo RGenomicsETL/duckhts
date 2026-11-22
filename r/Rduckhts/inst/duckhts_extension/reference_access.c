@@ -78,33 +78,6 @@ static char *copy_path(const char *path) {
     return copy;
 }
 
-/*
- * DuckDB's reason for a load of these paths that just failed: the reason for
- * the index, the FASTA or the .gzi, whichever the route's most recent failure
- * concerns.
- */
-static const char *routed_load_reason(const duckhts_file_access_t *access, const char *fasta_path,
-                                      const char *fai_path, const char *gzi_path) {
-    static const char *const suffixes[] = {".fai", ".gzi"};
-    const char *const explicit_paths[] = {fai_path, gzi_path};
-    const size_t fasta_length = strlen(fasta_path);
-    const char *reason = duckhts_file_access_reason(access, fasta_path);
-    if (reason[0] || fasta_length > SIZE_MAX - sizeof(".fai")) {
-        return reason;
-    }
-    char *beside = malloc(fasta_length + sizeof(".fai"));
-    if (!beside) {
-        return reason;
-    }
-    for (size_t i = 0; i < 2 && !reason[0]; i++) {
-        memcpy(beside, fasta_path, fasta_length);
-        memcpy(beside + fasta_length, suffixes[i], sizeof(".fai"));
-        reason = duckhts_file_access_reason(access, explicit_paths[i] ? explicit_paths[i] : beside);
-    }
-    free(beside);
-    return reason;
-}
-
 duckhts_reference_entry_t *duckhts_reference_access_get(
     duckhts_reference_access_t *references, const char *fasta_path, const char *fai_path,
     const char *gzi_path, int tune_indexed_remote_io, const char **error, const char **reason) {
@@ -161,7 +134,7 @@ duckhts_reference_entry_t *duckhts_reference_access_get(
     if (!fai) {
         routed_reference_close(&opened);
         *error = duckhts_reference_load_error(fasta_path, fai_path, gzi_path);
-        *reason = routed_load_reason(references->access, fasta_path, fai_path, gzi_path);
+        *reason = duckhts_file_access_fasta_reason(references->access, fasta_path, fai_path, gzi_path);
         return NULL;
     }
     opened.entry = duckhts_reference_entry_wrap(fai);

@@ -164,12 +164,12 @@ const char *duckhts_file_access_reason(const duckhts_file_access_t *access, cons
 
 /*
  * duckhts_file_access_reason() for a FASTA that duckhts_file_access_fai_load
- * could not open. htslib opens the index before the sequence, so the failure
- * may concern the FASTA, fai_path, or <fasta>.fai when fai_path is NULL; the
- * reason text names the file it concerns. Same lifetime as
+ * could not open. The failure may concern the FASTA, its index (fai_path, or
+ * <fasta>.fai when NULL) or its BGZF index (gzi_path, or <fasta>.gzi when
+ * NULL); the reason text names the file it concerns. Same lifetime as
  * duckhts_file_access_reason().
  */
 const char *duckhts_file_access_fasta_reason(const duckhts_file_access_t *access, const char *fasta_path,
-                                             const char *fai_path);
+                                             const char *fai_path, const char *gzi_path);
 
 #endif

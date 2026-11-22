@@ -43,13 +43,14 @@
   `bcftools_norm_row` and `bcftools_munge_row` fail on a FASTA without a `.fai` where
   htslib's file access builds one. A FASTA those three open through the DuckDB file system
   is closed when the query ends; with htslib's file access it stays open for later
-  queries. Writers and index builders (`bgzip`, `bgunzip`, `bam_index`, `bcf_index`,
-  `tabix_index`, `fasta_index`), everything a function writes, and the `columns_file` and
-  a summaries directory of `bcftools_score` keep htslib's file access. The default, `'htslib'`, is unchanged. "File access" under `read_bam` in the
+  queries. Writers and index builders (`bgunzip`, `bam_index`, `bcf_index`, `tabix_index`,
+  `fasta_index`) and everything a function writes keep htslib's file access; `bgzip`, and
+  the `columns_file` and a summaries directory of `bcftools_score`, open local files with
+  the C library. The default, `'htslib'`, is unchanged. "File access" under `read_bam` in the
   function reference states the contract.
   One module, `src/hts_file_access.c`, opens every input and index for both file systems;
-  `make test-file-access-guard` fails when another source file calls an htslib read-open
-  function. `make test-duckdb-file-system` compares both routes for every reader on the
+  `make test-file-access-guard` fails when another source file calls a function that opens
+  a file by name, from htslib, libBigWig or the C library, without an allow marker. `make test-duckdb-file-system` compares both routes for every reader on the
   committed fixtures, on full scans, region and index paths, and failing opens.
   `benchmarks/benchmark_duckdb_file_system.md` measures both routes for `read_bam` over
   HTTP on a loopback server; the other readers are not measured. For `read_bam`, the two

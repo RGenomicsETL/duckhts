@@ -912,6 +912,12 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
             "bcftools_liftover": (
                 "SELECT bcftools_liftover('chrF', 2, 'C', 'T', ?, ?, ?, 1, 250, false, NULL::BIGINT, false)",
                 [missing, str(DATA / "liftover_dst.fa"), str(DATA / "liftover_src.fa")]),
+            "bcftools_liftover destination FASTA": (
+                "SELECT bcftools_liftover('chrF', 2, 'C', 'T', ?, ?, ?, 1, 250, false, NULL::BIGINT, false)",
+                [present["chain"], missing, str(DATA / "liftover_src.fa")]),
+            "bcftools_liftover source FASTA": (
+                "SELECT bcftools_liftover('chrF', 2, 'C', 'T', ?, ?, ?, 1, 250, false, NULL::BIGINT, false)",
+                [present["chain"], str(DATA / "liftover_dst.fa"), missing]),
             "bcftools_norm_row": (NORM_ONE_ROW, [missing]),
             "bcftools_munge_row": (MUNGE_ONE_ROW, [missing]),
         }
@@ -939,6 +945,37 @@ class ReadersThroughBothFileSystems(unittest.TestCase):
                 if reader in with_reason:
                     self.assertIn("No such file or directory", message)
                 self.compared[(reader, "error")] += 1
+
+    def test_a_missing_gzi_fails_with_duckdbs_reason(self):
+        """A bgzipped FASTA whose .gzi is missing: the error names the .gzi on the DuckDB route.
+
+        htslib's own file access builds the missing .gzi for the functions that
+        load with FAI_CREATE, so it is no oracle here; each reader gets a fresh
+        copy, and the route must leave the .gzi missing.
+        """
+        contig = (DATA / "bam_mismatch.long.fa.gz.fai").read_text().split("\t", 1)[0]
+        relations = {
+            "fasta_nuc": ("SELECT * FROM fasta_nuc(?, bin_width := 50)", lambda fasta: [fasta]),
+            "bcftools_liftover destination FASTA": (
+                "SELECT bcftools_liftover('chrF', 2, 'C', 'T', ?, ?, ?, 1, 250, false, NULL::BIGINT, false)",
+                lambda fasta: [str(DATA / "liftover.chain"), fasta, str(DATA / "liftover_src.fa")]),
+            "bcftools_norm_row": (
+                "SELECT bcftools_norm_row(?, 2::BIGINT, 'A', ['C'], ?, NULL::BIGINT, NULL::BIGINT, NULL, NULL)",
+                lambda fasta: [contig, fasta]),
+        }
+        for number, (reader, (relation, parameters)) in enumerate(relations.items()):
+            with self.subTest(reader=reader):
+                scratch = Path(self.scratch.name) / ("missing_gzi_%d" % number)
+                scratch.mkdir()
+                fasta = scratch / "reference.fa.gz"
+                shutil.copy(DATA / "bam_mismatch.long.fa.gz", fasta)
+                shutil.copy(DATA / "bam_mismatch.long.fa.gz.fai", Path(str(fasta) + ".fai"))
+                gzi = Path(str(fasta) + ".gzi")
+                self.assertFalse(gzi.exists())
+                with self.assertRaisesRegex(
+                        duckdb.Error, r'\(Cannot open file "' + re.escape(str(gzi)) + r'": No such file or directory\)'):
+                    self.routed.execute(relation, parameters(str(fasta))).fetchall()
+                self.assertFalse(gzi.exists())
 
     def test_duckdb_access_policy_applies_to_every_reader_family(self):
         relations = {

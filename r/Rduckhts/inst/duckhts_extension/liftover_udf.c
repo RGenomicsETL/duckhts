@@ -1834,7 +1834,7 @@ static liftover_bind_t *load_liftover_context(const duckhts_file_access_t *acces
     if (!bind->dst_fai) {
         if (errbuf_out) {
             *errbuf_out = fmt_path_reason_message("bcftools_liftover: failed to load destination FASTA index",
-                bind->dst_fasta_ref, duckhts_file_access_fasta_reason(access, bind->dst_fasta_ref, NULL));
+                bind->dst_fasta_ref, duckhts_file_access_fasta_reason(access, bind->dst_fasta_ref, NULL, NULL));
         }
         liftover_bind_destroy(bind);
         return NULL;
@@ -1845,7 +1845,7 @@ static liftover_bind_t *load_liftover_context(const duckhts_file_access_t *acces
         if (!bind->src_fai) {
             if (errbuf_out) {
                 *errbuf_out = fmt_path_reason_message("bcftools_liftover: failed to load source FASTA index",
-                    bind->src_fasta_ref, duckhts_file_access_fasta_reason(access, bind->src_fasta_ref, NULL));
+                    bind->src_fasta_ref, duckhts_file_access_fasta_reason(access, bind->src_fasta_ref, NULL, NULL));
             }
             liftover_bind_destroy(bind);
             return NULL;
