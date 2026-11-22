@@ -156,6 +156,7 @@ urlTell(URL_t *url)
 }
 
 URL_t *
+/* duckhts-file-access: allow this defines urlOpen, which routes libBigWig's opens */
 urlOpen(const char *path, CURLcode (*callback)(CURL *), const char *mode)
 {
     URL_t *url;

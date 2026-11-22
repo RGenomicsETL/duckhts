@@ -74,26 +74,12 @@ def line_of(text, offset):
     return text.count("\n", 0, offset) + 1
 
 
-# A function definition in the style of src/libbigwig_hfile_io.c, which defines
-# urlOpen to route libBigWig's opens: a line holding only the return type, then
-# the name at the start of the next line, then a parameter list closed before an
-# opening brace. A definition is not a call. A call wrapped onto a line of its
-# own follows an expression or operator, never a bare type line, so it does not
-# match and the guard still reports it.
-DEFINITION = re.compile(
-    r"^[ \t]*(?:static[ \t]+)?(?:const[ \t]+)?(?:struct[ \t]+)?\w+(?:[ \t]*\*+)?[ \t]*\n"
-    r"(\w+)\s*\([^;{}]*\)\s*\{", re.M)
-
-
 def name_opens(source):
     """Yield (line number, name) for each listed call or option in C source."""
     code = COMMENT_OR_LITERAL.sub(blank, source)
-    definitions = {match.start(1) for match in DEFINITION.finditer(code)}
-    for match in CALL.finditer(code):
-        if match.start(1) not in definitions:
+    for pattern in (CALL, OPTION):
+        for match in pattern.finditer(code):
             yield line_of(code, match.start()), match.group(1)
-    for match in OPTION.finditer(code):
-        yield line_of(code, match.start()), match.group(1)
 
 
 def markers(source):

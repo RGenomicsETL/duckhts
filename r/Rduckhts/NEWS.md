@@ -17,8 +17,9 @@
   `allowed_directories` and `allowed_paths` only. That route is
   read-only and does not build a missing index, so `rduckhts_bcftools_norm()`,
   `rduckhts_munge()` and `rduckhts_liftover()` need the `.fai` beside their FASTA there.
-  Writers and index builders keep htslib's own file access, as does the default,
-  `'htslib'`. "File access" under `read_bam` in
+  Writers and index builders keep htslib's own file access, and `rduckhts_bgzip()` reads
+  local files with the C library, under either setting; the default, `'htslib'`, is
+  unchanged. "File access" under `read_bam` in
   `system.file("function_catalog", "reference.md", package = "Rduckhts")` states the
   contract.
 - **The `duckdb` R package 1.5.6 or newer is required** (`Imports: duckdb (>= 1.5.6)`).

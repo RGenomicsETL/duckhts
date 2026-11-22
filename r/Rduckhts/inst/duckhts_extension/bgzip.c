@@ -232,7 +232,7 @@ static void bgzip_init(duckdb_init_info info) {
     }
 
     if (decompress) {
-        /* duckhts-file-access: allow bgunzip writes its output beside the input with this process */
+        /* duckhts-file-access: allow bgunzip reads a local file to decompress with htslib */
         bgzf_fp = bgzf_open(input_path, "r");
         if (!bgzf_fp) {
             char err[512];
