@@ -646,3 +646,20 @@ const char *duckhts_file_access_reason(const duckhts_file_access_t *access, cons
     }
     return reason;
 }
+
+const char *duckhts_file_access_fasta_reason(const duckhts_file_access_t *access, const char *fasta_path,
+                                             const char *fai_path) {
+    const char *reason = duckhts_file_access_reason(access, fasta_path);
+    if (reason[0] || !fasta_path) {
+        return reason;
+    }
+    if (fai_path) {
+        return duckhts_file_access_reason(access, fai_path);
+    }
+    kstring_t fai_default = KS_INITIALIZE;
+    if (ksprintf(&fai_default, "%s.fai", fasta_path) >= 0) {
+        reason = duckhts_file_access_reason(access, fai_default.s);
+    }
+    free(fai_default.s);
+    return reason;
+}

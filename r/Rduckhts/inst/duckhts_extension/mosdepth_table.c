@@ -1060,6 +1060,7 @@ static int build_bed_csi(const char *path, const char *csi, int overwrite, duckh
         snprintf(err, errlen, "duckhts_mosdepth: failed to build CSI index for '%s'", path);
         goto cleanup;
     }
+    /* duckhts-file-access: allow duckhts_mosdepth reads back the CSI index it built */
     input = fopen(stage, "rb");
     if (!input) goto failure;
     fd = duckhts_output_open(csi, overwrite, owned);

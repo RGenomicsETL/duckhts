@@ -1774,16 +1774,20 @@ static void scalar_shift_left(scalar_realign_t *ra) {
 
 /* ======================================================================== */
 
-/* prefix ": " path, then DuckDB's reason when access reads through DuckDB. */
-static char *fmt_open_message(const char *prefix, const duckhts_file_access_t *access, const char *path) {
+/* prefix ": " path, then reason, which is empty or " (DuckDB's reason)". */
+static char *fmt_path_reason_message(const char *prefix, const char *path, const char *reason) {
     char *message = fmt_path_message(prefix, path);
-    const char *reason = duckhts_file_access_reason(access, path);
     char *extended;
     if (!message || !reason[0]) return message;
     extended = (char *)realloc(message, strlen(message) + strlen(reason) + 1);
     if (!extended) return message;
     strcat(extended, reason);
     return extended;
+}
+
+/* prefix ": " path, then DuckDB's reason when access reads through DuckDB. */
+static char *fmt_open_message(const char *prefix, const duckhts_file_access_t *access, const char *path) {
+    return fmt_path_reason_message(prefix, path, duckhts_file_access_reason(access, path));
 }
 
 static liftover_bind_t *load_liftover_context(const duckhts_file_access_t *access,
@@ -1828,7 +1832,10 @@ static liftover_bind_t *load_liftover_context(const duckhts_file_access_t *acces
     bind->dst_fai = duckhts_file_access_fai_load(access, bind->dst_fasta_ref, NULL, NULL, FAI_CREATE,
                                                  FAI_FASTA, DUCKHTS_HTS_IO_PROFILE_METADATA);
     if (!bind->dst_fai) {
-        if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to load destination FASTA index", bind->dst_fasta_ref);
+        if (errbuf_out) {
+            *errbuf_out = fmt_path_reason_message("bcftools_liftover: failed to load destination FASTA index",
+                bind->dst_fasta_ref, duckhts_file_access_fasta_reason(access, bind->dst_fasta_ref, NULL));
+        }
         liftover_bind_destroy(bind);
         return NULL;
     }
@@ -1836,7 +1843,10 @@ static liftover_bind_t *load_liftover_context(const duckhts_file_access_t *acces
         bind->src_fai = duckhts_file_access_fai_load(access, bind->src_fasta_ref, NULL, NULL, FAI_CREATE,
                                                      FAI_FASTA, DUCKHTS_HTS_IO_PROFILE_METADATA);
         if (!bind->src_fai) {
-            if (errbuf_out) *errbuf_out = fmt_path_message("bcftools_liftover: failed to load source FASTA index", bind->src_fasta_ref);
+            if (errbuf_out) {
+                *errbuf_out = fmt_path_reason_message("bcftools_liftover: failed to load source FASTA index",
+                    bind->src_fasta_ref, duckhts_file_access_fasta_reason(access, bind->src_fasta_ref, NULL));
+            }
             liftover_bind_destroy(bind);
             return NULL;
         }

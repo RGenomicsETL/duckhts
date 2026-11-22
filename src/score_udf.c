@@ -462,6 +462,7 @@ static int score_add_summary_paths_from_list_file(score_bind_t *bind, const char
      * than scandir or dirent.d_type: those calls are available in Emscripten's
      * virtual filesystem for webR/wasm, while remote URL list files fall through
      * to hts_open() below and are handled by the wasm HTTP hFILE backend. */
+    /* duckhts-file-access: allow a bcftools_score summaries directory is listed with the C library */
     d = opendir(path);
     if (d) {
         struct dirent *dir;
@@ -669,6 +670,7 @@ static score_mapping_t *score_mapping_file(const char *path, int *n) {
     int mapping_n = 0;
     int mapping_m = 0;
     if (!path) return NULL;
+    /* duckhts-file-access: allow the bcftools_score columns_file is read with the C library */
     fp = fopen(path, "r");
     if (!fp) return NULL;
     while (fgets(line, sizeof(line), fp)) {
@@ -1926,6 +1928,7 @@ static int score_write_log(const score_bind_t *bind,
     FILE *fp;
     int pi;
     if (!bind->log_path || !bind->log_path[0]) return 0;
+    /* duckhts-file-access: allow bcftools_score writes its log_path */
     fp = fopen(bind->log_path, "w");
     if (!fp) {
         snprintf(err, err_sz, "bcftools_score: cannot write log_path '%s': %s", bind->log_path, strerror(errno));

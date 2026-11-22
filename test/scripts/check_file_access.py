@@ -30,8 +30,10 @@ MODULE = {"src/hts_file_access.c", "src/duckdb_fs_hfile.c"}
 # bcf_sr_set_regions, bcf_sr_set_targets and bcf_sr_set_samples when told the
 # argument is a file. bam_index_load and bam_index_build are sam.h macros over
 # the sam_index functions; the guard sees the macro name in source, so it lists
-# both. The list covers the functions found in the htslib and libBigWig headers
-# that open a file by name; a new one needs adding here.
+# both. urlOpen is libBigWig's open by name. fopen, freopen and opendir open a
+# file by name through the C library and so bypass the setting too. The list
+# covers the htslib and libBigWig functions, and these C library ones, that this
+# guard was written against; a new open-by-name function needs adding here.
 NAME_OPEN_FUNCTIONS = (
     "hts_open", "hts_open_format", "hts_hopen", "sam_open", "sam_open_format",
     "bcf_open", "vcf_open", "cram_open", "bgzf_open", "bgzf_hopen", "hopen",
@@ -50,7 +52,8 @@ NAME_OPEN_FUNCTIONS = (
     "hts_readlist", "hts_readlines", "regidx_init", "bcf_sr_regions_init",
     "bcf_hdr_set", "hts_file_type", "bgzf_is_bgzf", "knet_open",
     "bcf_sweep_init", "bam_index_load", "bam_index_build",
-    "bwOpen", "bbOpen", "bwIsBigWig", "bbIsBigBed",
+    "bwOpen", "bbOpen", "bwIsBigWig", "bbIsBigBed", "urlOpen",
+    "fopen", "freopen", "opendir",
 )
 # hts_set_opt(fp, CRAM_OPT_REFERENCE, path) opens the reference by name.
 NAME_OPEN_OPTIONS = ("CRAM_OPT_REFERENCE",)
@@ -71,12 +74,21 @@ def line_of(text, offset):
     return text.count("\n", 0, offset) + 1
 
 
+# A function definition: the name starts a line and its parameter list ends
+# before an opening brace. src/libbigwig_hfile_io.c defines urlOpen to route
+# libBigWig's opens; a definition is not a call.
+DEFINITION = re.compile(r"^(\w+)\s*\([^;{}]*\)\s*\{", re.M)
+
+
 def name_opens(source):
     """Yield (line number, name) for each listed call or option in C source."""
     code = COMMENT_OR_LITERAL.sub(blank, source)
-    for pattern in (CALL, OPTION):
-        for match in pattern.finditer(code):
+    definitions = {match.start(1) for match in DEFINITION.finditer(code)}
+    for match in CALL.finditer(code):
+        if match.start(1) not in definitions:
             yield line_of(code, match.start()), match.group(1)
+    for match in OPTION.finditer(code):
+        yield line_of(code, match.start()), match.group(1)
 
 
 def markers(source):
