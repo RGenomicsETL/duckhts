@@ -1,5 +1,8 @@
 # Rduckhts (development version)
 
+- On Windows, a package build whose libdeflate probe fails passes `--without-libdeflate`
+  to the bundled htslib's configure, which ignores `--disable-libdeflate` and checks
+  for libdeflate again on its own.
 - `bcftools_munge_row` and `bcftools_liftover` read no file and build no `.fai` while
   DuckDB plans a query (`PREPARE`, `EXPLAIN`). SQL that repeats one of these calls to read
   several fields runs the function once for each written call; call it once in a

@@ -340,7 +340,7 @@ fi
 
 if [ "$HAS_LIBDEFLATE" = "no" ]; then
     echo "INFO: libdeflate not found - disabling libdeflate support in htslib"
-    HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --disable-libdeflate"
+    HTSLIB_CONFIGURE_FLAGS="$HTSLIB_CONFIGURE_FLAGS --without-libdeflate"
 fi
 
 # Configure htslib for Windows/MinGW

@@ -2,6 +2,11 @@
 
 # duckhts (development version)
 
+- The vcpkg manifest enables its `deflate` feature by default, so community extension
+  binaries link htslib against libdeflate for BGZF and index (de)compression
+  (https://github.com/RGenomicsETL/duckhts/issues/369). When CMake finds no libdeflate,
+  it passes `--without-libdeflate` to htslib's configure, which ignores
+  `--disable-libdeflate` and would still link a libdeflate it finds.
 - `bcftools_munge_row` and `bcftools_liftover` are volatile. `PREPARE` and `EXPLAIN` of a
   call whose arguments are all constants read no file and build no `.fai`; the query does
   that when it runs. DuckDB evaluates each written call of a volatile function, so SQL

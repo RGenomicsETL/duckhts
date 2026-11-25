@@ -352,7 +352,8 @@ if(NOT LIBLZMA_FOUND)
     list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-lzma)
 endif()
 if(NOT LIBDEFLATE_FOUND)
-    list(APPEND HTSLIB_CONFIGURE_FLAGS --disable-libdeflate)
+    # htslib declares libdeflate with AC_ARG_WITH; configure ignores --disable-libdeflate.
+    list(APPEND HTSLIB_CONFIGURE_FLAGS --without-libdeflate)
 endif()
 if(DUCKDB_WASM_EXTENSION)
     # Curl-based HTTP and plugin loading both fail in a WASM SIDE_MODULE context

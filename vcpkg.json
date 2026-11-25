@@ -5,7 +5,7 @@
   "dependencies": [
     "zlib"
   ],
-  "default-features": ["compression", "net"],
+  "default-features": ["compression", "net", "deflate"],
   "features": {
     "compression": {
       "description": "bzip2 and liblzma support for CRAM/BAM",
