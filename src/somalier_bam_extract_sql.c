@@ -330,12 +330,13 @@ static bool scan_sites(samFile *fp, sam_hdr_t *header, hts_idx_t *index,
     reader.min_mapq = bind->min_mapq;
     reader.require_flags = (uint16_t)bind->require_flags;
     reader.exclude_flags = (uint16_t)bind->exclude_flags;
+    /* sam_itr_regions owns the list from here on, also when it fails. */
     reader.iterator = sam_itr_regions(index, header, regions, region_count);
+    regions = NULL;
     if (!reader.iterator) {
         *error = "duckhts_somalier_bam_counts: could not construct one multi-region iterator";
         goto cleanup;
     }
-    regions = NULL;
     if (bind->overlap_policy == DUCKHTS_BAM_SITE_OVERLAP_HILEUP_V0_1_0 &&
         bind->max_overlap_qnames != 0u) {
         size_t overlap_bytes;

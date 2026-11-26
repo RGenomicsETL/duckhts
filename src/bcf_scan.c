@@ -100,7 +100,7 @@ int duckhts_bcf_samples_apply(const duckhts_bcf_samples_t *samples, bcf_hdr_t *h
             strcmp(header->samples[samples->indices[i]], samples->names[i]) != 0) goto changed;
     }
     if (samples->count == samples->original_count) return 1;
-    /* HTSlib 1.24 drops keep_samples when an exclusion list selects zero.
+    /* HTSlib 1.25 drops keep_samples when an exclusion list selects zero.
      * Its explicit NULL selector retains the empty bitmap needed to strip
      * FORMAT in bcf_read and indexed bcf_subset_format. */
     const char *selector = samples->count == 0 ? NULL
@@ -281,7 +281,7 @@ int duckhts_bcf_scan_intervals(duckhts_bcf_scan_t *scan, const duckhts_interval_
         i = j;
     }
     errno = 0;
-    /* On failure HTSlib leaves the list with us; on success the iterator owns it. */
+    /* hts_itr_regions owns the list from here on, also when it fails. */
     if (index->bcf) {
         scan->itr = hts_itr_regions(index->bcf, list, (int)used, NULL, NULL,
                                     hts_itr_multi_bam, bcf_readrec, interval_seek, interval_tell);
@@ -292,7 +292,6 @@ int duckhts_bcf_scan_intervals(duckhts_bcf_scan_t *scan, const duckhts_interval_
         scan->typed_tabix = 1;
     }
     if (!scan->itr) {
-        hts_reglist_free(list, (int)used);
         snprintf(error, error_size, "BCF scan: failed to create typed interval iterator");
         return 0;
     }

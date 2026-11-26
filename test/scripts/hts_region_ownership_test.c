@@ -1,4 +1,6 @@
-/* HTSlib multi-region iterators own region lists only after successful creation. */
+/* HTSlib multi-region iterators own their region list from the call on,
+ * also when creation fails (HTSlib 1.25). Run under ASan with leak detection:
+ * a caller free after failure is a double free, a missing HTSlib free a leak. */
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -70,20 +72,18 @@ static int64_t unused_tell(void *file) {
     return -1;
 }
 
-static void check_failure_retains_list(void) {
+static void check_failure_takes_list(void) {
     hts_reglist_t *regions = make_region_list("invalid");
     hts_itr_t *iterator = hts_itr_regions(
         NULL, regions, 1, fail_name_lookup, NULL, fail_query, unused_read,
         unused_seek, unused_tell);
     assert(iterator == NULL);
-    hts_reglist_free(regions, 1);
 
     regions = make_region_list(NULL);
     iterator = hts_itr_regions(
         NULL, regions, 1, fail_name_lookup, NULL, fail_query, unused_read,
         unused_seek, unused_tell);
     assert(iterator == NULL);
-    hts_reglist_free(regions, 1);
 }
 
 static void check_sam_allocation_failure(const char *path,
@@ -107,7 +107,6 @@ static void check_sam_allocation_failure(const char *path,
     assert(iterator == NULL);
     assert(fail_iterator_calloc == 0);
     assert(failed_iterator_callocs == failures_before + 1);
-    hts_reglist_free(regions, 1);
 
     hts_idx_destroy(index);
     sam_hdr_destroy(header);
@@ -116,7 +115,7 @@ static void check_sam_allocation_failure(const char *path,
 
 int main(int argc, char **argv) {
     assert(argc == 5);
-    check_failure_retains_list();
+    check_failure_takes_list();
     check_sam_allocation_failure(argv[1], argv[2]);
     check_sam_allocation_failure(argv[3], argv[4]);
     return 0;

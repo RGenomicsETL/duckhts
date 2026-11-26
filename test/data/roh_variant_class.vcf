@@ -35,3 +35,11 @@ chr1	2600	multi_mnp_complex	AC	GT,G	.	.	.
 chr1	2700	multi_indel_overlap	ATT	A,*	.	.	.
 chr1	2800	multi_symbolic_first	A	<*>,AT	.	.	.
 chr1	2900	ref_case	ac	AC	.	.	.
+chr1	3000	single_bnd_after	A	A.	.	.	.
+chr1	3100	single_bnd_before	A	.A	.	.	.
+chr1	3200	single_bnd_after_ins	A	AT.	.	.	.
+chr1	3300	single_bnd_after_long	AC	ACGT.	.	.	.
+chr1	3400	single_bnd_after_mismatch	AC	A.	.	.	.
+chr1	3500	single_bnd_before_long	AC	.C	.	.	.
+chr1	3600	single_bnd_after_complex	AC	GT.	.	.	.
+chr1	3700	multi_indel_single_bnd	A	AT,A.	.	.	.

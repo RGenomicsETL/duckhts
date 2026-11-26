@@ -1,5 +1,9 @@
 # Rduckhts (development version)
 
+- Bundles htslib 1.25. A region query on a CRAM without records works with its index.
+  `rduckhts_roh(site_rule = "bcftools")` classes a single breakend allele (`A.`, `.A`)
+  as BND, not as an indel, when it chooses the record of a listed position, as
+  bcftools 1.25 does.
 - With `SET duckhts_file_system = 'duckdb'`, the search for an index beside the file
   skips a file under an index name whose content is not that index format, and goes on
   to the next name.

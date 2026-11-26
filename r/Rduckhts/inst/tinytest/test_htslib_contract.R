@@ -22,9 +22,9 @@ test_htslib_contract <- function() {
     expect_identical(config$duckdb_platform, expected_platform)
     expect_true(endsWith(config$build_id, paste0("-", expected_platform)))
   }
-  expect_identical(config$htslib_version, "1.24")
+  expect_identical(config$htslib_version, "1.25")
   expect_identical(config$runtime_version, config$htslib_version)
-  expect_identical(config$htslib_header_version, 102400L)
+  expect_identical(config$htslib_header_version, 102500L)
   expect_true(file.exists(file.path(config$include_dir, "htslib", "hts.h")))
   expect_true(file.exists(config$library_file))
   expect_true(nzchar(config$cppflags))
@@ -37,7 +37,7 @@ test_htslib_contract <- function() {
   con <- rduckhts_connect()
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
   info <- rduckhts_htslib_info(con)
-  expect_identical(as.character(info$version[[1L]]), "1.24")
+  expect_identical(as.character(info$version[[1L]]), "1.25")
   expect_true(info$feature_bits[[1L]] > 0)
   expect_true(grepl("libcurl=", info$feature_string[[1L]], fixed = TRUE))
 
@@ -64,11 +64,11 @@ test_htslib_contract <- function() {
 
   relocated_header <- file.path(relocated, "include", "htslib", "hts.h")
   header <- readLines(relocated_header, warn = FALSE)
-  header <- sub(
-    "#define HTS_VERSION 102400",
-    "#define HTS_VERSION 102399",
-    header,
-    fixed = TRUE
+  version_line <- paste("#define HTS_VERSION", config$htslib_header_version)
+  expect_true(version_line %in% header)
+  header[header == version_line] <- paste(
+    "#define HTS_VERSION",
+    config$htslib_header_version - 1L
   )
   writeLines(header, relocated_header)
   expect_error(

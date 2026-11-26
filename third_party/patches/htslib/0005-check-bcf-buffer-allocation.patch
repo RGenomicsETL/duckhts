@@ -1,68 +1,69 @@
+diff --git a/htslib/vcf.h b/htslib/vcf.h
+index 6547c3c..c2d27c3 100644
+--- a/htslib/vcf.h
++++ b/htslib/vcf.h
+@@ -1087,6 +1087,7 @@ set to one of BCF_ERR* codes and must be checked before calling bcf_write().
+      *          -2 .. clash between types defined in the header and encountered in the VCF record
+      *          -3 .. tag is not present in the VCF record
+      *          -4 .. the operation could not be completed (e.g. out of memory)
++     *          -5 .. decoded value count or string size exceeds the signed API capacity
+      *
+      *  Returns negative value on error or the number of values (including
+      *  missing values) put in *dst on success. bcf_get_info_string() returns
 diff --git a/vcf.c b/vcf.c
+index fc2307b..c0b0aed 100644
 --- a/vcf.c
 +++ b/vcf.c
-@@ -6126,8 +6126,11 @@
--    if ( type==BCF_HT_STR )
--    {
--        if ( *ndst < info->len+1 )
--        {
--            *ndst = info->len + 1;
--            *dst  = realloc(*dst, *ndst);
--        }
--        memcpy(*dst,info->vptr,info->len);
-+    if ( type==BCF_HT_STR )
-+    {
+@@ -6216,10 +6216,13 @@ int bcf_get_info_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, voi
+     if ( !info->vptr ) return -3;           // the tag was marked for removal
+     if ( type==BCF_HT_STR )
+     {
 +        if ( info->len==INT_MAX ) return -5;
-+        if ( *ndst < info->len+1 )
-+        {
+         if ( *ndst < info->len+1 )
+         {
 +            void *new_dst = realloc(*dst, (size_t)info->len + 1);
 +            if ( !new_dst ) return -4;
 +            *dst = new_dst;
-+            *ndst = info->len + 1;
-+        }
-+        memcpy(*dst,info->vptr,info->len);
-@@ -6148,5 +6151,7 @@
--    if ( *ndst < info->len )
--    {
--        *ndst = info->len;
--        *dst  = hts_realloc_p(*dst, *ndst, size1);
--    }
-+    if ( *ndst < info->len )
-+    {
+             *ndst = info->len + 1;
+-            *dst  = realloc(*dst, *ndst);
+         }
+         memcpy(*dst,info->vptr,info->len);
+         ((uint8_t*)*dst)[info->len] = 0;
+@@ -6238,8 +6241,10 @@ int bcf_get_info_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, voi
+     }
+     if ( *ndst < info->len )
+     {
 +        void *new_dst = hts_realloc_p(*dst, info->len, size1);
 +        if ( !new_dst ) return -4;
 +        *dst = new_dst;
-+        *ndst = info->len;
-+    }
-@@ -6209,14 +6214,24 @@
--    int nsmpl = bcf_hdr_nsamples(hdr);
+         *ndst = info->len;
+-        *dst  = hts_realloc_p(*dst, *ndst, size1);
+     }
+ 
+     #define BRANCH(type_t, convert, is_missing, is_vector_end, set_missing, set_regular, out_type_t) do { \
+@@ -6298,19 +6303,28 @@ int bcf_get_format_string(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, c
+     if ( !fmt->p ) return -3;                                      // the tag was marked for removal
+ 
+     int nsmpl = bcf_hdr_nsamples(hdr);
 -    if ( !*dst )
--    {
--        *dst = hts_malloc_p(sizeof(char*), nsmpl);
--        if ( !*dst ) return -4;     // could not alloc
--        (*dst)[0] = NULL;
--    }
--    int n = (fmt->n+1)*nsmpl;
--    if ( *ndst < n )
--    {
--        (*dst)[0] = realloc((*dst)[0], n);
--        if ( !(*dst)[0] ) return -4;    // could not alloc
--        *ndst = n;
--    }
-+    int nsmpl = bcf_hdr_nsamples(hdr);
-+    if ( !nsmpl ) return 0;
 +    if ( fmt->n < 0 || fmt->n == INT_MAX || nsmpl < 0 ||
-+         nsmpl > INT_MAX / (fmt->n + 1) ) return -5;
++         (nsmpl && nsmpl > INT_MAX / (fmt->n + 1)) ) return -5;
 +    int n = (fmt->n+1)*nsmpl;
 +    char **new_dst = *dst;
 +    if ( !new_dst )
-+    {
-+        new_dst = hts_malloc_p(sizeof(char*), nsmpl);
+     {
+-        *dst = hts_malloc_p(sizeof(char*), nsmpl != 0 ? nsmpl : 1);
+-        if ( !*dst ) return -4;     // could not alloc
+-        (*dst)[0] = NULL;
++        new_dst = hts_malloc_p(sizeof(char*), nsmpl != 0 ? nsmpl : 1);
 +        if ( !new_dst ) return -4;
 +        new_dst[0] = NULL;
-+    }
-+    if ( !*dst || *ndst < n )
-+    {
+     }
+-    int n = (fmt->n+1)*nsmpl;
+     if ( *ndst < n )
+     {
+-        (*dst)[0] = realloc((*dst)[0], n);
+-        if ( !(*dst)[0] ) return -4;    // could not alloc
 +        char *new_data = realloc(new_dst[0], n);
 +        if ( !new_data )
 +        {
@@ -70,65 +71,48 @@ diff --git a/vcf.c b/vcf.c
 +            return -4;
 +        }
 +        new_dst[0] = new_data;
-+        *ndst = n;
-+    }
+         *ndst = n;
+     }
 +    *dst = new_dst;
-@@ -6253,22 +6268,26 @@
--    if ( type==BCF_HT_STR )
--    {
+     for (i=0; i<nsmpl; i++)
+     {
+         uint8_t *src = fmt->p + i*fmt->n;
+@@ -6341,13 +6355,16 @@ int bcf_get_format_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, v
+     bcf_fmt_t *fmt = &line->d.fmt[i];
+     if ( !fmt->p ) return -3;                                      // the tag was marked for removal
+ 
++    int nsmpl = bcf_hdr_nsamples(hdr);
++    if ( fmt->n < 0 || nsmpl < 0 || (nsmpl && fmt->n > INT_MAX / nsmpl) ) return -5;
++    int n = fmt->n*nsmpl;
+     if ( type==BCF_HT_STR )
+     {
 -        int n = fmt->n*bcf_hdr_nsamples(hdr);
--        if ( *ndst < n )
--        {
+         if ( *ndst < n )
+         {
 -            *dst  = realloc(*dst, n);
 -            if ( !*dst ) return -4;     // could not alloc
--            *ndst = n;
--        }
--        memcpy(*dst,fmt->p,n);
--        return n;
--    }
--
--    // Make sure the buffer is big enough
--    int nsmpl = bcf_hdr_nsamples(hdr);
--    int size1 = type==BCF_HT_INT ? sizeof(int32_t) : sizeof(float);
--    if ( *ndst < fmt->n*nsmpl )
--    {
--        *ndst = fmt->n*nsmpl;
--        *dst  = hts_realloc_p(*dst, *ndst, size1);
--        if ( !*dst ) return -4;     // could not alloc
--    }
-+    int nsmpl = bcf_hdr_nsamples(hdr);
-+    if ( !nsmpl ) return 0;
-+    if ( fmt->n < 0 || nsmpl < 0 || fmt->n > INT_MAX / nsmpl ) return -5;
-+    int n = fmt->n*nsmpl;
-+    if ( type==BCF_HT_STR )
-+    {
-+        if ( *ndst < n )
-+        {
 +            void *new_dst = realloc(*dst, n);
 +            if ( !new_dst ) return -4;
 +            *dst = new_dst;
-+            *ndst = n;
-+        }
-+        memcpy(*dst,fmt->p,n);
-+        return n;
-+    }
-+
-+    // Make sure the buffer is big enough
-+    int size1 = type==BCF_HT_INT ? sizeof(int32_t) : sizeof(float);
+             *ndst = n;
+         }
+         if (n > 0)
+@@ -6356,13 +6373,13 @@ int bcf_get_format_values(const bcf_hdr_t *hdr, bcf1_t *line, const char *tag, v
+     }
+ 
+     // Make sure the buffer is big enough
+-    int nsmpl = bcf_hdr_nsamples(hdr);
+     int size1 = type==BCF_HT_INT ? sizeof(int32_t) : sizeof(float);
+-    if ( *ndst < fmt->n*nsmpl )
 +    if ( *ndst < n )
-+    {
+     {
+-        *ndst = fmt->n*nsmpl;
+-        *dst  = hts_realloc_p(*dst, *ndst, size1);
+-        if ( !*dst ) return -4;     // could not alloc
 +        void *new_dst = hts_realloc_p(*dst, n, size1);
 +        if ( !new_dst ) return -4;
 +        *dst = new_dst;
 +        *ndst = n;
-+    }
-diff --git a/htslib/vcf.h b/htslib/vcf.h
---- a/htslib/vcf.h
-+++ b/htslib/vcf.h
-@@ -1088,5 +1088,6 @@
-      *          -3 .. tag is not present in the VCF record
-      *          -4 .. the operation could not be completed (e.g. out of memory)
-+     *          -5 .. decoded value count or string size exceeds the signed API capacity
-      *
-      *  Returns negative value on error or the number of values (including
-      *  missing values) put in *dst on success. bcf_get_info_string() returns
+     }
+ 
+     #define BRANCH(type_t, convert, is_missing, is_vector_end, set_missing, set_vector_end, set_regular, out_type_t) { \

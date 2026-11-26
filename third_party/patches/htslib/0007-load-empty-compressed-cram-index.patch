@@ -1,0 +1,22 @@
+From: DuckHTS maintainers
+Subject: Load the compressed index of a CRAM without records
+
+htslib 1.25 reads the .crai through BGZF and rejects an index that
+decompresses to nothing. samtools index writes such an index, a gzip stream
+of no bytes, for a CRAM without records, so 1.25 cannot load the index it
+wrote. Reject only an uncompressed empty file, as before 1.25.
+
+diff --git a/cram/cram_index.c b/cram/cram_index.c
+index 719a778..ad759eb 100644
+--- a/cram/cram_index.c
++++ b/cram/cram_index.c
+@@ -232,7 +232,8 @@ int cram_index_load(cram_fd *fd, const char *fn, const char *fn_idx) {
+             goto fail;
+     }
+ 
+-    if (len < 0 || kstr.l < 1)
++    // A compressed index of a CRAM without records holds no entries.
++    if (len < 0 || (kstr.l < 1 && bgzf_compression(fp) == no_compression))
+         goto fail;
+ 
+     int ret = bgzf_close(fp);

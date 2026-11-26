@@ -2149,7 +2149,7 @@ true
 # duckhts_roh_af_table_bcftools chooses the record of a listed position as bcftools roh --AF-file
 # does. HTSlib's indel class of a record decides which records bcftools passes over;
 # duckhts__htslib_is_indel ports it.
-# The expected classes are the INDEL flag of bcftools 1.24 (RBCFTools) on the fixture:
+# The expected classes are the INDEL flag of bcftools 1.25 on the fixture:
 #   bcftools query -f '%ID\t%TYPE\n' test/data/roh_variant_class.vcf
 query II
 WITH bcftools(id, type) AS (VALUES
@@ -2161,14 +2161,17 @@ WITH bcftools(id, type) AS (VALUES
  ('symbolic_x', 'REF'), ('overlap', 'OVERLAP'), ('bnd_after', 'BND'), ('bnd_before', 'BND'),
  ('no_alt', 'REF'), ('multi_snp_indel', 'SNP,INDEL'), ('multi_snp_symbolic', 'SNP'),
  ('multi_mnp_complex', 'MNP,OTHER'), ('multi_indel_overlap', 'INDEL,OVERLAP'),
- ('multi_symbolic_first', 'INDEL'), ('ref_case', 'REF')
+ ('multi_symbolic_first', 'INDEL'), ('ref_case', 'REF'), ('single_bnd_after', 'BND'),
+ ('single_bnd_before', 'BND'), ('single_bnd_after_ins', 'BND'), ('single_bnd_after_long', 'BND'),
+ ('single_bnd_after_mismatch', 'BND'), ('single_bnd_before_long', 'BND'),
+ ('single_bnd_after_complex', 'BND'), ('multi_indel_single_bnd', 'INDEL,BND')
 )
 SELECT count(*), count(*) FILTER (WHERE duckhts__htslib_is_indel(v.REF, v.ALT) IS DISTINCT FROM
   list_contains(string_split(b.type, ','), 'INDEL'))
 FROM read_bcf('__WORKING_DIRECTORY__/test/data/roh_variant_class.vcf') AS v
 JOIN bcftools AS b ON b.id = v.ID;
 ----
-29	0
+37	0
 
 # test/data/roh_repeated.vcf.gz holds repeated records at 1000 to 10000 that the two rules
 # resolve differently (test/scripts/prepare_roh_repeated_fixture.R). Every record there is

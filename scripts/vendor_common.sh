@@ -70,6 +70,6 @@ apply_patches() {
 
   while IFS= read -r patch_file; do
     echo "Applying patch $patch_file"
-    patch -d "$target_dir" -p1 < "$patch_file"
+    patch -d "$target_dir" -p1 --no-backup-if-mismatch < "$patch_file"
   done < <(find "$patch_dir" -maxdepth 1 -type f -name '*.patch' | sort)
 }

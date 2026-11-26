@@ -5,7 +5,7 @@ require duckhts
 query T
 SELECT duckhts_htslib_version();
 ----
-1.24
+1.25
 
 query I
 SELECT duckhts_htslib_features() > 0;

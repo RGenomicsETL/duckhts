@@ -2,6 +2,16 @@
 
 # duckhts (development version)
 
+- The vendored htslib is 1.25, with its fixes to index loading, multi-region iterator
+  cleanup, FORMAT strings with NUL bytes and CRAM decoding. A multi-region iterator now
+  owns its region list also when it fails, as htslib 1.25 documents; the local patch
+  that kept the list with the caller is dropped, and `bcf_scan.c` and
+  `somalier_bam_extract_sql.c` free nothing after a failure. A new local patch loads
+  the compressed `.crai` of a CRAM without records, which htslib 1.25 rejects, so a
+  region query on such a CRAM works with its index. The backport of htslib d24ed09
+  (tabix parses only the columns that locate a record) stays, since 1.25 does not
+  contain it. `duckhts_roh_af_table_bcftools` follows htslib 1.25 in classing a single
+  breakend allele (`A.`, `.A`) as BND, not as an indel.
 - With `SET duckhts_file_system = 'duckdb'`, the search for an index beside the file
   takes a candidate only when htslib detects in it the format its suffix names (CSI, TBI,
   BAI or CRAI). In duckdb-wasm a missing name opens as a one-byte file

@@ -57,29 +57,30 @@ static const char sites_from_info_tag[] =
 
 /* duckhts__htslib_is_indel(ref, alts): whether HTSlib's bcf_get_variant_types()
  * sets VCF_INDEL for a record with these alleles, a port of
- * bcf_set_variant_type() (third_party/htslib vcf.c:5415, HTSlib 1.24).
+ * bcf_set_variant_type() (third_party/htslib vcf.c, HTSlib 1.25).
  * An allele is an indel when, after the common prefix (compared without case),
  * one allele is used up and the other is not and does not end in a breakend
- * bracket; or when both remain and, after the common suffix, one shrinks to
- * its first base and the base where the other stops equals it. '*', symbolic
- * and breakend alleles and a single-base pair are never indels, so an MNP such
- * as AC>GT and a complex substitution such as ACG>AT are not. The record is an
+ * mark ('[', ']' or the '.' of a single breakend); or when both remain and,
+ * after the common suffix, one shrinks to its first base and the base where
+ * the other stops equals it. '*', symbolic and breakend alleles and a
+ * single-base pair are never indels, so an MNP such as AC>GT and a complex
+ * substitution such as ACG>AT are not. The record is an
  * indel when any ALT is. ind_p is the common prefix length; ind_s the common
  * suffix length of the rest, leaving at least one base of each. */
 static const char htslib_is_indel_macro[] =
     "CREATE OR REPLACE MACRO duckhts__htslib_is_indel(ref, alts) AS "
     "coalesce(list_bool_or(list_transform(alts, lambda ind_x: "
     "CASE WHEN ind_x = '*' OR starts_with(ind_x, '<') OR starts_with(ind_x, '[') "
-    "OR starts_with(ind_x, ']') OR (length(ref) = 1 AND length(ind_x) = 1) THEN false "
+    "OR starts_with(ind_x, ']') OR starts_with(ind_x, '.') OR (length(ref) = 1 AND length(ind_x) = 1) THEN false "
     "ELSE list_transform([struct_pack(r := upper(ref), a := upper(ind_x))], lambda ind_v: "
     "list_transform([coalesce(list_position(list_transform("
     "range(1, least(length(ind_v.r), length(ind_v.a)) + 1), "
     "lambda ind_i: substr(ind_v.r, ind_i, 1) != substr(ind_v.a, ind_i, 1)), true) - 1, "
     "least(length(ind_v.r), length(ind_v.a)))], lambda ind_p: "
     "CASE WHEN ind_p = length(ind_v.r) AND ind_p = length(ind_v.a) THEN false "
-    "WHEN ind_p = length(ind_v.r) THEN NOT (ends_with(ind_v.a, ']') OR ends_with(ind_v.a, '[')) "
+    "WHEN ind_p = length(ind_v.r) THEN NOT (ends_with(ind_v.a, ']') OR ends_with(ind_v.a, '[') OR ends_with(ind_v.a, '.')) "
     "WHEN ind_p = length(ind_v.a) THEN true "
-    "WHEN ends_with(ind_v.a, ']') OR ends_with(ind_v.a, '[') THEN false "
+    "WHEN ends_with(ind_v.a, ']') OR ends_with(ind_v.a, '[') OR ends_with(ind_v.a, '.') THEN false "
     "ELSE list_transform([coalesce(list_position(list_transform("
     "range(0, least(length(ind_v.r), length(ind_v.a)) - ind_p - 1), "
     "lambda ind_j: substr(ind_v.r, length(ind_v.r) - ind_j, 1) != "
@@ -143,28 +144,28 @@ static const char sites_from_relation[] =
 
 /* duckhts_roh_af_table_bcftools: the record of a listed position as bcftools
  * roh --AF-file chooses it. HTSlib functions are cited with lines of the
- * vendored third_party/htslib/synced_bcf_reader.c (HTSlib 1.24); bcftools is
+ * vendored third_party/htslib/synced_bcf_reader.c (HTSlib 1.25); bcftools is
  * not vendored, so vcfroh.c lines are those of the bcftools 1.23 mirror under
- * .sync/RBCFTools, and the tests compare with bcftools 1.24. Checked against
- * htslib develop 613169c1 (2026-10-08), where these targets paths are
- * unchanged; its new region merging (bcf_sr_regions_next_ with aux,
+ * .sync/RBCFTools, which bcftools 1.25 keeps at the same lines. The tests
+ * compare with bcftools 1.24 and 1.25. HTSlib 1.25 does not change these
+ * targets paths; its region merging (bcf_sr_regions_next_ with aux,
  * multi-region iterators) applies to -r/-R regions only.
  *
  * vcfroh's main() makes the frequency file a target list with alleles in its
  * third column (bcf_sr_set_targets(..., 1, 3), vcfroh.c:1272-1276). The
  * first target line at a position stays current, since
- * _bcf_sr_regions_overlap() (1793) advances only past lines that end before
- * the record (`while ( iseq==reg->iseq && reg->end < start )`, 1815), and
- * _regions_match_alleles() (1725) parses the alleles of that current line only
- * (reg->line.s, 1738). So bcftools reads the first line of a position. A
+ * _bcf_sr_regions_overlap() (2203) advances only past lines that end before
+ * the record (`while ( iseq==reg->iseq && reg->end < start )`, 2225), and
+ * _regions_match_alleles() (2135) parses the alleles of that current line only
+ * (reg->line.s, 2148). So bcftools reads the first line of a position. A
  * relation has no line order: without af_order it must give one row per
  * position, and with af_order the row with the least af_order value stands for
  * the first line (ROH_FREQ_FIRST; the guard below checks both). The row is an
  * indel when any of its alleles is longer than one character. At a listed
- * position, in file order (FILE_OFFSET), bcf_sr_next_line() (1001) passes over
- * a record whose indel class differs from the row's (the allele match, 1014)
+ * position, in file order (FILE_OFFSET), bcf_sr_next_line() (1292) passes over
+ * a record whose indel class differs from the row's (the allele match, 1305)
  * when the next record of the file has the same POS
- * (`buffer[1]->pos!=buffer[0]->pos`, 1022); otherwise the record is seen. In
+ * (`buffer[1]->pos!=buffer[0]->pos`, 1313); otherwise the record is seen. In
  * vcfroh(), a record with no non-symbolic ALT, or several, claims nothing
  * (vcfroh.c:1010-1027); the first remaining record claims the position
  * (prev_pos, 1036-1065), and process_line() skips the position unless that

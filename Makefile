@@ -446,7 +446,7 @@ test-hts-region-ownership:
 			if [ "$(LINUX_CI_IN_DOCKER)" != 0 ]; then \
 				cmake --build cmake_build/release --target duckhts_hts_region_ownership_test; \
 			fi; \
-			ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+			ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
 				./cmake_build/release/duckhts_hts_region_ownership_test \
 				test/data/range.bam test/data/range.bam.bai \
 				test/data/range.cram test/data/range.cram.crai ;; \

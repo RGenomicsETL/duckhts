@@ -5,10 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=vendor_common.sh
 source "$SCRIPT_DIR/vendor_common.sh"
 
-VERSION="1.24"
+VERSION="1.25"
 TARBALL="htslib-${VERSION}.tar.bz2"
 URL="https://github.com/samtools/htslib/releases/download/${VERSION}/${TARBALL}"
-SHA256="28a8de191381c7a97a35675ceac76fa1ea95e7b678d6a2e9d600a7874e4077de"
+SHA256="158c271e4e2986bb2dd11283b640edc10c56695b293df77a109ce99480303730"
 
 archive_path="$DIST_DIR/$TARBALL"
 

@@ -1075,25 +1075,25 @@ static int bam_region_scan_begin(const bam_bind_data_t *bind, bam_local_init_dat
  * CRAM required fields
  *
  * A CRAM decoder decodes only the data series behind the SAM fields it is
- * asked for (htslib cram/cram_decode.c:564-616). read_bam always asks for
+ * asked for (htslib cram/cram_decode.c:564-617). read_bam always asks for
  * FLAG, RNAME, POS and CIGAR for scan ownership and iterator overlap checks.
  * Other fixed fields follow the projection. It also drops two groups when no
  * projected column reads them:
  *   - SEQ and QUAL. Without them htslib does not fetch the reference for a
- *     single-reference slice (cram_decode.c:2452-2458) and returns an empty
- *     sequence (cram_decode.c:3184-3198).
+ *     single-reference slice (cram_decode.c:2466-2472) and returns an empty
+ *     sequence (cram_decode.c:3198-3212).
  *   - AUX and RGAUX. Without them htslib keeps no tag data in the record
- *     (cram_decode.c:601-611, 2007-2011).
+ *     (cram_decode.c:602-612, 2009-2013).
  * htslib makes MD and NM from the reference when they are not stored
- * (cram_decode.c:1105-1107), so a projection that can show MD or NM keeps
+ * (cram_decode.c:1107-1109), so a projection that can show MD or NM keeps
  * SEQ and QUAL as well. RGAUX alone does not restore an RG tag that is
- * missing from the header (cram/cram_encode.c:2753-2769), so READ_GROUP_ID
+ * missing from the header (cram/cram_encode.c:2773-2789), so READ_GROUP_ID
  * and SAMPLE_ID keep AUX.
  *
  * htslib restores a CIGAR stored as a placeholder with a CG tag only from
- * tag data and SEQ (cram_decode.c:3231-3233, sam.c:683-690). htslib's
- * readers move CG into the CIGAR before a record is written (sam.c:845,
- * 2826), but a CRAM from another writer may keep the placeholder, so a
+ * tag data and SEQ (cram_decode.c:3256-3258, sam.c:693-700). htslib's
+ * readers move CG into the CIGAR before a record is written (sam.c:867,
+ * 2851), but a CRAM from another writer may keep the placeholder, so a
  * projected CIGAR keeps tag data and SEQ as well.
  * ================================================================ */
 
@@ -1108,7 +1108,7 @@ static int bam_cram_required_fields(const bam_bind_data_t *bind,
         if (col_id == BAM_COL_QNAME) {
             /* Names discarded at encoding are generated per pair from the mate
              * links, which htslib resolves only when a mate field is requested
-             * (cram_decode.c:2101-2110); without them mates get different names. */
+             * (cram_decode.c:2103-2112); without them mates get different names. */
             fields |= SAM_QNAME | SAM_RNEXT | SAM_PNEXT | SAM_TLEN;
         } else if (col_id == BAM_COL_MAPQ) {
             fields |= SAM_MAPQ;
@@ -1124,7 +1124,7 @@ static int bam_cram_required_fields(const bam_bind_data_t *bind,
             /* A record may keep BAM's long-CIGAR placeholder with the real
              * CIGAR in a CG:B:I tag. cram_decode.c restores it (bam_tag2cigar,
              * after the aux block, line 3231) only when the tags are decoded,
-             * and the placeholder test needs l_qseq (sam.c:688), so a
+             * and the placeholder test needs l_qseq (sam.c:698), so a
              * projected CIGAR asks for both. */
             need_tags = 1;
             need_sequence = 1;

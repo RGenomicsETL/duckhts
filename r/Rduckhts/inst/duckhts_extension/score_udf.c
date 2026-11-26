@@ -1241,7 +1241,7 @@ static score_summary_t **score_load_summary_vcf(const score_bind_t *bind,
 
         key = (((uint64_t)(uint32_t)rid) << 44) | (uint64_t)rec->pos;
 
-        /* htslib 1.24 returns -4 when a FORMAT buffer allocation fails. */
+        /* htslib 1.25 returns -4 when a FORMAT buffer allocation fails. */
         n_es = bcf_get_format_float(shdr, rec, "ES", &float_arr, &m_float);
         if (n_es == -4) goto oom;
         if (n_es < n_prs) continue;

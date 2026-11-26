@@ -40,7 +40,7 @@ static inline int duckhts_bcf_index_load(duckhts_bcf_index_t *index,
         }
     }
     if (index->tabix && !index->tabix->dict) {
-        /* HTSlib 1.24's get_tid(..., is_add=0) lazily creates even an empty
+        /* HTSlib 1.25's get_tid(..., is_add=0) lazily creates even an empty
          * dictionary. Do that before publication: query/readrec then only
          * look up names, and all per-query mutations stay in the iterator. */
         (void)tbx_name2id(index->tabix, "");

@@ -249,7 +249,7 @@ static int window_fill_mask(mismatch_window_t *window, mismatch_mask_t *mask, co
             if (header_id < 0) goto unknown_contig;
             return 1; /* a header contig without records */
         }
-        /* htslib 1.24 tabix ends a record with SVLEN one base before the rlen
+        /* htslib 1.25 tabix ends a record with SVLEN one base before the rlen
          * that vcf_parse() gives it (tbx.c adds |SVLEN| to POS, vcf.c adds
          * |SVLEN| + 1), so a query from beg0 would miss a deletion whose last
          * base is the window's first. Start one base earlier; marks are
