@@ -1,6 +1,6 @@
 # DuckHTS Extension News
 
-# duckhts (development version)
+# duckhts 2.1.0
 
 - Filter expressions (`include`, `exclude` of `bcftools_score`) follow bcftools 1.25
   `filter.c`, carried over from 1.23 with the DuckHTS changes kept: `!~` tests its

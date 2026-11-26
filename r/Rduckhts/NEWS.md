@@ -1,4 +1,4 @@
-# Rduckhts (development version)
+# Rduckhts 2.1.0.0.1.1
 
 - `include` and `exclude` expressions of `bcftools_score` follow bcftools 1.25: `!~`
   tests its pattern, and MAF and MAC count each allele of a multiallelic site.
