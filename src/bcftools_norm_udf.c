@@ -113,8 +113,57 @@ static inline int has_non_acgtn(const char *seq, int nseq) {
     return 0;
 }
 
+/* A mate breakend holds '[' or ']'; a single breakend, as htslib 1.25 classes
+ * it, starts or ends with '.' after or before its bases (A. or .A). */
 static int is_breakend_alt(const char *alt) {
-    return alt && (strchr(alt, '[') || strchr(alt, ']'));
+    if (!alt) return 0;
+    if (strchr(alt, '[') || strchr(alt, ']')) return 1;
+    size_t len = strlen(alt);
+    return len >= 2 && (alt[0] == '.' || alt[len - 1] == '.');
+}
+
+/* Symbolic alleles whose length htslib takes from INFO/SVLEN
+ * (svlen_on_ref_for_vcf_alt in htslib 1.25 hts_internal.h). */
+static int is_svlen_symbolic_alt(const char *alt) {
+    size_t len = alt ? strlen(alt) : 0;
+    if (len < 5 || alt[0] != '<' || alt[len - 1] != '>') return 0;
+    if (alt[4] != '>' && alt[4] != ':') return 0;
+    return !strncmp(alt, "<CNV", 4) || !strncmp(alt, "<DEL", 4) ||
+           !strncmp(alt, "<DUP", 4) || !strncmp(alt, "<INV", 4);
+}
+
+/* The reference length htslib 1.25 gives a record (get_rlen in vcf.c): the
+ * longest of REF, the span to INFO/END and |SVLEN| + 1 when an ALT takes its
+ * length from SVLEN. An END before POS and an SVLEN of 0 count as absent. */
+static int64_t symbolic_record_rlen(int64_t pos1, size_t ref_len, int has_end_pos, int64_t end_pos,
+                                    int has_svlen, int64_t svlen, char **alts, int n_alt) {
+    int64_t rlen = (int64_t)ref_len;
+    if (has_end_pos && end_pos >= pos1 && end_pos - pos1 + 1 > rlen) rlen = end_pos - pos1 + 1;
+    int svlen_applies = 0;
+    for (int i = 0; i < n_alt; i++) svlen_applies |= is_svlen_symbolic_alt(alts[i]);
+    if (svlen_applies && has_svlen && svlen != 0) {
+        int64_t from_svlen = (svlen < 0 ? -svlen : svlen) + 1;
+        if (from_svlen > rlen) rlen = from_svlen;
+    }
+    return rlen;
+}
+
+/* The first base an IUPAC code stands for, keeping case, as bcftools 1.25
+ * iupac2first maps it; 0 for a character that is not a base code. */
+static char iupac_first_base(char c) {
+    switch (c) {
+    case 'A': case 'R': case 'W': case 'M': case 'D': case 'H': case 'V': return 'A';
+    case 'a': case 'r': case 'w': case 'm': case 'd': case 'h': case 'v': return 'a';
+    case 'C': case 'Y': case 'S': case 'B': return 'C';
+    case 'c': case 'y': case 's': case 'b': return 'c';
+    case 'G': case 'K': return 'G';
+    case 'g': case 'k': return 'g';
+    case 'T': return 'T';
+    case 't': return 't';
+    case 'N': return 'N';
+    case 'n': return 'n';
+    default: return 0;
+    }
 }
 
 static int is_spanning_deletion_alt(const char *alt) {
@@ -154,12 +203,15 @@ static char *fetch_windowed_sequence(duckhts_reference_entry_t *entry,
     const char *chrom, hts_pos_t start0, hts_pos_t end0) {
     char *bases = duckhts_reference_fetch(entry, chrom, start0, end0,
                                         DUCKHTS_REFERENCE_CLIP_END);
-    /* bcftools normalization interprets non-ACGTN reference bases as N.
-     * Do not alter shared cached bytes: munge preserves IUPAC characters. */
+    /* bcftools 1.25 normalization reads an IUPAC code in the reference as the
+     * first base it stands for and leaves other characters as they are.
+     * duckhts_reference_fetch returns a copy, so the cached bytes keep the
+     * codes that munge reports. */
     if (bases) {
-        for (char *p = bases; *p; p++)
-            if (*p != 'A' && *p != 'C' && *p != 'G' && *p != 'T' && *p != 'N')
-                *p = 'N';
+        for (char *p = bases; *p; p++) {
+            char base = iupac_first_base(*p);
+            if (base) *p = base;
+        }
     }
     return bases;
 }
@@ -495,6 +547,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
     int any_breakend = 0;
     int any_spanning = 0;
     int64_t original_end;
+    int64_t record_rlen;
     hts_pos_t new_pos0;
     int full_ref_len;
     char *out_ref = NULL;
@@ -711,6 +764,21 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
         }
     }
 
+    /* bcftools 1.25 does not realign a multiallelic record with a symbolic
+     * ALT. Mixed gVCF rows were handled above, a documented DuckHTS extension. */
+    if (n_orig_alt > 1) {
+        for (int i = 0; i < n_orig_alt; i++) {
+            if (orig_alt[i][0] != '<') continue;
+            if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
+                                        "SymbolicAllele")) goto oom;
+            free(orig_ref);
+            free_string_array(orig_alt, n_orig_alt);
+            return 1;
+        }
+    }
+    record_rlen = symbolic_record_rlen(pos1, strlen(orig_ref), has_end_pos, end_pos_in,
+                                       has_svlen, svlen_in, orig_alt, n_orig_alt);
+
     n_allele = n_orig_alt + 1;
     als = (kstring_t *)calloc((size_t)n_allele, sizeof(kstring_t));
     sym = (kstring_t *)calloc((size_t)n_allele, sizeof(kstring_t));
@@ -721,7 +789,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
         char *alt = orig_alt[i - 1];
         if (is_symbolic_alt(alt)) {
             if (!strncmp(alt, "<DEL", 4)) {
-                int64_t rlen = has_end_pos && end_pos_in >= pos1 ? end_pos_in - pos1 + 1 : (int64_t)strlen(orig_ref);
+                int64_t rlen = record_rlen;
                 char *expanded_ref;
                 if (rlen <= 0) {
                     if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
@@ -748,7 +816,10 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
                 if (kputsn(als[0].s, 1, &als[i]) < 0) goto oom;
             } else if (!strncmp(alt, "<DUP", 4)) {
                 char *dup_ref;
-                if (!has_svlen || svlen_in <= 0) {
+                /* As bcftools 1.25: the DUP length is the record length
+                 * less the anchor base. */
+                int64_t dup_len = record_rlen - 1;
+                if (dup_len <= 0) {
                     if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt,
                                                 "SymbolicInsufficientMetadata")) goto oom;
                     free_kstring_array(als, n_allele);
@@ -757,7 +828,7 @@ static int normalize_variant_row(duckhts_reference_entry_t *cache,
                     free_string_array(orig_alt, n_orig_alt);
                     return 1;
                 }
-                dup_ref = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + svlen_in - 1);
+                dup_ref = fetch_windowed_sequence(cache, chrom, pos1 - 1, pos1 + dup_len - 1);
                 if (!dup_ref) {
                     if (!set_result_passthrough(result, pos1, original_end, orig_ref, orig_alt, n_orig_alt, "MissingContig")) goto oom;
                     free_kstring_array(als, n_allele);

@@ -1,0 +1,59 @@
+# name: test/sql/bcftools_norm_1_25.test
+# description: bcftools_norm_row against bcftools 1.25 norm
+# group: [duckhts]
+
+# bcftools_norm_row against bcftools 1.25 norm -c w on test/data/norm_bcftools_1_25.vcf
+# (IUPAC reference codes, <DEL>/<DUP> lengths from END or SVLEN, single and
+# mate breakends, multiallelic symbolic records). Expected rows come from:
+#   bcftools norm -c w -f test/data/norm_bcftools_1_25.fa test/data/norm_bcftools_1_25.vcf
+# with REF and ALT uppercased, keyed by ID.
+
+require duckhts
+
+query TITT
+SELECT r.ID, n.pos_normed, upper(n.ref_normed), upper(array_to_string(n.alt_normed, ','))
+FROM read_bcf('__WORKING_DIRECTORY__/test/data/norm_bcftools_1_25.vcf') AS r,
+LATERAL (SELECT bcftools_norm_row(r.CHROM, r.POS, r.REF, r.ALT, '__WORKING_DIRECTORY__/test/data/norm_bcftools_1_25.fa',
+                                  r.INFO_END::BIGINT, r.INFO_SVLEN[1]::BIGINT, NULL, NULL) AS n)
+ORDER BY r.ID COLLATE C;
+----
+bnd_mate	24	G	G[CHR1:60[
+bnd_single_after	24	G	G.
+bnd_single_before	24	G	.G
+del_A_run	50	TAA	T
+del_GT	72	CGT	C
+del_after_iupac	39	AC	A
+del_end_eq_pos	1	A	<DEL>
+del_homopolymer	7	GT	G
+del_long_homopolymer	105	CA	C
+del_no_len	1	A	<DEL>
+del_repeat	24	GCAT	G
+dup_allele	24	GCAT	G,G
+dup_no_len	10	T	<DUP>
+gvcf_block	13	T	<NON_REF>
+ins_after_MK	101	C	CT
+ins_homopolymer	7	G	GT
+ins_long_homopolymer	105	C	CA
+ins_repeat	24	G	GGCA
+iupac_M_as_A	99	A	C
+iupac_R_as_A	37	A	G
+iupac_Y_as_C	38	C	T
+iupac_Y_as_N	38	N	T
+iupac_ref_window	37	RY	R
+lower_del	7	GT	G
+mnp_lower	43	A	T
+multi_del_ins	24	GCAT	G,GCATGCA
+multi_indel_bnd	24	GCAT	G,G.
+multi_real_dup	24	GCAT	G,<DUP>
+multi_snv_sym	24	G	C,<DEL>
+spanning_star	24	GCAT	G,*
+sym_del	7	G	<DEL>
+sym_del_end_svlen_disagree	7	G	<DEL>
+sym_del_svlen_only	7	G	<DEL>
+sym_dup	7	G	<DUP>
+sym_dup_end_only	7	G	<DUP>
+sym_dup_end_only_repeat	72	C	<DUP>
+sym_dup_end_svlen_disagree	7	G	<DUP>
+sym_dup_repeat	72	C	<DUP>
+sym_dup_svlen_only	7	G	<DUP>
+sym_inv	74	T	<INV>

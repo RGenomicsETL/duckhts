@@ -2,6 +2,14 @@
 
 # duckhts (development version)
 
+- Filter expressions (`include`, `exclude` of `bcftools_score`) follow bcftools 1.25
+  `filter.c`, carried over from 1.23 with the DuckHTS changes kept: `!~` tests its
+  pattern instead of passing every record, and MAF and MAC count each allele of a
+  multiallelic site. `bcftools_norm_row` and `duckhts_bcftools_norm` follow bcftools
+  1.25 `norm`: an IUPAC code in the FASTA reads as the first base it stands for,
+  `<DEL>` and `<DUP>` take their length from END or SVLEN as htslib does, a single
+  breakend passes through as Breakend, and a multiallelic row with a symbolic ALT
+  passes through as SymbolicAllele. New SQL tests compare both with bcftools 1.25.
 - The vendored htslib is 1.25, with its fixes to index loading, multi-region iterator
   cleanup, FORMAT strings with NUL bytes and CRAM decoding. A multi-region iterator now
   owns its region list also when it fails, as htslib 1.25 documents; the local patch

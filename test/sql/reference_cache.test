@@ -47,11 +47,13 @@ SELECT i, 1 + (i * 13) % 60 AS pos,
   '__WORKING_DIRECTORY__/' || repeat('./', (i // 2048) % 12) || 'test_reference_cache.fa.gz' AS path
 FROM range(1000000) t(i)
 
+# bcftools 1.25 norm reads an IUPAC code in the FASTA as the first base it
+# stands for (R, W, M as A; Y, S as C; K as G), so that base is the matching REF.
 statement ok
 CREATE MACRO cache_outputs(input_table) AS TABLE
 SELECT i, pos, ref,
-  bcftools_norm_row('chrCache', pos, CASE WHEN ref IN ('A','C','G','T','N') THEN ref ELSE 'N' END,
-    [CASE WHEN ref = 'A' THEN 'C' ELSE 'A' END], path, NULL, NULL, NULL, NULL) AS norm,
+  bcftools_norm_row('chrCache', pos, CASE WHEN ref IN ('R','W','M') THEN 'A' WHEN ref IN ('Y','S') THEN 'C' WHEN ref = 'K' THEN 'G' ELSE ref END,
+    [CASE WHEN ref IN ('A','R','W','M') THEN 'C' ELSE 'A' END], path, NULL, NULL, NULL, NULL) AS norm,
   bcftools_munge_row('chrCache', pos, CASE WHEN ref = 'A' THEN 'C' ELSE 'A' END, ref, NULL,
     NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,
     path,'IFFY','REF_MISMATCH',NULL,NULL,NULL) AS munge
@@ -65,7 +67,7 @@ CREATE TABLE cache_serial AS SELECT * FROM cache_outputs('cache_inputs')
 
 query III
 SELECT count(*), count(*) FILTER (WHERE norm.pos_normed = pos AND norm.norm_status = 'Unchanged'
-  AND norm.ref_normed = CASE WHEN ref IN ('A','C','G','T','N') THEN ref ELSE 'N' END),
+  AND norm.ref_normed = CASE WHEN ref IN ('R','W','M') THEN 'A' WHEN ref IN ('Y','S') THEN 'C' WHEN ref = 'K' THEN 'G' ELSE ref END),
   count(*) FILTER (WHERE munge.pos = pos AND munge.ref = ref AND munge.filter IS NULL AND NOT munge.alleles_swapped)
 FROM cache_serial
 ----
@@ -89,10 +91,11 @@ SELECT count(*) FROM (
 statement ok
 PRAGMA threads=1
 
-# Execute normalization first on the same literal path. Its N interpretation
-# must not overwrite the cached IUPAC bytes subsequently consumed by munge.
+# Execute normalization first on the same literal path. It reads the R at
+# position 5 as A; that reading must not overwrite the cached IUPAC bytes
+# subsequently consumed by munge.
 query T
-SELECT bcftools_norm_row('chrCache',5,'N',['A'],
+SELECT bcftools_norm_row('chrCache',5,'A',['C'],
   '__WORKING_DIRECTORY__/test/data/reference_cache.fa',NULL,NULL,NULL,NULL).norm_status
 ----
 Unchanged

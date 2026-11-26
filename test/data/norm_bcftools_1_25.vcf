@@ -1,0 +1,46 @@
+##fileformat=VCFv4.3
+##FILTER=<ID=PASS,Description="All filters passed">
+##INFO=<ID=END,Number=1,Type=Integer,Description="e">
+##INFO=<ID=SVLEN,Number=A,Type=Integer,Description="s">
+##contig=<ID=chr1,length=291>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	10	sym_del	T	<DEL>	.	.	END=13;SVLEN=-3
+chr1	10	sym_del_svlen_only	T	<DEL>	.	.	SVLEN=-3
+chr1	10	sym_del_end_svlen_disagree	T	<DEL>	.	.	END=13;SVLEN=-2
+chr1	10	del_no_len	T	<DEL>	.	.	.
+chr1	10	del_end_eq_pos	T	<DEL>	.	.	END=10
+chr1	10	sym_dup	T	<DUP>	.	.	END=12;SVLEN=2
+chr1	10	sym_dup_end_only	T	<DUP>	.	.	END=12
+chr1	10	sym_dup_svlen_only	T	<DUP>	.	.	SVLEN=2
+chr1	10	sym_dup_end_svlen_disagree	T	<DUP>	.	.	END=13;SVLEN=2
+chr1	10	dup_no_len	T	<DUP>	.	.	.
+chr1	13	gvcf_block	T	<NON_REF>	.	.	END=15
+chr1	13	ins_homopolymer	T	TT	.	.	.
+chr1	13	del_homopolymer	TT	T	.	.	.
+chr1	13	lower_del	tt	t	.	.	.
+chr1	24	bnd_single_before	G	.G	.	.	.
+chr1	24	multi_snv_sym	G	C,<DEL>	.	.	END=27;SVLEN=-3
+chr1	24	bnd_single_after	G	G.	.	.	.
+chr1	24	ins_repeat	G	GGCA	.	.	.
+chr1	24	bnd_mate	G	G[chr1:60[	.	.	.
+chr1	24	del_repeat	GCAT	G	.	.	.
+chr1	24	spanning_star	GCAT	G,*	.	.	.
+chr1	24	multi_real_dup	GCAT	G,<DUP>	.	.	END=27;SVLEN=3
+chr1	24	dup_allele	GCAT	G,G	.	.	.
+chr1	24	multi_indel_bnd	GCAT	G,G.	.	.	.
+chr1	24	multi_del_ins	GCAT	G,GCATGCA	.	.	.
+chr1	37	iupac_R_as_A	A	G	.	.	.
+chr1	37	iupac_ref_window	RY	R	.	.	.
+chr1	38	iupac_Y_as_C	C	T	.	.	.
+chr1	38	iupac_Y_as_N	N	T	.	.	.
+chr1	39	del_after_iupac	AC	A	.	.	.
+chr1	42	mnp_lower	ta	TT	.	.	.
+chr1	50	del_A_run	TAA	T	.	.	.
+chr1	74	sym_dup_repeat	T	<DUP>	.	.	END=76;SVLEN=2
+chr1	74	sym_dup_end_only_repeat	T	<DUP>	.	.	END=76
+chr1	74	sym_inv	T	<INV>	.	.	END=76
+chr1	75	del_GT	GTG	G	.	.	.
+chr1	99	iupac_M_as_A	A	C	.	.	.
+chr1	101	ins_after_MK	C	CT	.	.	.
+chr1	281	ins_long_homopolymer	A	AA	.	.	.
+chr1	281	del_long_homopolymer	AA	A	.	.	.

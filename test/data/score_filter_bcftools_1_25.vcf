@@ -1,0 +1,14 @@
+##fileformat=VCFv4.3
+##contig=<ID=1,length=10000>
+##INFO=<ID=TAG,Number=1,Type=String,Description="t">
+##INFO=<ID=TAGS,Number=.,Type=String,Description="t">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="g">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	S1	S2	S3	S4
+1	100	s0	A	T	.	PASS	TAG=abc;TAGS=x,abc	GT	0/1	0/0	0/0	0/0
+1	200	s1	A	T	.	PASS	TAG=xyz;TAGS=x,y	GT	0/1	0/1	0/1	0/0
+1	300	s2	A	T,G	.	PASS	TAG=abd	GT	0/1	2/2	2/2	2/2
+1	400	s3	A	T,G	.	PASS	.	GT	0/1	0/2	0/2	0/0
+1	500	s4	A	T,G,C	.	PASS	TAGS=.	GT	0/1	2/3	3/3	0/0
+1	600	s5	A	T	.	PASS	TAG=.	GT	0/1	1/1	1/1	1/1
+1	700	s6	A	T,G	.	PASS	TAG=ABC	GT	0/1	1/2	1/2	1/2
+1	800	s7	A	T	.	PASS	TAGS=abc,abc	GT	0/1	./.	./.	0/0

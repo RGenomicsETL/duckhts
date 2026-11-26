@@ -1,6 +1,7 @@
 #ifndef DUCKHTS_BCFTOOLS_SHIM_H
 #define DUCKHTS_BCFTOOLS_SHIM_H
 
+#include <ctype.h>
 #include <stdint.h>
 #include <htslib/kfunc.h>
 #include <htslib/vcf.h>
@@ -37,5 +38,12 @@ static inline double calc_binom_two_sided(int na, int nb, double aprob) {
     prob = na > nb ? 2 * kf_betai(na, nb + 1, aprob) : 2 * kf_betai(nb, na + 1, aprob);
     return prob > 1 ? 1 : prob;
 }
+
+/* <ctype.h> wrappers for plain chars, as bcftools 1.25 bcftools.h declares them. */
+static inline int isalnum_c(char c) { return isalnum((unsigned char)c); }
+static inline int isdigit_c(char c) { return isdigit((unsigned char)c); }
+static inline int ispunct_c(char c) { return ispunct((unsigned char)c); }
+static inline int isspace_c(char c) { return isspace((unsigned char)c); }
+static inline char tolower_c(char c) { return tolower((unsigned char)c); }
 
 #endif

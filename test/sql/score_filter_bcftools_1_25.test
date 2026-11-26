@@ -1,0 +1,84 @@
+# name: test/sql/score_filter_bcftools_1_25.test
+# description: bcftools_score include expressions against bcftools 1.25 view -i
+# group: [duckhts]
+
+# Each record of test/data/score_filter_bcftools_1_25.vcf has BETA 2^(k+1) in
+# test/data/score_filter_bcftools_1_25.tsv and S1 is 0/1 at every record, so the
+# S1 score is the sum of the weights of the records the expression keeps. The
+# expected record sets are those of
+#   bcftools view -H -i EXPR test/data/score_filter_bcftools_1_25.vcf
+# with bcftools 1.25; bcftools 1.23 gives other sets for !~ and multiallelic MAF/MAC.
+
+require duckhts
+
+# kept: s1 s3 s4 s5 s6 s7
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'TAG!~"ab"') WHERE SAMPLE = 'S1';
+----
+500.0
+
+# kept: s0 s2
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'TAG~"ab"') WHERE SAMPLE = 'S1';
+----
+10.0
+
+# kept: s0 s1 s2 s3 s4 s5 s6
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'TAGS!~"ab"') WHERE SAMPLE = 'S1';
+----
+254.0
+
+# kept: s0 s7
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'TAGS~"ab"') WHERE SAMPLE = 'S1';
+----
+258.0
+
+# kept: s0 s2 s3 s4 s5 s6 s7
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'TAG!~"^x"') WHERE SAMPLE = 'S1';
+----
+506.0
+
+# kept: s1 s3 s4 s5 s7
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'TAG!~"ab/i"') WHERE SAMPLE = 'S1';
+----
+372.0
+
+# kept: s1
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'MAF>0.3') WHERE SAMPLE = 'S1';
+----
+4.0
+
+# kept: s0 s2 s3 s4 s5 s6
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'MAF<0.2') WHERE SAMPLE = 'S1';
+----
+250.0
+
+# kept: s1
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'MAF[0]>0.3') WHERE SAMPLE = 'S1';
+----
+4.0
+
+# kept: s1
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'MAC>=3') WHERE SAMPLE = 'S1';
+----
+4.0
+
+# kept: s0 s2 s3 s4 s5 s6 s7
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'MAC[1]<2') WHERE SAMPLE = 'S1';
+----
+506.0
+
+# kept: s0 s1 s2 s3 s4 s5 s6 s7
+query R
+SELECT "score_filter_bcftools_1_25" FROM bcftools_score('__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.vcf', '__WORKING_DIRECTORY__/test/data/score_filter_bcftools_1_25.tsv', columns := 'PLINK', include := 'MAF>0.1 && MAC<4') WHERE SAMPLE = 'S1';
+----
+510.0
