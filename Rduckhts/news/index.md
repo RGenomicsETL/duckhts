@@ -2,6 +2,13 @@
 
 ## Rduckhts (development version)
 
+- `include` and `exclude` expressions of `bcftools_score` follow
+  bcftools 1.25: `!~` tests its pattern, and MAF and MAC count each
+  allele of a multiallelic site. `bcftools_norm_row` and
+  `duckhts_bcftools_norm` follow bcftools 1.25 `norm` for IUPAC
+  reference codes, `<DEL>`/`<DUP>` lengths, single breakends and
+  multiallelic rows with a symbolic ALT.
+
 - Bundles htslib 1.25. A region query on a CRAM without records works
   with its index. `rduckhts_roh(site_rule = "bcftools")` classes a
   single breakend allele (`A.`, `.A`) as BND, not as an indel, when it
