@@ -77,6 +77,6 @@ controlled by this helper and override entries with those names in
 con <- rduckhts_connect()
 DBI::dbGetQuery(con, "SELECT duckhts_htslib_version() AS version")
 #>   version
-#> 1    1.24
+#> 1    1.25
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
