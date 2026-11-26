@@ -1,5 +1,8 @@
 # Rduckhts (development version)
 
+- With `SET duckhts_file_system = 'duckdb'`, the search for an index beside the file
+  skips a file under an index name whose content is not that index format, and goes on
+  to the next name.
 - On Windows, a package build whose libdeflate probe fails passes `--without-libdeflate`
   to the bundled htslib's configure, which ignores `--disable-libdeflate` and checks
   for libdeflate again on its own.

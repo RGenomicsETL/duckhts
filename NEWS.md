@@ -2,6 +2,12 @@
 
 # duckhts (development version)
 
+- With `SET duckhts_file_system = 'duckdb'`, the search for an index beside the file
+  takes a candidate only when htslib detects in it the format its suffix names (CSI, TBI,
+  BAI or CRAI). In duckdb-wasm a missing name opens as a one-byte file
+  (https://github.com/duckdb/duckdb-wasm/issues/2332), so the absent `.csi` hid the
+  registered `.tbi` or `.bai` and region queries failed without `index_path`. A browser
+  test now covers the route.
 - The vcpkg manifest enables its `deflate` feature by default, so community extension
   binaries link htslib against libdeflate for BGZF and index (de)compression
   (https://github.com/RGenomicsETL/duckhts/issues/369). When CMake finds no libdeflate,

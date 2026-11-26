@@ -1,35 +1,13 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { gunzipSync } from "node:zlib";
 import { test, expect } from "@playwright/test";
-
-const root = path.resolve(__dirname, "../..");
+import { bedFixture, gffFixture, root, vcfFixture } from "./fixture-oracles";
 
 for (const ignoreRange of [false, true]) {
   test(`local File readers (${ignoreRange ? "full-body fallback" : "browser ranges"})`, async ({ page }) => {
-    const bed = await readFile(path.join(root, "test/data/fixture_mixed_regions.bed"), "utf8");
-    const gff = await readFile(path.join(root, "test/data/gff_attrs.gff3"), "utf8");
-    const vcf = await readFile(path.join(root, "test/data/region_union.vcf.gz"));
-    const index = await readFile(path.join(root, "test/data/region_union.vcf.gz.tbi"));
-    // Independent oracles: parse the physical fixture records, including duplicates.
-    const bedRows = bed.trim().split("\n").map((line) => {
-      const [chrom, start, end, name] = line.split("\t");
-      return { chrom, start: Number(start), end: Number(end), name };
-    });
-    const gffRows = gff.trim().split("\n").filter((line) => !line.startsWith("#")).map((line) => {
-      const [seqname, , feature, start, end] = line.split("\t");
-      return { seqname, feature, start: Number(start), end: Number(end) };
-    });
-    const records = gunzipSync(vcf).toString("utf8").trim().split("\n")
-      .filter((line) => !line.startsWith("#")).map((line) => {
-        const [chrom, pos, id, ref, alt, , , info] = line.split("\t");
-        const end = info.split(";").find((field) => field.startsWith("END="));
-        return {
-          row: { chrom, pos: Number(pos), id, ref, alt },
-          end: end ? Number(end.slice(4)) : Number(pos) + ref.length - 1,
-        };
-      });
-    const expectedRegion = records.filter(({ row, end }) => row.chrom === "chr1" && row.pos <= 18 && end >= 12);
+    const { text: bed, rows: bedRows } = await bedFixture();
+    const { text: gff, rows: gffRows } = await gffFixture();
+    const { bytes: vcf, index, rows: vcfRows, overlapping } = await vcfFixture();
+    const expectedRegion = overlapping("chr1", 12, 18);
 
     const browserLogs: string[] = [];
     page.on("console", (message) => browserLogs.push(message.text()));
@@ -136,8 +114,8 @@ for (const ignoreRange of [false, true]) {
 
     expect(result.bedResult).toEqual(bedRows);
     expect(result.gffResult).toEqual(gffRows);
-    expect(result.streamed).toEqual(records.map(({ row }) => row));
-    expect(result.indexed).toEqual(expectedRegion.map(({ row }) => row));
+    expect(result.streamed).toEqual(vcfRows);
+    expect(result.indexed).toEqual(expectedRegion);
     expect(result.large).toEqual(Array.from({ length: 2048 }, () => bedRows).flat());
     expect(result.emptyBed).toEqual([]);
     expect(result.emptyGff).toEqual([]);
@@ -162,11 +140,7 @@ for (const ignoreRange of [false, true]) {
 // worker global. The first assertion proves it reached the extension: a same-origin
 // HTTP read of a host outside allowHosts is refused.
 test("host allowlist blocks non-listed hosts but not local blob: files", async ({ page }) => {
-  const bed = await readFile(path.join(root, "test/data/fixture_mixed_regions.bed"), "utf8");
-  const bedRows = bed.trim().split("\n").map((line) => {
-    const [chrom, start, end, name] = line.split("\t");
-    return { chrom, start: Number(start), end: Number(end), name };
-  });
+  const { text: bed, rows: bedRows } = await bedFixture();
   await page.route("**/duckhts-package.js", (route) => route.fulfill({
     path: path.join(root, "js/src/local-file.js"), contentType: "text/javascript",
   }));

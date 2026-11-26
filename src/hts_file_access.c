@@ -417,21 +417,46 @@ typedef enum {
 
 #define INDEX_SUFFIX_CAPACITY sizeof(".crai")
 
+typedef struct {
+    const char *suffix;
+    enum htsExactFormat format;
+} index_suffix_t;
+
 /*
- * The index beside a routed file, as a routed name, or NULL when none opens.
+ * Whether a routed candidate opens and holds the index format its suffix names,
+ * as htslib's hts_detect_format2 recognises it. Opening alone is not proof:
+ * duckdb-wasm opens a missing name as a 1-byte buffer
+ * (https://github.com/duckdb/duckdb-wasm/issues/2332). A CRAI of an empty CRAM
+ * is an empty gzip stream, which htslib detects as empty_format.
+ */
+static bool routed_index_matches(const char *name, enum htsExactFormat format) {
+    hFILE *probe = hopen(name, "r");
+    if (!probe) {
+        return false;
+    }
+    htsFormat detected;
+    const bool matches =
+        hts_detect_format2(probe, name, &detected) == 0 &&
+        (detected.format == format || (format == crai && detected.format == empty_format));
+    return hclose(probe) == 0 && matches;
+}
+
+/*
+ * The index beside a routed file, as a routed name, or NULL when none is found.
  * Candidates follow the order of htslib's hts_idx_check_local: each suffix
  * appended to the path, then in place of the extension of its last component.
+ * The first candidate that routed_index_matches accepts is the index.
  * For a URL, as in htslib's haddextension, the suffix goes before a query or
  * fragment, so a presigned https://host/a.bam?sig=... looks for
  * https://host/a.bam.bai?sig=...; s3 URLs keep a '#' in the key.
  */
 static char *find_routed_index(const duckhts_fs_route_t *route, const char *path,
                                index_family_t family) {
-    static const char *const bam_suffixes[] = {".csi", ".bai"};
-    static const char *const cram_suffixes[] = {".crai"};
-    static const char *const bcf_suffixes[] = {".csi"};
-    static const char *const tabix_suffixes[] = {".csi", ".tbi"};
-    const char *const *suffixes = bam_suffixes;
+    static const index_suffix_t bam_suffixes[] = {{".csi", csi}, {".bai", bai}};
+    static const index_suffix_t cram_suffixes[] = {{".crai", crai}};
+    static const index_suffix_t bcf_suffixes[] = {{".csi", csi}};
+    static const index_suffix_t tabix_suffixes[] = {{".csi", csi}, {".tbi", tbi}};
+    const index_suffix_t *suffixes = bam_suffixes;
     size_t n_suffixes = 2;
     if (family == INDEX_OF_CRAM) {
         suffixes = cram_suffixes;
@@ -474,14 +499,13 @@ static char *find_routed_index(const duckhts_fs_route_t *route, const char *path
     for (size_t s = 0; s < n_suffixes && !found; s++) {
         const size_t bases[] = {path_end, stem_length};
         const size_t n_bases = stem_length == path_end ? 1 : 2;
-        const size_t suffix_length = strlen(suffixes[s]);
+        const size_t suffix_length = strlen(suffixes[s].suffix);
         for (size_t b = 0; b < n_bases && !found; b++) {
             memcpy(candidate, path, bases[b]);
-            memcpy(candidate + bases[b], suffixes[s], suffix_length);
+            memcpy(candidate + bases[b], suffixes[s].suffix, suffix_length);
             strcpy(candidate + bases[b] + suffix_length, path + path_end);
             char *name = duckhts_fs_route_path(route, candidate);
-            hFILE *probe = name ? hopen(name, "r") : NULL;
-            if (probe && hclose(probe) == 0) {
+            if (name && routed_index_matches(name, suffixes[s].format)) {
                 found = name;
             } else {
                 duckdb_free(name);
